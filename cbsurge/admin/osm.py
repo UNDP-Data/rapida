@@ -4,7 +4,8 @@ import asyncio
 from osm2geojson import json2geojson
 import shapely
 from shapely.constructive import centroid
-
+import logging
+logger = logging.getLogger(__name__)
 
 async def get_admin0_bbox(iso3):
     overpass_url = "http://overpass-api.de/api/interpreter"
@@ -157,11 +158,30 @@ def bbox_to_geojson_polygon(west, south, east, north):
 
 
 
-async def fetch_admin(west=None, south=None, east=None, north=None, level=1):
+async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=1, osm_level=3, clip=False):
+    """
+    Fetch admin geospatial in a LATLON bounidng box from OSM Overpass API
+
+    :param west:
+    :param south:
+    :param east:
+    :param north:
+    :param admin_level:
+    :param osm_level:
+    :param clip:
+    :return:
+    """
     VALID_LEVELS = {0:2, 1:(3,4,5), 2:(6,7,8)}
-    assert level in VALID_LEVELS, f'Invalid admin level. Valid values are {list(VALID_LEVELS.keys())}'
+
+    assert admin_level in VALID_LEVELS, f'Invalid admin level. Valid values are {list(VALID_LEVELS.keys())}'
     overpass_url = "http://overpass-api.de/api/interpreter"
-    for level_value in VALID_LEVELS[level][::-1]:
+    VALID_SUBLEVELS = VALID_LEVELS[admin_level][::-1]
+    if osm_level is not None:
+        assert osm_level in VALID_SUBLEVELS, f'Invalid admin sublevel. Valid values are {VALID_SUBLEVELS}'
+
+    for i, level_value in enumerate(VALID_SUBLEVELS):
+        if osm_level is not None and level_value != osm_level:continue
+        logger.info(f'Fetching data for OSM level {level_value}')
         overpass_query = f"""
                                [out:json][timeout:125];
                                 // Define the bounding box (replace {{bbox}} with "south,west,north,east").
@@ -176,13 +196,14 @@ async def fetch_admin(west=None, south=None, east=None, north=None, level=1):
                                 // Output only polygons
                                 out geom;
         """
-        print(overpass_query)
+        logger.debug(overpass_query)
         async with httpx.AsyncClient() as client:
             response = await client.post(overpass_url, data={"data": overpass_query})
             if response.status_code == 200:
                 data = response.json()
                 if len(data['elements'])>0:
                     geojson = json2geojson(data=data)
+                    nfeatures = len(geojson['features'])
                     for f in geojson['features']:
                         props = f['properties']
                         tags = props.pop('tags')
@@ -195,23 +216,29 @@ async def fetch_admin(west=None, south=None, east=None, north=None, level=1):
                         out_props['admin_level'] = int(tags['admin_level'])-2
                         out_props['name_en'] = tags.get('name:en', None)
                         f['properties'] = out_props
+                    logger.info(f'{nfeatures} feature/s were retrieved from {overpass_url} OSM level {level_value}')
                     return geojson
                 else:
-
+                    logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    if osm_level is None:
+                        logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
                     continue
             else:
                 return f"Error: {response.status_code}"
 
 
+if __name__ == '__main__':
+    logging.basicConfig()
+    logger.setLevel(logging.INFO)
 
-
-bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
-bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
-west, south, east, north = bbox
-c = asyncio.run(fetch_admin(west=west,south=south, east=east, north=north,level=2))
-with open('/tmp/abb.geojson', 'wt') as out:
-    out.write(json.dumps(c, indent=4))
-polygon = bbox_to_geojson_polygon(*bbox)
-l = {"type":"FeatureCollection", "features":[polygon]}
-with open('/tmp/bb.geojson', 'w') as out:
-    out.write(json.dumps(l,indent=4))
+    bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
+    #bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
+    west, south, east, north = bbox
+    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=1, osm_level=None))
+    if c is not None:
+        with open('/tmp/abb.geojson', 'wt') as out:
+            out.write(json.dumps(c, indent=4))
+        polygon = bbox_to_geojson_polygon(*bbox)
+        l = {"type":"FeatureCollection", "features":[polygon]}
+        with open('/tmp/bb.geojson', 'w') as out:
+            out.write(json.dumps(l,indent=4))

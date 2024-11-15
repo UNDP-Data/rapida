@@ -1,3 +1,5 @@
 httpx
 osm2geojson
 shapely
+h3
+tqdm

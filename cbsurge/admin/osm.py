@@ -11,7 +11,7 @@ from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter'
-ADMIN_LEVELS = {0: (2,), 1: (3, 4), 2: (5, 6, 7, 8)}
+ADMIN_LEVELS = {0: (2,), 1: (3, 4), 2: (4, 5, 6, 7, 8)}
 
 
 async def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
@@ -183,7 +183,7 @@ def undpadml2osmadml(undp_level=None):
 
 async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=None, osm_level=None,
                       clip=False,
-                      geohash_precision=6, overpass_url=OVERPASS_API_URL):
+                      h3id_precision=7, overpass_url=OVERPASS_API_URL):
     """
     Fetch admin geospatial in a LATLON bounding box from OSM Overpass API
 
@@ -195,8 +195,8 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
     :param admin_level: int, (0,1,2) the UN administrative level for which to fetch data
     :param osm_level: int, None, the OSM admin level for witch to fetch data
     :param clip: boolean, False, if True geometries will be clipped to the bbox
-    :param: geohash_precision, default=6, number, the number of decimal used form a latlon point representing the centroid of the
-            admin unit
+    :param: h3id_precision, default=7, the tolerance in meters (~11) use to compute the unique id as a h3 hexagon id
+
     :return: a python dict representing fetched administrative units in GeoJSON format
 
     Example
@@ -220,7 +220,7 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
     ranging from 1 (supra national and not rendered) to 12 (noty rendered/reserved).
     In practical terms, the levels start at 2 and end at 10 (inclusive) and can be mapped to  the three UN admin levels
 
-    using following structure {0:2, 1:(3,4,5), 2:(6,7,8)}
+    using following structure {0:2, 1:(3,4), 2:(4,5,6,7,8)}
 
     This function operates in two distinct styles or modes: implicit and explicit. In the implicit style the
     highest OSM admin level that returns data is used recursively for the UN admin level specified in admin_level argument.
@@ -247,29 +247,13 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
     10	        0.592
     11	        0.222
 
-    GEOHASH
-    Every  returned admin unit/entity contains its geohash computed with precision 6 ~ 2400m
-    Geohash Level	Cell Width (meters)	Cell Height (meters)	Tolerance (meters, approx.)
-    1	            5,000,000	        5,000,000	            ~5,000,000
-    2	            1,250,000	        625,000	                ~1,250,000
-    3	            156,000	            156,000	                ~156,000
-    4	            39,100	            19,500	                ~39,100
-    5	            4,890	            4,890	                ~4,890
-    6	            1,220	            610	                    ~1,220
-    7	            153	                153	                    ~153
-    8	            38.2	            19.1	                ~38.2
-    9	            4.77	4.77	~4.77
-    10	1.19	0.596	~1.19
-    11	0.149	0.149	~0.149
-    12	0.0372	0.0186	~0.0372
-
 
     """
 
 
     assert admin_level in ADMIN_LEVELS, f'Invalid admin level. Valid values are {list(ADMIN_LEVELS.keys())}'
 
-    VALID_SUBLEVELS = ADMIN_LEVELS[admin_level][::-1]
+    VALID_SUBLEVELS = ADMIN_LEVELS[admin_level]
     if osm_level is not None:
         assert osm_level in VALID_SUBLEVELS, f'Invalid admin osm_level. Valid values are {VALID_SUBLEVELS}'
 
@@ -315,10 +299,9 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
                             out_props = await fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
                             out_props['name'] = tags['name']
                             out_props['osm_admin_level'] = level_value
-                            out_props['undp_admin_level'] = osmadml2undpadml(osm_level=level_value)
+                            out_props['undp_admin_level'] = admin_level
                             out_props['name_en'] = tags.get('name:en', None)
-                            #out_props['geohash'] = geohash.encode(centroid.y, centroid.x, precision=geohash_precision)
-                            out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=7)
+                            out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
                             f['properties'] = out_props
                             pbar.update(1)
                         pbar.set_postfix_str(f'finished', refresh=True)
@@ -339,7 +322,7 @@ if __name__ == '__main__':
     bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
     #bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
     west, south, east, north = bbox
-    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=1, osm_level=None, clip=False))
+    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=2, osm_level=4, clip=True))
     if c is not None:
         with open('/tmp/abb.geojson', 'wt') as out:
             out.write(json.dumps(c, indent=4))

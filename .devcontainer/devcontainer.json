@@ -1,23 +1,17 @@
 {
 	"name": "Geo SURGE",
-	"build": {
-    "dockerfile": "./Dockerfile",  // Path to your Dockerfile
-		"context": ".",               // Build context (adjust if needed)
-		"args": {
-		"USER_UID": "1000",         // Pass build args for user
-		"USER_GID": "1000"
-		}
-  	},
-	"remoteUser": "janf",
+	"image": "ghcr.io/osgeo/gdal:ubuntu-full-3.10.0",
+	"remoteUser": "ubuntu",
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
-	  "ghcr.io/devcontainers/features/python:1": {
-		"version": "3.10"
-	  }
+	//   "ghcr.io/devcontainers/features/python:1": {
+	// 	"version": "3.10"
+	//   }
+		"ghcr.io/devcontainers/features/git:1": {}
 	},
-	//"postCreateCommand": "apt-get update && apt-get install -y libgdal-dev python3-pip && pip install pipenv && pipenv --python 3.10 && pipenv run pip install -r requirements.txt",
-	"postCreateCommand": "echo ",
+	"postCreateCommand": "apt-get update && apt-get install -y libgdal-dev python3-pip && pip install pipenv && pipenv --python 3.10 && pipenv run pip install -r requirements.txt",
+	//"postCreateCommand": "id",
 	"customizations": {
 	  "vscode": {
 		"extensions": [

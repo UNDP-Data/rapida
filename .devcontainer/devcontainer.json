@@ -1,7 +1,7 @@
 {
 	"name": "Geo SURGE",
 	"image": "ghcr.io/osgeo/gdal:ubuntu-full-3.10.0",
-	"remoteUser": "ubuntu",
+	//"remoteUser": "ubuntu",
 	"workspaceFolder": "/workspace",
 	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
 	"features": {
@@ -10,7 +10,9 @@
 	//   }
 		"ghcr.io/devcontainers/features/git:1": {}
 	},
-	"postCreateCommand": "apt-get update && apt-get install -y libgdal-dev python3-pip && pip install pipenv && pipenv --python 3.10 && pipenv run pip install -r requirements.txt",
+	"onCreateCommand": "apt-get update && apt-get install -y python3-pip pipenv",
+	"postCreateCommand": "pipenv --python 3 && pipenv run pip install -r requirements.txt",
+
 	//"postCreateCommand": "id",
 	"customizations": {
 	  "vscode": {

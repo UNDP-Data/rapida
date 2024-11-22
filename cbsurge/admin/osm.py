@@ -307,7 +307,7 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
                         pbar.set_postfix_str(f'finished', refresh=True)
                         return geojson
                 else:
-                    logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    #logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
                     if osm_level is None:
                         logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
                     continue
@@ -321,8 +321,9 @@ if __name__ == '__main__':
 
     bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
     #bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
+    bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
     west, south, east, north = bbox
-    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=2, osm_level=4, clip=True))
+    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=2, osm_level=7, clip=False))
     if c is not None:
         with open('/tmp/abb.geojson', 'wt') as out:
             out.write(json.dumps(c, indent=4))

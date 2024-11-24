@@ -3,3 +3,7 @@ osm2geojson
 shapely
 h3
 tqdm
+GDAL==3.10.0
+azure-storage-blob
+overturemaps
+adlfs

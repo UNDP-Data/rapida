@@ -1,9 +1,8 @@
-FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0 as gdal
+# Use the GDAL image as the base
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 
-
-# Adjust ownership of the workspace (optional)
-WORKDIR /workspace
-RUN chown -R $USERNAME:$USERNAME /workspace
-
-# Switch to the new user (optional, for debugging or initial setup)
-USER $USERNAME
+# Install necessary tools and Python packages
+RUN apt-get update && \
+    apt-get install -y python3-pip pipenv && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*

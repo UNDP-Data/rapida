@@ -169,29 +169,29 @@ def fetch_admin(west=None, south=None, east=None, north=None, admin_level=None, 
         logger.info(f'Using latest overture release {release}')
     
     admin_dataset_url = _dataset_path(overture_type=overture_type, release=release)
-    with gdal.ExceptionMgr(useExceptions=True):
-        with gdal.config_options({'AZURE_NO_SIGN_REQUEST': 'YES', 'AZURE_STORAGE_ACCOUNT':OVERTURE_AZURE_STORAGE_ACCOUNT}):
-            logger.info(f'Reading {admin_dataset_url}')
-            #result = gdal.VectorInfo(admin_dataset_url, format='json', deserialize=True, )
-            
-            with ogr.Open(admin_dataset_url, ) as src_ds:
-                lyr = src_ds.GetLayer(0)
-                lyr.SetSpatialFilterRect(west, south, east, north)
-                geom_type = lyr.GetGeomType()
-                with ogr.GetDriverByName('FlatGeobuf').CreateDataSource('/tmp/adminj.fgb') as dst_ds:
-                    dst_lyr = dst_ds.CreateLayer('adminj', geom_type=geom_type,)
-                    stream = lyr.GetArrowStream(["MAX_FEATURES_IN_BATCH=5"])
-                    schema = stream.GetSchema()
-                    for i in range(schema.GetChildrenCount()):
-                        if schema.GetChild(i).GetName() != lyr.GetGeometryColumn():
-                            s = schema.GetChild(i)
-                            print(s.GetName())
-                            dst_lyr.CreateFieldFromArrowSchema(s)
-                    while True:
-                        array = stream.GetNextRecordBatch()
-                        if array is None:
-                            break
-                        assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
+    gdal.UseExceptions()
+    with gdal.config_options({'AZURE_NO_SIGN_REQUEST': 'YES', 'AZURE_STORAGE_ACCOUNT':OVERTURE_AZURE_STORAGE_ACCOUNT}):
+        logger.info(f'Reading {admin_dataset_url}')
+        #result = gdal.VectorInfo(admin_dataset_url, format='json', deserialize=True, )
+        
+        with ogr.Open(admin_dataset_url, ) as src_ds:
+            lyr = src_ds.GetLayer(0)
+            lyr.SetSpatialFilterRect(west, south, east, north)
+            geom_type = lyr.GetGeomType()
+            with ogr.GetDriverByName('FlatGeobuf').CreateDataSource('/tmp/adminj.fgb') as dst_ds:
+                dst_lyr = dst_ds.CreateLayer('adminj', geom_type=ogr.wkbMultiPolygon,)
+                stream = lyr.GetArrowStream(["MAX_FEATURES_IN_BATCH=50"])
+                schema = stream.GetSchema()
+                for i in range(schema.GetChildrenCount()):
+                    if schema.GetChild(i).GetName() != lyr.GetGeometryColumn():
+                        s = schema.GetChild(i)
+                        #print(s.GetName())
+                        dst_lyr.CreateFieldFromArrowSchema(s)
+                while True:
+                    array = stream.GetNextRecordBatch()
+                    if array is None:
+                        break
+                    assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
 
 def get_fsspec_path(overture_type: str = None, release=None):
     theme = type_theme_map[overture_type]
@@ -247,12 +247,13 @@ def fetch_admin_pa(west=None, south=None, east=None, north=None, admin_level=Non
 if __name__  == '__main__':
     logging.basicConfig()
     logger.setLevel(logging.INFO)
-
+    import time
     
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA
     # bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
     west, south, east, north = bbox
-    
-    fetch_admin_pa(west=west, south=south, east=east, north=north, admin_level=1, )
+    start = time.time()
+    fetch_admin(west=west, south=south, east=east, north=north, admin_level=1, )
     #download(bbox,'geoparquet', '/tmp/admino.parquet','division_area')
-    
+    end = time.time()
+    logger.info(f'COmputation laster {end-start}')

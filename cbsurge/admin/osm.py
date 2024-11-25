@@ -7,7 +7,7 @@ import shapely
 from shapely.geometry import shape, box
 import logging
 from tqdm import tqdm
-
+from cbsurge.admin.util import bbox_to_geojson_polygon
 
 logger = logging.getLogger(__name__)
 OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter'
@@ -133,39 +133,6 @@ async def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url
         else:
             return f"Error: {response.status_code}"
 
-def bbox_to_geojson_polygon(west, south, east, north):
-    """
-    Converts a bounding box to a GeoJSON Polygon geometry.
-
-    Parameters:
-        west (float): Western longitude
-        south (float): Southern latitude
-        east (float): Eastern longitude
-        north (float): Northern latitude
-
-    Returns:
-        dict: A GeoJSON Polygon geometry representing the bounding box.
-    """
-    # Define the coordinates of the bounding box as a polygon
-    coordinates = [[
-        [west, south],  # bottom-left corner
-        [west, north],  # top-left corner
-        [east, north],  # top-right corner
-        [east, south],  # bottom-right corner
-        [west, south]  # closing the polygon (back to bottom-left corner)
-    ]]
-
-
-    # Construct a GeoJSON Polygon representation of the bounding box
-    geojson = {
-        "type": "Feature",
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": coordinates
-        }
-    }
-
-    return geojson
 
 def osmadml2undpadml(osm_level=None):
     """
@@ -321,9 +288,9 @@ if __name__ == '__main__':
 
     bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
     #bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
-    bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
+    #bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
     west, south, east, north = bbox
-    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=2, osm_level=7, clip=False))
+    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=2, osm_level=4, clip=False))
     if c is not None:
         with open('/tmp/abb.geojson', 'wt') as out:
             out.write(json.dumps(c, indent=4))

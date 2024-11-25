@@ -41,7 +41,7 @@ async def fetch_ocha_countries(url=None, bounding_box = None, ):
             try:
                 service_country, service_flavour, *other = service_name.split('_')
             except ValueError:
-                logger.error(f'could not parse "{service_name}" service from {url}. SKipping.')
+                logger.error(f'could not parse "{service_name}" service from {url}. Skipping.')
                 continue
             service_type = service['type']
             if service_flavour == 'pcode':
@@ -157,7 +157,7 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
         geojson_data = await fetch(url=country_geojson_url, timeout=timeout)
         nfeatures = len(geojson_data['features'])
 
-        with tqdm(total=nfeatures, desc=f'Augmenting admin level {admin_level} features from {iso3} ...') as pbar:
+        with tqdm(total=nfeatures, desc=f'Augmenting admin level {adm_level} features from {iso3} ...') as pbar:
             for i, f in enumerate(geojson_data['features']):
                 props = f['properties']
                 feature_geom = f['geometry']
@@ -204,7 +204,7 @@ if __name__ == '__main__':
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA
     west, south, east, north = bbox
 
-    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level={'KEN':1, 'UGA':3}, clip=False))
+    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level={'KEN':1, 'UGA':3}, clip=True))
     if c is not None:
         with open('/tmp/abc.geojson', 'wt') as out:
             out.write(json.dumps(c, indent=4))

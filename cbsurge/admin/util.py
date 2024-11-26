@@ -1,4 +1,9 @@
 def is_int(val):
+    """
+    Check value/variable is integer
+    :param val:
+    :return:
+    """
     if type(val) == int:
         return True
     else:

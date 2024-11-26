@@ -14,7 +14,7 @@ OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter'
 ADMIN_LEVELS = {0: (2,), 1: (3, 4), 2: (4, 5, 6, 7, 8)}
 
 
-async def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
+def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
     """
     Retrieves from overpass the geographic bounding box of the admin0 units corresponding to the
     iso3 country code
@@ -31,8 +31,8 @@ async def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
         out bb;
 
     """
-    async with httpx.AsyncClient(timeout=100) as client:
-        response = await client.post(overpass_url, data=overpass_query)
+    with httpx.Client(timeout=100) as client:
+        response = client.post(overpass_url, data=overpass_query)
         if response.status_code == 200:
 
             data = response.json()
@@ -45,7 +45,7 @@ async def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
             return f"Error: {response.status}"
 
 
-async def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, overpass_url=OVERPASS_API_URL):
+def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, overpass_url=OVERPASS_API_URL):
     """
     Retrieves from overpass the geographic centroid of the admin0 units corresponding to the
     iso3 country code
@@ -67,8 +67,8 @@ async def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, o
     """
 
     timeout = httpx.Timeout(connect=10, read=1800, write=1800,pool=1000)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(overpass_url, data=overpass_query)
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(overpass_url, data=overpass_query)
         if response.status_code == 200:
             data = response.json()
             if 'elements' in data and len(data['elements']) > 0:
@@ -81,7 +81,7 @@ async def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, o
 
 
 
-async def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url=OVERPASS_API_URL):
+def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url=OVERPASS_API_URL):
     """
     Fetches all administrative hierarchical levels from  OSM for a given point on Earth represented using geographical
     coordinates.
@@ -109,8 +109,8 @@ async def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url
     """
 
     timeout = httpx.Timeout(connect=10, read=1800, write=1800,pool=1000)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(overpass_url, data={"data": overpass_query})
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(overpass_url, data={"data": overpass_query})
         if response.status_code == 200:
             data = response.json()
             result = dict()
@@ -148,17 +148,14 @@ def osmadml2undpadml(osm_level=None):
 def undpadml2osmadml(undp_level=None):
     return ADMIN_LEVELS[undp_level][-1]
 
-async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=None, osm_level=None,
-                      clip=False,
-                      h3id_precision=7, overpass_url=OVERPASS_API_URL):
+def fetch_admin( bbox=None, admin_level=None, osm_level=None,
+                       clip=False, h3id_precision=7, overpass_url=OVERPASS_API_URL
+                    ):
     """
     Fetch admin geospatial in a LATLON bounding box from OSM Overpass API
 
 
-    :param west: western coord of the bbox
-    :param south: southern coord of the bbox
-    :param east: eastern coord of the bbox
-    :param north: northern coord of the bbox
+    :param bbox: tuple of floats/numbers, west, south, east, north geographic coordinates
     :param admin_level: int, (0,1,2) the UN administrative level for which to fetch data
     :param osm_level: int, None, the OSM admin level for witch to fetch data
     :param clip: boolean, False, if True geometries will be clipped to the bbox
@@ -167,7 +164,7 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
     :return: a python dict representing fetched administrative units in GeoJSON format
 
     Example
-    admin_features = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=1, osm_level=None, clip=True))
+    admin_features = fetch_admin(bbox=bbox, admin_level=1, osm_level=None, clip=True)
     if admin_features is not None:
         with open('/tmp/admin.geojson', 'wt') as out:
             out.write(json.dumps(admin_features, indent=4))
@@ -217,7 +214,7 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
 
     """
 
-
+    west, south, east, north = bbox
     assert admin_level in ADMIN_LEVELS, f'Invalid admin level. Valid values are {list(ADMIN_LEVELS.keys())}'
 
     VALID_SUBLEVELS = ADMIN_LEVELS[admin_level]
@@ -241,10 +238,11 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
                                 // Output only polygons
                                 out geom;
         """
+
         logger.debug(overpass_query)
         timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.post(overpass_url, data={"data": overpass_query})
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(overpass_url, data={"data": overpass_query})
             if response.status_code == 200:
                 data = response.json()
                 nelems = len(data['elements'])
@@ -263,7 +261,7 @@ async def fetch_admin(west=None, south=None, east=None, north=None, admin_level=
                                 geom = geom.intersection(bbox_polygon)
                                 f['geometry'] = geom.__geo_interface__
                             centroid = shapely.centroid(geom)
-                            out_props = await fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
+                            out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
                             out_props['name'] = tags['name']
                             out_props['osm_admin_level'] = level_value
                             out_props['undp_admin_level'] = admin_level
@@ -289,8 +287,8 @@ if __name__ == '__main__':
     bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
     #bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
     #bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
-    west, south, east, north = bbox
-    c = asyncio.run(fetch_admin(west=west, south=south, east=east, north=north, admin_level=2, osm_level=4, clip=False))
+
+    c = fetch_admin(bbox=bbox, admin_level=2, osm_level=4, clip=False)
     if c is not None:
         with open('/tmp/abb.geojson', 'wt') as out:
             out.write(json.dumps(c, indent=4))

@@ -1,0 +1,37 @@
+{
+	"name": "Geo SURGE",
+	//"image": "ghcr.io/osgeo/gdal:ubuntu-full-3.10.0",
+	"build": {
+    	"dockerfile": "Dockerfile"
+  	},
+	//"remoteUser": "ubuntu",
+	"workspaceFolder": "/workspace",
+	"workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+	"features": {
+	//   "ghcr.io/devcontainers/features/python:1": {
+	// 	"version": "3.10"
+	//   }
+		"ghcr.io/devcontainers/features/git:1": {}
+	},
+	//"onCreateCommand": "apt-get update && apt-get install -y python3-pip pipenv",
+	"postCreateCommand": "pipenv --python 3 && pipenv run pip install -r requirements.txt",
+
+	//"postCreateCommand": "id",
+	"customizations": {
+	  "vscode": {
+		"extensions": [
+		  "ms-python.python",
+		  "ms-python.vscode-pylance"
+		],
+		"settings": {
+		  "python.terminal.activateEnvironment": true
+		}
+	  }
+	},
+	"containerEnv": {
+		"PIPENV_VENV_IN_PROJECT":"true",
+		"SHELL": "/bin/bash"
+	}
+
+  }
+  

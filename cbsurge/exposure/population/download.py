@@ -153,7 +153,7 @@ async def download_data():
     tasks = []
     for country in countries:
         files = await generate_list_of_files(country_code=country)
-        for i, file_chunk in enumerate(chunker_function(files, chunk_size=4)):
+        for i, file_chunk in enumerate(chunker_function(files, chunk_size=1)):
             if i > 0:
                 break
             for file in file_chunk:

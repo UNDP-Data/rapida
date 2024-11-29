@@ -148,14 +148,14 @@ from tqdm.asyncio import tqdm
 
 async def download_data():
     countries = await list_available_countries()
-    countries = ["KEN"]
+    # countries = ["KEN"]
     storage_manager = AzStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     tasks = []
     for country in countries:
         files = await generate_list_of_files(country_code=country)
         for i, file_chunk in enumerate(chunker_function(files, chunk_size=1)):
-            if i > 0:
-                break
+            # if i > 0:
+            #     break
             for file in file_chunk:
                 download_task = process_single_file(country_code=country, file_name=file, storage_manager=storage_manager)
                 tasks.append(download_task)

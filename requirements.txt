@@ -7,3 +7,6 @@ GDAL==3.10.0
 azure-storage-blob
 overturemaps
 async
+aiofiles
+aiohttp
+azure-storage-blob

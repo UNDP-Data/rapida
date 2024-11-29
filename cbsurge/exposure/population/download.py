@@ -6,15 +6,12 @@ from asyncio import subprocess
 import aiofiles
 
 import httpx
-from azure.storage.blob import BlobServiceClient
+from azure.storage.blob.aio import BlobServiceClient
 from tqdm.asyncio import tqdm
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ROOT_URL = "https://hub.worldpop.org/rest/data/pop/wpgpunadj"
-
-AZ_ROOT_FILE_PATH = "AgeSex_structures/Global_2000_2020_Constrained_UNadj/2020/BDI"
 
 ROOT_URL = "https://data.worldpop.org/GIS/AgeSex_structures/Global_2000_2020_Constrained_UNadj/2020/"
 AGE_MAPPING = {
@@ -38,6 +35,7 @@ AGE_MAPPING = {
     "80+": 80
 }
 
+
 class AzStorageManager:
     def __init__(self, conn_str):
         self.conn_str = conn_str
@@ -46,9 +44,26 @@ class AzStorageManager:
 
     async def upload_file(self, file_path=None, blob_name=None):
         blob_client = self.container_client.get_blob_client(blob_name)
-        with open(file_path, "rb") as data:
-            blob_client.upload_blob(data, overwrite=True)
+
+        # Get the file size for progress tracking
+        file_size = os.path.getsize(file_path)
+        chunk_size = 4 * 1024 * 1024  # 4MB chunks
+        progress = tqdm(total=file_size, unit="B", unit_scale=True, desc=f"Uploading {blob_name}")
+
+        async with aiofiles.open(file_path, "rb") as data:
+            while True:
+                chunk = await data.read(chunk_size)
+                if not chunk:
+                    break
+                await blob_client.upload_blob(chunk, overwrite=True, length=len(chunk),
+                                              raw_response_hook=lambda _: progress.update(len(chunk)))
+
+        progress.close()
         return blob_client.url
+
+    async def close(self):
+        await self.blob_service_client.close()
+        await self.container_client.close()
 
 
 def chunker_function(iterable, chunk_size=4):
@@ -105,7 +120,7 @@ async def process_single_file(country_code=None, file_name=None, storage_manager
                             await f.close()
                             cog_path = f"{temp_dir}/{file_name.replace('.tif', '_cog.tif')}"
                             await convert_to_cog(input_file=temp_file, output_file=cog_path)
-                            await storage_manager.upload_file(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{file_name}")
+                            await storage_manager.upload_file(file_path=cog_path, blob_name=f"{os.getenv("AZ_ROOT_FILE_PATH")}/{country_code}/{file_name}")
                             os.unlink(temp_file)
                             os.unlink(cog_path)
         logging.info("Successfully downloaded: %s", file_name)
@@ -133,27 +148,32 @@ from tqdm.asyncio import tqdm
 
 async def download_data():
     countries = await list_available_countries()
-    # countries = ["BDI"]
+    countries = ["KEN"]
     storage_manager = AzStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     tasks = []
     for country in countries:
         files = await generate_list_of_files(country_code=country)
         for i, file_chunk in enumerate(chunker_function(files, chunk_size=4)):
-            # if i > 0:
-            #     break
+            if i > 0:
+                break
             for file in file_chunk:
                 download_task = process_single_file(country_code=country, file_name=file, storage_manager=storage_manager)
                 tasks.append(download_task)
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for results in results:
-        if isinstance(results, Exception):
-            logging.error("Error downloading file: %s", results)
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for results in results:
+            if isinstance(results, Exception):
+                logging.error("Error processing file: %s", results)
+    #  Close the storage manager connection after all files have been uploaded
+    await storage_manager.close()
 
 
 
 async def convert_to_cog(input_file=None, output_file=None):
     """
     Convert a GeoTIFF file to a COG.
+    Args:
+        input_file: Input file path
+        output_file: Output file path
     """
 
     cmd = ["gdal_translate",

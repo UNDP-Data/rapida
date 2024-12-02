@@ -153,12 +153,9 @@ async def download_data():
     tasks = []
     for country in countries:
         files = await generate_list_of_files(country_code=country)
-        for i, file_chunk in enumerate(chunker_function(files, chunk_size=1)):
-            # if i > 0:
-            #     break
+        for i, file_chunk in enumerate(chunker_function(files, chunk_size=4)):
             for file in file_chunk:
-                download_task = process_single_file(country_code=country, file_name=file, storage_manager=storage_manager)
-                tasks.append(download_task)
+                tasks.append(process_single_file(country_code=country, file_name=file, storage_manager=storage_manager))
         results = await asyncio.gather(*tasks, return_exceptions=True)
         for results in results:
             if isinstance(results, Exception):

@@ -34,6 +34,7 @@ AGE_MAPPING = {
     "75-79": 75,
     "80+": 80
 }
+AZ_ROOT_FILE_PATH = "AgeSex_structures/Global_2000_2020_Constrained_UNadj/2020"
 
 
 class AzStorageManager:
@@ -120,7 +121,7 @@ async def process_single_file(country_code=None, file_name=None, storage_manager
                             await f.close()
                             cog_path = f"{temp_dir}/{file_name.replace('.tif', '_cog.tif')}"
                             await convert_to_cog(input_file=temp_file, output_file=cog_path)
-                            await storage_manager.upload_file(file_path=cog_path, blob_name=f"{os.getenv("AZ_ROOT_FILE_PATH")}/{country_code}/{file_name}")
+                            await storage_manager.upload_file(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{country_code}/{file_name}")
                             os.unlink(temp_file)
                             os.unlink(cog_path)
         logging.info("Successfully downloaded: %s", file_name)
@@ -150,17 +151,24 @@ async def download_data():
     countries = await list_available_countries()
     # countries = ["KEN"]
     storage_manager = AzStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
-    tasks = []
+
     for country in countries:
         files = await generate_list_of_files(country_code=country)
         for i, file_chunk in enumerate(chunker_function(files, chunk_size=4)):
-            for file in file_chunk:
-                tasks.append(process_single_file(country_code=country, file_name=file, storage_manager=storage_manager))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        for results in results:
-            if isinstance(results, Exception):
-                logging.error("Error processing file: %s", results)
-    #  Close the storage manager connection after all files have been uploaded
+            # if i > 0:
+            #     break
+
+            # Create a fresh list of tasks for each file chunk
+            tasks = [process_single_file(country_code=country, file_name=file, storage_manager=storage_manager)
+                     for file in file_chunk]
+
+            # Gather tasks and process results
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    logging.error("Error processing file: %s", result)
+
+    # Close the storage manager connection after all files have been uploaded
     await storage_manager.close()
 
 

@@ -2,8 +2,9 @@ import asyncio
 import datetime
 import gzip
 import json
+import math
 from typing import OrderedDict
-
+from functools import partial
 from aiopmtiles import Reader
 import morecantile as m
 import mapbox_vector_tile
@@ -14,20 +15,25 @@ import httpx
 import logging
 import concurrent
 from osgeo import ogr, osr
-from shapely.geometry import shape, MultiPolygon
-from shapely.io import to_wkb
+from shapely.geometry import shape, Polygon
+from shapely.io import to_wkb, to_geojson
+from shapely import transform
 #from tit import atimeit
+import numpy as np
 ogr.UseExceptions()
 import itertools
 from pyproj import Transformer
 wm2ll_transformer = Transformer.from_crs(crs_from=3857, crs_to=4326)
 import pyarrow as pa
+from vt2geojson.tools import vt_bytes_to_geojson
 GMOSM_BUILDINGS = 'https://data.source.coop/vida/google-microsoft-osm-open-buildings/pmtiles/goog_msft_osm.pmtiles'
 #GMOSM_BUILDINGS = 'https://data.source.coop/vida/google-microsoft-open-buildings/pmtiles/go_ms_building_footprints.pmtiles'
 
 WEB_MERCATOR_TMS = m.tms.get("WebMercatorQuad")
-ll = osr.SpatialReference()
-ll.ImportFromEPSG(4326)
+WEB_MERCATOR_BBOX = WEB_MERCATOR_TMS.xy_bbox
+WEB_MERCATOR_EXTENT = WEB_MERCATOR_BBOX.right - WEB_MERCATOR_BBOX.left
+srs_prj = osr.SpatialReference()
+srs_prj.ImportFromEPSG(4326)
 logger = logging.getLogger()
 
 
@@ -209,7 +215,7 @@ async def get_admin_level_bbox(iso3, admin_level=2):
 #
 #                 df.to_csv('/data/hreaibm/admfieldmaps/a2pmtiles.csv')
 
-def process_tile(data=None, compression=None, fields=None, tile_bounds=None):
+def process_tile(data=None, compression=None, fields=None, tile=None):
     try:
         flds = {}
         for k in fields:
@@ -217,31 +223,74 @@ def process_tile(data=None, compression=None, fields=None, tile_bounds=None):
         flds['wkb_geometry'] = []
         if compression is not None:
             data = gzip.decompress(data)
-        #decoded_data = mapbox_vector_tile.decode(tile=data, default_options={'transformer':wm2ll_transformer.transform} )
-        decoded_data = mapbox_vector_tile.decode(tile=data,  )
+        decoded_data = mapbox_vector_tile.decode(tile=data, default_options=dict(
+            transformer=partial(mvt2ll1, z=tile.z,tx=tile.x,ty=tile.y),
+            y_coord_down=True)
+        )
+
+        n_multi_geom = 0
+        fcol = []
         for lname, l in decoded_data.items():
+            fcol.extend(l['features'])
             for i, feat in enumerate(l['features']):
                 fgeom = shape(feat['geometry'])
-                print(fgeom)
                 if fgeom.geom_type != 'Polygon':
+                    n_multi_geom+=1
                     continue
                 props = feat['properties']
-                for  k in fields:
-                    flds[k].append(props.get(k, None))
+                for  k, v in fields.items():
+                    nv = props.get(k, None)
+                    if nv is None:
+                        if v == 'Number':
+                            nv = np.nan
+                        if v == 'String':
+                            nv = ''
+                    flds[k].append(nv)
                 flds['wkb_geometry'].append(to_wkb(fgeom))
-                break
-            r = pa.RecordBatch.from_pydict(flds)
-            #rr = r.replace_schema_metadata(metadata={'ARROW:extension:name':'geoarrow:wkb'})
-            return  r
+                #fcol.append(feat)
+                #break
+
+                #print(fields)
+                r = pa.RecordBatch.from_pydict(flds)
+
+
+        logger.debug(f'Tile {tile.z}/{tile.x}/{tile.y} contains {r.num_rows} polygons and {n_multi_geom} multi geoms')
+        return  r
 
 
     except Exception as e:
         logger.error(e)
+        raise
+
+
 
 def generator_length(gen):
     gen1, gen2 = itertools.tee(gen)
     length = sum(1 for _ in gen1)  # Consume the duplicate
     return length, gen2  # Return the length and the unconsumed generator
+
+def mvt2ll1(x=None, y=None, tx=None, ty=None, z=None, extent=4096):
+
+    size = extent * 2 ** z
+    x0 = extent * tx
+    y0 = extent * ty
+    lon = (x + x0) * 360. / size - 180
+    y2 = 180 - (y + y0) * 360. / size
+    lat = 360. / math.pi * math.atan(math.exp(y2 * np.pi / 180)) - 90
+    return lon, lat
+
+def mvt2ll(coords_array=None, x=None, y=None, z=None, extent=4096):
+
+    px, py = coords_array[..., 0], coords_array[..., 1]
+    size = extent*2**z
+    x0 = extent*x
+    y0 = extent*y
+    lon = (px+x0)*360./size-180
+    y2 = 180 - (py + y0) * 360. / size
+    lat = 360. / np.pi * np.arctan(np.exp(y2 * np.pi / 180)) - 90
+    tcoords = np.stack((lon, lat), axis=-1)
+    return tcoords
+
 
 def add_fields_to_layer(fields, layer):
     """
@@ -272,7 +321,8 @@ def add_fields_to_layer(fields, layer):
 
 async def fetch_buildings(bbox=None, zoom_level=None, url=GMOSM_BUILDINGS):
     bb = m.BoundingBox(*bbox)
-    assert WEB_MERCATOR_TMS.intersect_tms(bbox=bb) is True, f'The supplied bounding box {bb} does not intersect Web Mercator Quad '
+    assert WEB_MERCATOR_TMS.intersect_tms(bbox=bb) is True, (f'The supplied bounding box {bb} does not intersect the '
+                                                             f'Web Mercator Quad ')
 
     async with Reader(url) as src:
         # PMTiles Metadata
@@ -281,57 +331,78 @@ async def fetch_buildings(bbox=None, zoom_level=None, url=GMOSM_BUILDINGS):
 
         meta = await src.metadata()
         layer_meta = meta['vector_layers'][0]
-
-
-        # Spatial Metadata
-        bounds = src.bounds
-        # print(bounds)
-        # bb = m.BoundingBox(*bounds)
+        logger.debug(json.dumps(layer_meta, indent=2))
         minzoom, maxzoom = src.minzoom, src.maxzoom
         zoom_level = zoom_level or maxzoom
 
         all_tiles = WEB_MERCATOR_TMS.tiles(west=bb.left,south=bb.bottom, east=bb.right, north=bb.top,
                                    zooms=[zoom_level],)
         ntiles, all_tiles = generator_length(all_tiles)
+        gj = None
 
         with ogr.GetDriverByName('FlatGeobuf').CreateDataSource('/tmp/bldgs.fgb') as dst_ds:
-            dst_lyr = dst_ds.CreateLayer('bldgs', geom_type=ogr.wkbPolygon, srs=ll)
+            dst_lyr = dst_ds.CreateLayer('bldgs', geom_type=ogr.wkbPolygon, srs=srs_prj)
             add_fields_to_layer(fields=layer_meta['fields'],layer=dst_lyr)
 
             stream= dst_lyr.GetArrowStream()
             schema = stream.GetSchema()
 
             with tqdm(total=ntiles, desc=f'Downloading...') as pbar:
-                for i, tiles in enumerate(chunker(all_tiles, size=1), start=1):
-
-                    download_tasks = list()
+                for i, tiles in enumerate(chunker(all_tiles, size=16), start=1):
+                    download_tasks = dict()
+                    tdict = {}
                     pbar.set_postfix_str(f'downloading chunk no {i}...', refresh=True)
                     for tile in tiles :
+                        tbb = WEB_MERCATOR_TMS.bounds(tile)
+
+                        t = f'\n ogr2ogr -spat {tbb.left} {tbb.bottom} {tbb.right} {tbb.top} /tmp/bldgs_{tile.z}.{tile.x}.{tile.y}.fgb "/vsicurl/https://data.source.coop/vida/google-microsoft-osm-open-buildings/flatgeobuf/by_country/country_iso=ALB/ALB.fgb"'
+                        #if tile.x != 18161 or tile.y != 12285:continue
+                        #logger.info(t)
+                        tile_name = f'{tile.z}/{tile.x}/{tile.y}'
                         task = asyncio.create_task(
                             src.get_tile(z=tile.z, x=tile.x, y=tile.y),
-                            name=f'{tile.z}/{tile.x}/{tile.y}'
+                            name=tile_name
                         )
-                        download_tasks.append(task)
-                    done, pending = await asyncio.wait(download_tasks, timeout=1000, return_when=asyncio.ALL_COMPLETED)
-                    tiles_data = list()
+                        download_tasks[tile_name] = task
+                        tdict[tile_name] = tile
+                    if not download_tasks:continue
+                    done, pending = await asyncio.wait(download_tasks.values(), timeout=1000, return_when=asyncio.ALL_COMPLETED)
+                    tiles_data = dict()
                     for done_task in done:
                         try:
-                            tile_id = done_task.get_name()
+                            tile_name = done_task.get_name()
                             tile_data = await done_task
                             if tile_data is not None:
-                                tiles_data.append(tile_data)
+                                tiles_data[tile_name] = tile_data
                             else:
-                                logger.info(f'No data was downloaded for {tile_id} ')
+                                logger.debug(f'No data was downloaded for tile {tile_name} ')
                         except Exception as e:
-                            logger.error(f'Failed to download tile {tile_id}')
-                    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-                        futures = [executor.submit(process_tile, data=e, compression=compression, fields=layer_meta['fields']) for e in tiles_data]
-                        done, not_done = concurrent.futures.wait(futures,timeout=300, )
-                        for fut in done:
-                            arr = fut.result()
+                            logger.error(f'Failed to download tile {tile_name}. {e}')
+                    if not tiles_data:continue
+                    futures = dict()
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+                        for tile_name, tile_data in tiles_data.items():
+                            kw_args = dict(data=tile_data, compression=compression, fields=layer_meta['fields'], tile=tdict[tile_name])
+                            futures[executor.submit(process_tile, **kw_args)] = tile_name
+
+                    done, not_done = concurrent.futures.wait(futures,timeout=300, )
+
+                    for fut in done:
+                        tile_name = futures[fut]
+
+                        exception = fut.exception()
+                        if exception is not None:
+                            logger.error(f'Failed to process tile {tile_name} because {exception} ')
+                        arr = fut.result()
+                        if arr is not None:
+                            logger.info(f'Going to write {arr.num_rows} features from tile {tile_name}')
                             dst_lyr.WritePyArrow(arr)
-                    break
+
+                    #break
                 pbar.set_postfix_str('Finished')
+
+            logger.info(f'{dst_lyr.GetFeatureCount()} feature were fetched and saved to /tmp/bldgs.fgb ')
+
 
 
 if __name__ == '__main__':
@@ -342,6 +413,7 @@ if __name__ == '__main__':
 
     nf = 5829
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA
+    bbox = 19.5128619671,40.9857135911,19.5464217663,41.0120783699  # ALB, Divjake
     # bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
     # bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
 

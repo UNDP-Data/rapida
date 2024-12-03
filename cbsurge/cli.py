@@ -8,6 +8,5 @@ def cli(ctx):
     pass
 cli.add_command(admin)
 
-
 if __name__ == '__main__':
     cli()

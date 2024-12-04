@@ -213,6 +213,7 @@ async def convert_to_cog(input_file=None, output_file=None):
            "-co", "BIGTIFF=YES",
            "-co", "WARP_RESAMPLING=NEAREST",
            "-co", "RESAMPLING=NEAREST",
+           "-co", "STATISTICS=YES",
            input_file, output_file]
 
     proc = await subprocess.create_subprocess_exec(*cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

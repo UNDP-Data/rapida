@@ -2,20 +2,18 @@ import logging
 import os
 import tempfile
 from asyncio import subprocess
-import shutil
 import aiofiles
 
 import httpx
 from azure.storage.blob.aio import BlobServiceClient
 from tqdm.asyncio import tqdm
-from dotenv import load_dotenv
 
-load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
 ROOT_URL = "https://data.worldpop.org/GIS/AgeSex_structures/Global_2000_2020_Constrained_UNadj/2020/"
+CONTAINER_NAME = "stacdata"
 AGE_MAPPING = {
     "0-12": 0,
     "1-4": 1,
@@ -36,7 +34,7 @@ AGE_MAPPING = {
     "75-79": 75,
     "80+": 80
 }
-AZ_ROOT_FILE_PATH = "AgeSex_structures/Global_2000_2020_Constrained_UNadj/2020"
+AZ_ROOT_FILE_PATH = "worldpop/AgeSex_structures/Global_2000_2020_Constrained_UNadj/2020"
 
 
 class AzStorageManager:
@@ -44,7 +42,7 @@ class AzStorageManager:
         logging.info("Initializing Azure Storage Manager")
         self.conn_str = conn_str
         self.blob_service_client = BlobServiceClient.from_connection_string(conn_str)
-        self.container_client = self.blob_service_client.get_container_client("worldpop")
+        self.container_client = self.blob_service_client.get_container_client(CONTAINER_NAME)
 
     async def upload_file(self, file_path=None, blob_name=None):
         logging.info("Starting upload for blob: %s", blob_name)
@@ -82,7 +80,7 @@ def chunker_function(iterable, chunk_size=4):
 
 
 async def list_available_countries():
-    url = "https://hub.worldpop.org/rest/data/pop/wpgpunadj"
+    url = "https://hub.worldpop.org/rest/data/age_structures/ascicua_2020"
     logging.info("Fetching available countries from: %s", url)
     try:
         async with httpx.AsyncClient() as client:
@@ -121,8 +119,7 @@ async def process_single_file(country_code=None, file_name=None, storage_manager
 
                 total_size = int(response.headers.get("content-length", 0))
                 with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {file_name}") as progress:
-                    with tempfile.TemporaryDirectory(delete=False) as temp_dir:
-
+                    with tempfile.TemporaryDirectory() as temp_dir:
                         temp_file_path = f"{temp_dir}/{file_name}"
                         logging.debug("Temporary file path: %s", temp_file_path)
                         async with aiofiles.open(temp_file_path, 'wb') as f:
@@ -136,13 +133,12 @@ async def process_single_file(country_code=None, file_name=None, storage_manager
                             await validate_cog(file_path=cog_path)
                             if download_locally:
                                 logging.info("Copying COG file locally: %s", cog_path)
-                                os.makedirs(f"/media/thuha/Data/output/{country_code}", exist_ok=True)
-                                shutil.copy2(cog_path, f"/media/thuha/Data/output/{country_code}/{file_name.replace('.tif', '_cog.tif')}")
+
                             else:
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
                                 await storage_manager.upload_file(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{country_code}/{file_name}")
-                            os.unlink(temp_file_path)
-                            os.unlink(cog_path)
+                                os.unlink(temp_file_path)
+                                os.unlink(cog_path)
         logging.info("Successfully processed file: %s", file_name)
     except Exception as e:
         logging.error("Error processing file %s: %s", file_name, e)
@@ -243,6 +239,14 @@ async def validate_cog(file_path=None):
 
 
 
+async def validate_cog_exists(file_path=None):
+    """
+    Validate that a COG file exists and is valid.
+    Args:
+        file_path: Path to the COG file
+    """
+
+
 if __name__ == "__main__":
     import asyncio
-    asyncio.run(download_data(download_locally=True))
+    asyncio.run(download_data(download_locally=False))

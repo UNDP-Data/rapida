@@ -324,4 +324,4 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     await storage_manager.close()
 
 if __name__ == "__main__":
-    asyncio.run(download_data(country_code="KEN", download_locally=True, force_repocessing=False))
+    asyncio.run(download_data(country_code="KEN", download_locally=False, force_reprocessing=True))

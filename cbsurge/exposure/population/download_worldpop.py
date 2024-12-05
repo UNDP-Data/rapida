@@ -229,6 +229,11 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
 
     try:
         async with httpx.AsyncClient() as client:
+            cog_exists = await check_cog_exists(storage_manager=storage_manager,
+                                                blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
+            if cog_exists and not force_reprocessing:
+                logging.info("COG already exists in Azure, skipping upload: %s", file_name)
+                return
             async with client.stream("GET", file_url, timeout=600) as response:
                 if response.status_code != 200:
                     logging.error("Failed to download file: %s, status: %s", file_url, response.status_code)
@@ -254,11 +259,6 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                                     os.makedirs(local_download_path, exist_ok=True)
                                 shutil.move(cog_path, os.path.join(os.getenv("LOCAL_DOWNLOAD_PATH", "/tmp"), year, country_code, file_name))
                             else:
-                                cog_exists = await check_cog_exists(storage_manager=storage_manager,
-                                                                    blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
-                                if cog_exists and not force_reprocessing:
-                                    logging.info("COG already exists in Azure, skipping upload: %s", file_name)
-                                    return
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
                                 await storage_manager.upload_file(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
                                 os.unlink(temp_file_path)
@@ -303,7 +303,7 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     for country_code, country_id in available_data.items():
         logging.info("Processing country: %s", country_code)
         file_links = await get_links_from_table(data_id=country_id)
-        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
+        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=1)):
             logging.info("Processing chunk %d for country: %s", i + 1, country_code)
             # Create a fresh list of tasks for each file chunk
             tasks = [process_single_file(file_url=url,
@@ -324,4 +324,4 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     await storage_manager.close()
 
 if __name__ == "__main__":
-    asyncio.run(download_data(country_code="KEN", download_locally=False, force_reprocessing=True))
+    asyncio.run(download_data(country_code="KEN", download_locally=False, force_reprocessing=False))

@@ -4,7 +4,7 @@ Fetch admin boundaries from OCHA ArcGIS server
 import os
 import httpx
 import logging
-from urllib.parse import urlparse,urlencode, ParseResult
+from urllib.parse import urlparse,urlencode
 import pycountry
 from shapely.predicates import intersects
 from shapely.geometry import box, shape
@@ -12,7 +12,7 @@ import h3.api.basic_int as h3
 import shapely
 from cbsurge.admin.util import is_int
 from tqdm import tqdm
-
+from cbsurge.util import http_get_json
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +21,28 @@ ARCGIS_SERVER_ROOT = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/s
 ARCGIS_COD_SERVICE = 'COD_External'
 
 
-def http_get_json(url=None, timeout=None):
+def countries_for_bbox(bounding_box=None):
     """
-    Generic HTTP get function using httpx
-    :param url: str, the url to be fetched
-    :param timeout: httpx.Timeout instance
-    :return: python dict representing the result as parsed json
+    Retrieves the ISO 3166-1 alpha-3 country code for all  countries whose extent intersects the
+    bounding box f rom ESRI ARcGIS oneline World countries layer
+    :param bounding_box: tuple of numbers, xmin/west, ymin/south, xmax/east, ymax/north
+    :return: tuple with string representing iso3 country codes
+
+
     """
-    with httpx.Client(timeout=timeout) as client:
-        response = client.get(url)
-        response.raise_for_status()
-        if response.status_code == 200:
-            return response.json()
+    str_bbox = map(str, bounding_box)
+    url = f'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/World_Countries_(Generalized)/FeatureServer/0/query?where=1%3D1&outFields=*&geometry={",".join(str_bbox)}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&outSR=4326&f=json'
+    try:
+        timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
+        data = http_get_json(url=url, timeout=timeout)
+        countries = list()
+        for country in data['features']:
+            iso2 = country['attributes']['ISO']
+            countries.append(pycountry.countries.get(alpha_2=iso2).alpha_3)
+        return tuple(countries)
+    except Exception as e:
+        logger.error(f'Failed to fetch  countries that intersect bbox {bounding_box}. {e}')
+        raise
 
 def fetch_ocha_countries(bounding_box = None, ):
     """
@@ -75,29 +85,6 @@ def fetch_ocha_countries(bounding_box = None, ):
         logger.error(f'Failed to fetch available countries. {e}')
         raise
 
-
-def countries_for_bbox(bounding_box=None):
-    """
-    Retrieves the ISO 3166-1 alpha-3 country code for all  countries whose extent intersects the
-    bounding box f rom ESRI ARcGIS oneline World countries layer
-    :param bounding_box: tuple of numbers, xmin/west, ymin/south, xmax/east, ymax/north
-    :return: tuple with string representing iso3 country codes
-
-
-    """
-    str_bbox = map(str, bounding_box)
-    url = f'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/World_Countries_(Generalized)/FeatureServer/0/query?where=1%3D1&outFields=*&geometry={",".join(str_bbox)}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&outSR=4326&f=json'
-    try:
-        timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-        data = http_get_json(url=url, timeout=timeout)
-        countries = list()
-        for country in data['features']:
-            iso2 = country['attributes']['ISO']
-            countries.append(pycountry.countries.get(alpha_2=iso2).alpha_3)
-        return tuple(countries)
-    except Exception as e:
-        logger.error(f'Failed to fetch  countries that intersect bbox {bounding_box}. {e}')
-        raise
 
 def fetch_ocha_admin_levels(iso3_country=None):
     """

@@ -41,18 +41,13 @@ class AzStorageManager:
 
         # Get the file size for progress tracking
         file_size = os.path.getsize(file_path)
-        chunk_size = 4 * 1024 * 1024  # 4MB chunks
-        progress = tqdm(total=file_size, unit="B", unit_scale=True, desc=f"Uploading {blob_name}")
+
+        async def __progress(current, total):
+            tqdm(total=total, unit="B", unit_scale=True, desc=f"Uploading {blob_name}").update(current)
 
         async with aiofiles.open(file_path, "rb") as data:
-            while True:
-                chunk = await data.read(chunk_size)
-                if not chunk:
-                    break
-                await blob_client.upload_blob(chunk, overwrite=True, length=len(chunk),
-                                              raw_response_hook=lambda _: progress.update(len(chunk)))
+            await blob_client.upload_blob(data, overwrite=True, max_concurrency=4, blob_type="BlockBlob", length=file_size, progress_hook=__progress)
 
-        progress.close()
         logging.info("Upload completed for blob: %s", blob_name)
         return blob_client.url
 
@@ -159,7 +154,6 @@ async def convert_to_cog(input_file=None, output_file=None):
            "-co", "TARGET_SRS=EPSG:3857",
            "-co", "COMPRESS=ZSTD",
            "-co", "BLOCKSIZE=256",
-           "-co", "NUM_THREADS=ALL_CPUS",
            "-co", "BIGTIFF=YES",
            "-co", "WARP_RESAMPLING=NEAREST",
            "-co", "RESAMPLING=NEAREST",
@@ -208,7 +202,7 @@ async def check_cog_exists(storage_manager=None, blob_path=None):
 
 
 
-async def process_single_file(file_url=None, storage_manager=None, country_code=None, year=None, force_reprocessing=False, download_locally=False):
+async def process_single_file(file_url=None, storage_manager=None, country_code=None, year=None, force_reprocessing=False, download_path=None):
     """
     Download a single file, convert the file to a COG and upload it to Azure Blob Storage.
     Args:
@@ -216,7 +210,7 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
         year: The year for which the file is being processed
         country_code: The country code for which the file is being processed
         file_url: URL to download the file from
-        download_locally: If True, the COG file will be downloaded locally instead of being uploaded to Azure
+        download_path: (Path) The local path to download the COG files to. It will upload to Azure if not provided.
         storage_manager: AzStorageManager instance
     Returns: None
 
@@ -252,17 +246,20 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                             logging.info("Converting file to COG: %s", cog_path)
                             await convert_to_cog(input_file=temp_file_path, output_file=cog_path)
                             await validate_cog(file_path=cog_path)
-                            if download_locally:
-                                logging.info("Copying COG file locally: %s", cog_path)
-                                local_download_path = os.path.join(os.getenv("LOCAL_DOWNLOAD_PATH", "/tmp"), year, country_code)
-                                if not os.path.exists(local_download_path):
-                                    os.makedirs(local_download_path, exist_ok=True)
-                                shutil.move(cog_path, os.path.join(os.getenv("LOCAL_DOWNLOAD_PATH", "/tmp"), year, country_code, file_name))
+                            if download_path:
+                                try:
+                                    if not os.path.exists(download_path):
+                                        logging.info("Download path does not exist. Creating download path: %s", download_path)
+                                        os.makedirs(download_path, exist_ok=True)
+                                    logging.info("Copying COG file locally: %s", cog_path)
+                                    shutil.move(cog_path, f"{download_path}/{year}/{country_code}{file_name}")
+                                    logging.info("Successfully copied COG file: %s", f"{download_path}/{year}/{country_code}/{file_name}")
+                                except Exception as e:
+                                    raise Exception(f"Error copying COG file: {e}")
                             else:
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
                                 await storage_manager.upload_file(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
-                                os.unlink(temp_file_path)
-                                os.unlink(cog_path)
+
         logging.info("Successfully processed file: %s", file_name)
     except Exception as e:
         logging.error("Error processing file %s: %s", file_name, e)
@@ -285,14 +282,14 @@ async def get_links_from_table(data_id=None):
         return await extract_links_from_table(response.text)
 
 
-async def download_data(country_code=None, year="2020", force_reprocessing=False, download_locally=False):
+async def download_data(country_code=None, year="2020", force_reprocessing=False, download_path=None):
     """
     Download all available data for a given country and year.
     Args:
         force_reprocessing: (bool) Force reprocessing of any files found in azure
         country_code: (str) The country code for which to download data
         year: (Not implemented) The year for which to download data
-        download_locally: (bool) If True, the COG files will be downloaded locally instead of being uploaded to Azure
+        download_path: (Path) The local path to download the COG files to. It will upload to Azure if not provided.
 
     Returns: None
 
@@ -303,7 +300,9 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     for country_code, country_id in available_data.items():
         logging.info("Processing country: %s", country_code)
         file_links = await get_links_from_table(data_id=country_id)
-        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=1)):
+        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=10)):
+            # if i > 0:
+            #     break
             logging.info("Processing chunk %d for country: %s", i + 1, country_code)
             # Create a fresh list of tasks for each file chunk
             tasks = [process_single_file(file_url=url,
@@ -311,7 +310,7 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
                                          year=year,
                                          country_code=country_code,
                                          force_reprocessing=force_reprocessing,
-                                         download_locally=download_locally) for url in file_urls_chunk]
+                                         download_path=download_path) for url in file_urls_chunk]
 
             # Gather tasks and process results
             results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -319,9 +318,9 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
                 if isinstance(result, Exception):
                     logging.error("Error processing file: %s", result)
 
-    # Close the storage manager connection after all files have been uploaded
-    logging.info("Closing storage manager after all uploads")
+    # Close the storage manager connection after all files have been processed
+    logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
 
 if __name__ == "__main__":
-    asyncio.run(download_data(country_code="KEN", download_locally=False, force_reprocessing=False))
+    asyncio.run(download_data(force_reprocessing=True))

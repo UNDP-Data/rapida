@@ -1,5 +1,5 @@
 import asyncclick as click
-import anyio
+
 from download_worldpop import download_data
 
 

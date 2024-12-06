@@ -298,9 +298,11 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     available_data = await get_available_data(country_code=country_code, year=year)
     storage_manager = AzStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     for country_code, country_id in available_data.items():
+        # if country_code == "RUS":
+        #     continue
         logging.info("Processing country: %s", country_code)
         file_links = await get_links_from_table(data_id=country_id)
-        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=10)):
+        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
             # if i > 0:
             #     break
             logging.info("Processing chunk %d for country: %s", i + 1, country_code)
@@ -323,4 +325,4 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     await storage_manager.close()
 
 if __name__ == "__main__":
-    asyncio.run(download_data(force_reprocessing=True))
+    asyncio.run(download_data(force_reprocessing=False))

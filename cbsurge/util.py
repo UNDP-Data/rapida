@@ -1,7 +1,17 @@
 import httpx
 import logging
+from osgeo import gdal
+import itertools
 
 logger = logging.getLogger(__name__)
+
+def fetch_drivers():
+    d = dict()
+    for i in range(gdal.GetDriverCount()):
+
+        drv = gdal.GetDriver(i)
+        d[drv.ShortName] = drv.GetMetadataItem(gdal.DMD_EXTENSIONS)
+    return d
 
 def http_get_json(url=None, timeout=None):
     """
@@ -28,3 +38,15 @@ def validate(url=None, timeout=10):
     with httpx.Client(timeout=timeout) as client:
         response = client.head(url, timeout=timeout)
         response.raise_for_status()
+
+
+
+def generator_length(gen):
+    """
+    compute the no of elems inside a generator
+    :param gen:
+    :return:
+    """
+    gen1, gen2 = itertools.tee(gen)
+    length = sum(1 for _ in gen1)  # Consume the duplicate
+    return length, gen2  # Return the length and the unconsumed generator

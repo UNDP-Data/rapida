@@ -7,3 +7,4 @@ GDAL==3.10.0
 azure-storage-blob
 overturemaps
 async
+exactextract

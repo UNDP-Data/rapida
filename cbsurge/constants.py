@@ -1,0 +1,1 @@
+AGE_STRUCTURES_ROOT_URL = "https://hub.worldpop.org/geodata"

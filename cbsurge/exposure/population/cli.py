@@ -11,8 +11,5 @@ async def run_download(force_reprocessing, country, download_path):
     await download_data(force_reprocessing=force_reprocessing, country_code=country, download_path=download_path)
 
 
-
-
-
 if __name__ == '__main__':
     run_download()

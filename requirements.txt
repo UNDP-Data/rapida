@@ -12,3 +12,5 @@ aiohttp
 azure-storage-blob
 asyncclick
 rio-cogeo
+exactextract
+

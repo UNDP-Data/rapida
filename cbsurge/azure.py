@@ -4,7 +4,7 @@ import os
 import aiofiles
 from azure.storage.blob.aio import BlobServiceClient
 from azure.storage.fileshare.aio import ShareServiceClient
-
+from rasterio.rio.blocks import blocks
 
 from tqdm.asyncio import tqdm
 
@@ -13,17 +13,18 @@ FILE_SHARE_NAME = "cbrapida"
 
 class AzStorageManager:
 
-    def __aenter__(self):
-        return self
-
-    def __aexit__(self, exc_type, exc_val, exc_tb):
-        return self.close()
+    # def __aenter__(self):
+    #     return self
+    #
+    # def __aexit__(self, exc_type, exc_val, exc_tb):
+    #     return self.close()
 
     def __init__(self, conn_str):
         logging.info("Initializing Azure Storage Manager")
         self.conn_str = conn_str
         self.blob_service_client = BlobServiceClient.from_connection_string(conn_str)
         self.share_service_client = ShareServiceClient.from_connection_string(conn_str)
+
 
     async def upload_blob(self, file_path=None, blob_name=None):
         """
@@ -51,6 +52,35 @@ class AzStorageManager:
 
         logging.info("Upload completed for blob: %s", blob_name)
         return blob_client.url, await container_client.close()
+
+
+
+    async def upload_files(self, local_directory=None, azure_directory=None):
+        """
+        Upload multiple files to Azure Blob Storage.
+        Args:
+            local_directory: (str) The local directory containing the files to upload
+            azure_directory: (str) The directory in Azure Blob Storage to upload the files to
+
+        Returns:
+
+        """
+
+
+        container_client = self.blob_service_client.get_container_client(CONTAINER_NAME)
+        for root, _, files in os.walk(local_directory):
+            for file in files:
+                async def __progress__(current, total):
+                    tqdm(total=total, unit="B", unit_scale=True, desc=f"Uploading {blob_name}").update(current)
+                local_file_path = os.path.join(root, file)
+                blob_name = os.path.join(azure_directory, file)
+                logging.info(f"Uploading {local_file_path} as {blob_name}...")
+                async with aiofiles.open(local_file_path, "rb") as data:
+                    await container_client.upload_blob(name=blob_name, data=data, overwrite=True, max_concurrency=4, progress_hook=__progress__)
+        logging.info("Upload completed for all files")
+        return await container_client.close()
+
+
 
     async def upload_to_fileshare(self, local_file=None, file_name=None):
         """

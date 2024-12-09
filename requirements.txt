@@ -10,3 +10,5 @@ async
 aiofiles
 aiohttp
 azure-storage-blob
+asyncclick
+rio-cogeo

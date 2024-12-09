@@ -11,7 +11,7 @@ import httpx
 
 from tqdm.asyncio import tqdm
 
-from cbsurge.azure_upload import AzStorageManager
+from cbsurge.azure import AzStorageManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)

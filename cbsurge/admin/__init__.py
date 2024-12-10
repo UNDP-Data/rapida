@@ -15,8 +15,11 @@ from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
 import click
 import json
 
-
-
+def silence_httpx_az():
+    azlogger = logging.getLogger('azure.core.pipeline.policies.http_logging_policy')
+    azlogger.setLevel(logging.WARNING)
+    httpx_logger = logging.getLogger('httpx')
+    httpx_logger.setLevel(logging.WARNING)
 
 @click.group()
 def admin():
@@ -81,7 +84,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
     python -m  cbsurge.cli admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
     """
-
+    silence_httpx_az()
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
     if geojson:
@@ -137,6 +140,7 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False)
 
     python -m  cbsurge.cli admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
     """
+    silence_httpx_az()
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
     if geojson:

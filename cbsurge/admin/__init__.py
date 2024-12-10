@@ -15,9 +15,28 @@ from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
 import click
 import json
 
+def silence_httpx_az():
+    azlogger = logging.getLogger('azure.core.pipeline.policies.http_logging_policy')
+    azlogger.setLevel(logging.WARNING)
+    httpx_logger = logging.getLogger('httpx')
+    httpx_logger.setLevel(logging.WARNING)
 
+class BboxParamType(click.ParamType):
+    name = "bbox"
 
+    def convert(self, value, param, ctx):
+        try:
+            bbox = [float(x.strip()) for x in value.split(",")]
+            fail = False
+        except ValueError:  # ValueError raised when passing non-numbers to float()
+            fail = True
 
+        if fail or len(bbox) != 4:
+            self.fail(
+                f"bbox must be 4 floating point numbers separated by commas. Got '{value}'"
+            )
+
+        return bbox
 @click.group()
 def admin():
     f"""Command line interface for {__package__} package"""
@@ -25,8 +44,8 @@ def admin():
 
 
 @admin.command(no_args_is_help=True)
-@click.option('-b', '--bbox', required=True, type=float,
-              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north', nargs=4 )
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
                 required=True,
                 type=click.IntRange(min=0, max=2, clamp=False),
@@ -81,7 +100,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
     python -m  cbsurge.cli admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
     """
-
+    silence_httpx_az()
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
     if geojson:
@@ -90,8 +109,8 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
 
 @admin.command(no_args_is_help=True)
-@click.option('-b', '--bbox', required=True, type=float,
-              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north', nargs=4)
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
                 required=True,
                 type=click.IntRange(min=0, max=2, clamp=False),
@@ -137,6 +156,7 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False)
 
     python -m  cbsurge.cli admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
     """
+    silence_httpx_az()
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
     if geojson:

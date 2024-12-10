@@ -276,7 +276,8 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                         pbar.set_postfix_str(f'finished', refresh=True)
                         return geojson
                 else:
-                    #logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    logger.info(f'Try changing OSM level or omitting it so eventually an OSM level is found!')
                     if osm_level is None:
                         logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
                     continue

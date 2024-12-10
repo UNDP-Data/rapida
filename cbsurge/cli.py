@@ -5,8 +5,8 @@ from cbsurge.exposure.population import population
 
 
 @click.group
-@click.pass_context
-def cli(ctx):
+
+def cli():
     """Main CLI for the application."""
     pass
 cli.add_command(admin)

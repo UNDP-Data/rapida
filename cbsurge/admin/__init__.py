@@ -13,6 +13,7 @@ import logging
 from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
 import click
+import json
 
 
 
@@ -76,9 +77,15 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     the Overpass query. Additionally, all hierarchically superior admin levels and names are returned and attributes of
     the admin units.
 
+    To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
+
+    python -m  cbsurge.cli admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
     """
+
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
-    fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
+    geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
+    if geojson:
+        click.echo(json.dumps(geojson))
 
 
 
@@ -126,7 +133,11 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False)
     this function also uses a per country approach to fetch features and merge them into one layer in case the supplied
     bounding box covers several countries.
 
+    To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
+
+    python -m  cbsurge.cli admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
-    fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
-
+    geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
+    if geojson:
+        click.echo(json.dumps(geojson))

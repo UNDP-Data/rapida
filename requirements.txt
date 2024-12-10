@@ -8,3 +8,4 @@ azure-storage-blob
 overturemaps
 async
 exactextract
+pycountry

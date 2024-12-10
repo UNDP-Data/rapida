@@ -1,4 +1,4 @@
-import asyncclick as click
+import click as click
 
 from cbsurge.admin import admin
 from cbsurge.exposure.population import population

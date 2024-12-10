@@ -3,8 +3,6 @@ import gzip
 import json
 import math
 import multiprocessing
-
-import h3.api.basic_int as h3
 import os.path
 from functools import partial
 from aiopmtiles import Reader
@@ -24,7 +22,7 @@ import pyarrow as pa
 
 from multiprocessing import Manager
 from cbsurge.util import validate, fetch_drivers
-from pyproj import Geod
+
 ogr.UseExceptions()
 osr.UseExceptions()
 GMOSM_BUILDINGS = 'https://data.source.coop/vida/google-microsoft-osm-open-buildings/pmtiles/goog_msft_osm.pmtiles'
@@ -466,14 +464,6 @@ def remove_duplicate_buildings(src_path=None):
             assert lyr.DeleteFeature(id_to_remove) == 0
         logger.info(f'{lyr.GetFeatureCount()} feature were saved to /tmp/bldgs.fgb ')
 
-
-
-
-
-
-
-    # with open('/tmp/tiles.geojson', 'w') as tj:
-    #     tj.write(json.dumps(dict(type='FeatureCollection', features=ftrs), indent=2))
 if __name__ == '__main__':
     httpx_logger = logging.getLogger('httpx')
     httpx_logger.setLevel(100)

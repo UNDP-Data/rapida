@@ -21,6 +21,22 @@ def silence_httpx_az():
     httpx_logger = logging.getLogger('httpx')
     httpx_logger.setLevel(logging.WARNING)
 
+class BboxParamType(click.ParamType):
+    name = "bbox"
+
+    def convert(self, value, param, ctx):
+        try:
+            bbox = [float(x.strip()) for x in value.split(",")]
+            fail = False
+        except ValueError:  # ValueError raised when passing non-numbers to float()
+            fail = True
+
+        if fail or len(bbox) != 4:
+            self.fail(
+                f"bbox must be 4 floating point numbers separated by commas. Got '{value}'"
+            )
+
+        return bbox
 @click.group()
 def admin():
     f"""Command line interface for {__package__} package"""
@@ -28,8 +44,8 @@ def admin():
 
 
 @admin.command(no_args_is_help=True)
-@click.option('-b', '--bbox', required=True, type=float,
-              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north', nargs=4 )
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
                 required=True,
                 type=click.IntRange(min=0, max=2, clamp=False),
@@ -93,8 +109,8 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
 
 @admin.command(no_args_is_help=True)
-@click.option('-b', '--bbox', required=True, type=float,
-              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north', nargs=4)
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
                 required=True,
                 type=click.IntRange(min=0, max=2, clamp=False),

@@ -213,6 +213,10 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
 
 
     """
+    if type(admin_level) is str:
+        admin_level = int(admin_level)
+    if type(osm_level) is str:
+        osm_level = int(osm_level)
 
     west, south, east, north = bbox
     assert admin_level in ADMIN_LEVELS, f'Invalid admin level. Valid values are {list(ADMIN_LEVELS.keys())}'

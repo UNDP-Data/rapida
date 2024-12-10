@@ -9,15 +9,15 @@ from html.parser import HTMLParser
 import aiofiles
 import httpx
 
-from tqdm.asyncio import tqdm
+from tqdm.asyncio import tqdm_asyncio
 
 from cbsurge.azure.blob_storage import AzureBlobStorageManager
+from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
 
-CONTAINER_NAME = "stacdata"
-AZ_ROOT_FILE_PATH = "worldpop"
+
 
 
 class LinkExtractor(HTMLParser):
@@ -79,7 +79,7 @@ async def get_available_data(country_code=None, year="2020"):
         async with httpx.AsyncClient() as client:
             response = await client.get(url, timeout=600)
             if response.status_code != 200:
-                logging.error("Failed to get ava ilable countries, status: %s", response.status_code)
+                logging.error("Failed to get available countries, status: %s", response.status_code)
                 return []
             res = response.json()
             data = res.get("data", [])
@@ -196,7 +196,7 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                     logging.error("Failed to download file: %s, status: %s", file_url, response.status_code)
                     return
                 total_size = int(response.headers.get("content-length", 0))
-                with tqdm(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {file_name}") as progress:
+                with tqdm_asyncio(total=total_size, unit="B", unit_scale=True, desc=f"Downloading {file_name}") as progress:
                     with tempfile.TemporaryDirectory() as temp_dir:
                         temp_file_path = f"{temp_dir}/{file_name}"
                         logging.debug("Temporary file path: %s", temp_file_path)
@@ -222,7 +222,8 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                                     raise Exception(f"Error copying COG file: {e}")
                             else:
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
-                                await storage_manager.upload_file(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
+                                await storage_manager.upload_blob(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
+
 
         logging.info("Successfully processed file: %s", file_name)
     except Exception as e:

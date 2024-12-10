@@ -1,5 +1,7 @@
 # Description: Constants for the population module
+
 AZ_ROOT_FILE_PATH = "worldpop"
+CONTAINER_NAME = "stacdata"
 WORLDPOP_AGE_MAPPING = {
     "0-12": 0,
     "1-4": 1,

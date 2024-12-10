@@ -13,11 +13,11 @@ FILE_SHARE_NAME = "cbrapida"
 
 class AzStorageManager:
 
-    # def __aenter__(self):
-    #     return self
-    #
-    # def __aexit__(self, exc_type, exc_val, exc_tb):
-    #     return self.close()
+    def __aenter__(self):
+        return self
+
+    def __aexit__(self, exc_type, exc_val, exc_tb):
+        return self.close()
 
     def __init__(self, conn_str):
         logging.info("Initializing Azure Storage Manager")

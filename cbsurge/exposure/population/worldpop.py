@@ -11,7 +11,7 @@ import httpx
 
 from tqdm.asyncio import tqdm
 
-from cbsurge.azure import AzStorageManager
+from cbsurge.azure.blob_storage import AzureBlobStorageManager
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -260,7 +260,7 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     """
     logging.info("Starting data download")
     available_data = await get_available_data(country_code=country_code, year=year)
-    storage_manager = AzStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
+    storage_manager = AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     for country_code, country_id in available_data.items():
         # if country_code == "RUS":
         #     continue

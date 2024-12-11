@@ -21,7 +21,7 @@ import itertools
 import pyarrow as pa
 
 from multiprocessing import Manager
-from cbsurge.util import validate, fetch_drivers
+from cbsurge.util import validate, generator_length
 
 ogr.UseExceptions()
 osr.UseExceptions()
@@ -106,7 +106,7 @@ def process_mvt(data=None, compression=None, fields=None, tile=None, bbox_poly=N
     the "area_in_meters" attribute.
 
     TO save computational resources every building is categorized in respect to where it sits within a tile:
-    inside, in buffer or at the edge. Edge buildings are not collected because they are normally split
+    inside, in buffer or at the edge. Edge buildings are not collected because they are normally split between tiles
     The inside but mainly buffer buildings can be duplicated within the bbox and this is handled through a thread safe dict
     where every building is recorded once. IN case the same building  exists the bbox  it is not collected
     unless its real area in m2 and the copy area are different.
@@ -117,7 +117,7 @@ def process_mvt(data=None, compression=None, fields=None, tile=None, bbox_poly=N
     :param fields: dict with layer's schema
     :param tile: morecantile tile instance
     :param bbox_poly: bbox to filter buildings spatially
-    :param shared_dict: shared dict use between multiple threads
+    :param shared_dict: shared dict use between multiple threads to  identify the unique buildings
     :param tile_buffer: int, the number of extra cartesian coordinates added to the tile
     :return: all buildings in LATLON coords and props inside a pyarrow.table
     """
@@ -133,10 +133,7 @@ def process_mvt(data=None, compression=None, fields=None, tile=None, bbox_poly=N
 
         if compression is not None:
             data = gzip.decompress(data)
-        # decoded_data = mapbox_vector_tile.decode(tile=data, default_options=dict(
-        #     transformer=partial(mvt2ll1, z=tile.z,tx=tile.x,ty=tile.y),
-        #     y_coord_down=True)
-        # )
+
         decoded_data1 = mapbox_vector_tile.decode(tile=data, default_options=dict(
             #transformer=partial(mvt2ll1, z=tile.z, tx=tile.x, ty=tile.y),
             y_coord_down=True))
@@ -154,8 +151,11 @@ def process_mvt(data=None, compression=None, fields=None, tile=None, bbox_poly=N
                 for p in polys:
                     c = np.array(p.exterior.coords, dtype='i2')
                     cs = c.size
+                    # coords located inside
                     tile_mask = (c>=0) & (c<=l['extent'])
+                    # coords located on the outer edge that arew ususally split between tiles
                     split_mask = (c==-tile_buffer) | (c==l['extent']+tile_buffer)
+                    # coords located in the tile buffer zone
                     buffer_mask = ((c>-tile_buffer)&(c<0)) | ((c>l['extent'])&(c<l['extent']+tile_buffer))
                     is_split = np.any(split_mask)
                     is_tile = tile_mask.sum()==cs
@@ -167,16 +167,19 @@ def process_mvt(data=None, compression=None, fields=None, tile=None, bbox_poly=N
                             continue
                         else:
                             btype = 'buffer'
-
+                    # transform geom to geographic
                     tp = transform(p, transformation=partial(mvt2ll_arr, z=tile.z, x=tile.x, y=tile.y))
-
+                    # filter using global bbox
                     if not tp.within(bbox_poly):
                         continue
-
+                    # compute the area
                     area_m = area(tp)
+                    # check for duplicates using original area
                     if not props['area_in_meters'] in shared_dict:
                         shared_dict[props['area_in_meters']] = area_m
                     else:
+                        # the area exists in the shared dict. if the one that exists is
+                        # equal to the current the  geom will be skipped, other
                         parea_m = shared_dict[props['area_in_meters']]
                         if area_m-parea_m == 0:
                             continue
@@ -207,7 +210,12 @@ def process_mvt(data=None, compression=None, fields=None, tile=None, bbox_poly=N
 
 def mvt2ll(x=None, y=None, tx=None, ty=None, z=None, extent=4096):
     """
-    Transform vector tile int coords to geographic
+    Transform vector tile geometries to geographic, scalar version
+    Can be plugged into mvt_vector_tile.decode
+    decoded_data = mapbox_vector_tile.decode(tile=data, default_options=dict(
+            transformer=partial(mvt2ll1, z=tile.z,tx=tile.x,ty=tile.y),
+            y_coord_down=True)
+        )
     :param x: x coord, int
     :param y: y coord, int
     :param tx: tile x number
@@ -226,7 +234,7 @@ def mvt2ll(x=None, y=None, tx=None, ty=None, z=None, extent=4096):
 
 def mvt2ll_arr(coords_array=None, x=None, y=None, z=None, extent=4096):
     """
-        Transform vector tile int coords to geographic. Array version
+        Transform vector tile int coords/geometries to geographic. Array version
         :param coords_array, 2D even x and y int2 coords array
 
         :param x: tile x number
@@ -462,7 +470,7 @@ def remove_duplicate_buildings(src_path=None):
         ids_to_remove = set(buffer_ftrs.keys()).difference(buffer_ftrs1.values())
         for id_to_remove  in ids_to_remove:
             assert lyr.DeleteFeature(id_to_remove) == 0
-        logger.info(f'{lyr.GetFeatureCount()} feature were saved to /tmp/bldgs.fgb ')
+        logger.info(f'{lyr.GetFeatureCount()} feature were saved to {out_path} ')
 
 if __name__ == '__main__':
     httpx_logger = logging.getLogger('httpx')

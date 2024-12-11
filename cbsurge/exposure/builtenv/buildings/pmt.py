@@ -3,7 +3,6 @@ import gzip
 import json
 import math
 import multiprocessing
-import os.path
 from functools import partial
 from aiopmtiles import Reader
 import morecantile as m
@@ -15,13 +14,13 @@ import concurrent
 from osgeo import ogr, osr, gdal
 from shapely.geometry import shape, box
 from shapely.io import to_wkb
-from shapely import  transform, equals, normalize, area, length
+from shapely import  transform, area
 import numpy as np
 import itertools
 import pyarrow as pa
 
 from multiprocessing import Manager
-from cbsurge.util import validate, generator_length
+from cbsurge import util
 
 ogr.UseExceptions()
 osr.UseExceptions()
@@ -39,14 +38,13 @@ logger = logging.getLogger(__name__)
 
 def validate_source():
     try:
-        validate(url=GMOSM_BUILDINGS, timeout=3)
+        util.validate(url=GMOSM_BUILDINGS, timeout=3)
         return  True
     except Exception as e:
         msg  = f'Failed to validate buildings source {GMOSM_BUILDINGS}. Error is {e}'
         logger.error(msg)
         raise
 
-    return geoarrow_schema
 
 def chunker(iterable, size):
     it = iter(iterable)
@@ -301,10 +299,25 @@ def add_fields_to_layer(fields, layer):
     layer.CreateField(ogr.FieldDefn('aream2', ogr.OFTReal))
 
 
+def remove_duplicate_buildings(src_path=None):
+    """
+    Remove duplicate building based on area_in_meters field
+    :param src_path:
+    :return:
+    """
+    with ogr.Open(src_path, 1) as src:
+        lyr = src.GetLayer(0)
+        stream = lyr.GetArrowStreamAsPyArrow()
+        buffer_ftrs = dict([(b['OGC_FID'].as_py(), b['area_in_meters'].as_py()) for b in stream.GetNextRecordBatch()])
+        buffer_ftrs1 = dict(zip(buffer_ftrs.values(), buffer_ftrs.keys()))
+        ids_to_remove = set(buffer_ftrs.keys()).difference(buffer_ftrs1.values())
+        for id_to_remove  in ids_to_remove:
+            assert lyr.DeleteFeature(id_to_remove) == 0
+        logger.info(f'{lyr.GetFeatureCount()} feature were saved to {out_path} ')
 
 
 
-async def fetch_buildings(bbox=None, zoom_level=None, x=None, y=None, out_path=None, url=GMOSM_BUILDINGS):
+async def download(bbox=None, zoom_level=None, x=None, y=None, out_path=None, url=GMOSM_BUILDINGS):
     """
     Fetch buildings from url remotye source in PMTiles format
 
@@ -316,13 +329,8 @@ async def fetch_buildings(bbox=None, zoom_level=None, x=None, y=None, out_path=N
     :param url:
     :return:
     """
-    assert os.path.isfile(out_path), f'{out_path} has to be a file'
-    out_folder, file_name = os.path.split(out_path)
-    assert os.path.exists(out_folder), f'Folder {out_path} has to exist'
 
-    if os.path.exists(out_path):
-        assert os.access(out_path, os.W_OK), f'Can not write to {out_path}'
-
+    util.validate_path(src_path=out_path)
 
     bb = m.BoundingBox(*bbox)
     bbox_polygon = box(*bbox)
@@ -342,7 +350,7 @@ async def fetch_buildings(bbox=None, zoom_level=None, x=None, y=None, out_path=N
 
         all_tiles = WEB_MERCATOR_TMS.tiles(west=bb.left,south=bb.bottom, east=bb.right, north=bb.top,
                                    zooms=[zoom_level],)
-        ntiles, all_tiles = generator_length(all_tiles)
+        ntiles, all_tiles = util.generator_length(all_tiles)
 
 
         with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
@@ -456,21 +464,6 @@ async def fetch_buildings(bbox=None, zoom_level=None, x=None, y=None, out_path=N
 
             logger.info(f'{dst_lyr.GetFeatureCount()} feature were written to {out_path} ')
 
-def remove_duplicate_buildings(src_path=None):
-    """
-    Remove duplicate building based on area_in_meters field
-    :param src_path:
-    :return:
-    """
-    with ogr.Open(src_path, 1) as src:
-        lyr = src.GetLayer(0)
-        stream = lyr.GetArrowStreamAsPyArrow()
-        buffer_ftrs = dict([(b['OGC_FID'].as_py(), b['area_in_meters'].as_py()) for b in stream.GetNextRecordBatch()])
-        buffer_ftrs1 = dict(zip(buffer_ftrs.values(), buffer_ftrs.keys()))
-        ids_to_remove = set(buffer_ftrs.keys()).difference(buffer_ftrs1.values())
-        for id_to_remove  in ids_to_remove:
-            assert lyr.DeleteFeature(id_to_remove) == 0
-        logger.info(f'{lyr.GetFeatureCount()} feature were saved to {out_path} ')
 
 if __name__ == '__main__':
     httpx_logger = logging.getLogger('httpx')
@@ -489,4 +482,4 @@ if __name__ == '__main__':
 
     validate_source()
     out_path = '/tmp/bldgs.fgb'
-    asyncio.run(fetch_buildings(bbox=bbox, out_path=out_path))
+    asyncio.run(download(bbox=bbox, out_path=out_path))

@@ -1,13 +1,21 @@
 import os.path
-
-from osgeo import ogr
-
+import tempfile
+import time
+from osgeo_utils import ogrmerge
+from cbsurge import util as u
+from osgeo import ogr, gdal
+import multiprocessing
 import httpx
 from cbsurge.admin.osm import OVERPASS_API_URL
 from cbsurge.util import validate
 import logging
+from tqdm import tqdm
+
+
+gdal.UseExceptions()
+ogr.UseExceptions()
 logger = logging.getLogger(__name__)
-import tempfile
+
 GMOSM_BUILDINGS_ROOT = 'https://data.source.coop/vida/google-microsoft-osm-open-buildings/flatgeobuf/by_country'
 ogr.UseExceptions()
 def validate_source():
@@ -55,41 +63,44 @@ def get_countries_for_bbox_osm(bbox=None, overpass_url=OVERPASS_API_URL):
     except Exception as e:
         logger.error(f'Failed to fetch available countries from OSM. {e}')
         raise
+def gdal_callback(complete, message, data):
 
-async def fetch_buildings(bbox=None):
+    timeout_event, progressbar = data
+    progressbar.update(complete*100-progressbar.n)
+    if timeout_event and timeout_event.is_set():
+        logger.info(f'GDAL was signalled to stop...')
+        return 0
 
-    with ogr.GetDriverByName('FlatGeobuf').CreateDataSource('/tmp/bldgs.fgb') as dst_ds:
-        for country in get_countries_for_bbox_osm(bbox=bbox):
-            country_fgb_url = f'/vsicurl/{GMOSM_BUILDINGS_ROOT}/country_iso={country}/{country}.fgb'
-            c = f'ogr2ogr -spat {bbox[0]} {bbox[1]} {bbox[2]} {bbox[3]} /tmp/bldgs_{country}_rect.fgb {country_fgb_url}'
-            logger.info(c)
-            with ogr.Open(country_fgb_url) as src_ds:
-                src_lyr = src_ds.GetLayer(0)
-                print(src_lyr.GetFeatureCount())
+def download(bbox=None, out_path =None):
+        """
+        Download building from VIDA source using GDAL
+        :param bbox: iterable of floats, xmin, ymin, xmax,ymax
+        :param out_path: str, full path wheer the buildings layer will be written
+        :return:
+        """
+        u.validate_path(out_path)
+        options = gdal.VectorTranslateOptions(
+            format='FlatGeobuf',
+            spatFilter=bbox,
+            layerName='buildings'
+        )
 
-                src_lyr.SetSpatialFilterRect(*bbox)
-                src_lyr.ResetReading()
-                print(src_lyr.GetFeatureCount())
+        with tempfile.TemporaryDirectory(delete=True) as tmp_dir:
+            files_to_merge = []
+            for country in get_countries_for_bbox_osm(bbox=bbox):
+                remote_country_fgb_url = f'/vsicurl/{GMOSM_BUILDINGS_ROOT}/country_iso={country}/{country}.fgb'
+                local_country_fgb_url = os.path.join(tmp_dir,f'buildings_{country}.fgb' )
+                ds = gdal.VectorTranslate(local_country_fgb_url,remote_country_fgb_url,options=options)
+                ds = None
+                files_to_merge.append(local_country_fgb_url)
+                assert os.path.exists(local_country_fgb_url)
+            logger.debug(f'merging {",".join(files_to_merge)} into {out_path}')
+            ogrmerge.ogrmerge(src_datasets=files_to_merge, dst_filename=out_path,single_layer=True, progress_arg=ogr.TermProgress_nocb, overwrite_ds=True)
+        with ogr.Open(out_path) as src:
+            l = src.GetLayer(0)
+            logger.info(f'{l.GetFeatureCount()} buildings were downloaded to {out_path}')
 
-                if dst_ds.GetLayerCount() == 0:
-                    dst_lyr = dst_ds.CreateLayer(f'bldgs', geom_type=ogr.wkbPolygon, srs=src_lyr.GetSpatialRef())
-                    stream = dst_lyr.GetArrowStream(["MAX_FEATURES_IN_BATCH=300"])
-                    schema = stream.GetSchema()
-                    for i in range(schema.GetChildrenCount()):
-                        if schema.GetChild(i).GetName() != src_lyr.GetGeometryColumn():
-                            dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
 
-                #src_lyr.ResetReading()
-
-
-
-                while True:
-                    array = stream.GetNextRecordBatch()
-                    print(array)
-                    if array is None:
-                        break
-                    print(array.num_rows)
-                    assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
 
 
 if __name__ == '__main__':
@@ -104,10 +115,19 @@ if __name__ == '__main__':
     #bbox = 19.5128619671,40.9857135911,19.5464217663,41.0120783699  # ALB, Divjake
     # bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
     # bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
+    bbox = 19.350384,41.206737,20.059003,41.571459 # ALB, TIRANA
+    bbox = 19.726666,39.312705,20.627545,39.869353, # ALB/GRC
 
     #a =  asyncio.run(get_admin_level_bbox(iso3='ZWE'))
     #print(a)
     url = 'https://undpgeohub.blob.core.windows.net/userdata/9426cffc00b069908b2868935d1f3e90/datasets/bldgsc_20241029084831.fgb/bldgsc.pmtiles?sv=2025-01-05&ss=b&srt=o&se=2025-11-29T15%3A58%3A37Z&sp=r&sig=bQ8pXRRkNqdsJbxcIZ1S596u4ZvFwmQF3TJURt3jSP0%3D'
     #validate_source()
-    get_countries_for_bbox_osm(bbox=bbox)
-    asyncio.run(fetch_buildings(bbox=bbox,))
+    out_path = '/tmp/bldgs.fgb'
+    cntry = get_countries_for_bbox_osm(bbox=bbox)
+    start = time.time()
+    #asyncio.run(download(bbox=bbox))
+
+    download(bbox=bbox, out_path=out_path)
+
+    end = time.time()
+    print((end-start))

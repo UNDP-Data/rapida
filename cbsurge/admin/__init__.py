@@ -12,25 +12,10 @@ from random import choices
 
 from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
+from cbsurge.util import BboxParamType
 import click
 
 
-class BboxParamType(click.ParamType):
-    name = "bbox"
-
-    def convert(self, value, param, ctx):
-        try:
-            bbox = [float(x.strip()) for x in value.split(",")]
-            fail = False
-        except ValueError:  # ValueError raised when passing non-numbers to float()
-            fail = True
-
-        if fail or len(bbox) != 4:
-            self.fail(
-                f"bbox must be 4 floating point numbers separated by commas. Got '{value}'"
-            )
-
-        return bbox
 
 
 @click.group()

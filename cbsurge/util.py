@@ -2,7 +2,8 @@ import httpx
 import logging
 from osgeo import gdal
 import itertools
-
+import click
+import os
 logger = logging.getLogger(__name__)
 
 def fetch_drivers():
@@ -50,3 +51,28 @@ def generator_length(gen):
     gen1, gen2 = itertools.tee(gen)
     length = sum(1 for _ in gen1)  # Consume the duplicate
     return length, gen2  # Return the length and the unconsumed generator
+
+
+class BboxParamType(click.ParamType):
+    name = "bbox"
+    def convert(self, value, param, ctx):
+        try:
+            bbox = [float(x.strip()) for x in value.split(",")]
+            fail = False
+        except ValueError:  # ValueError raised when passing non-numbers to float()
+            fail = True
+
+        if fail or len(bbox) != 4:
+            self.fail(
+                f"bbox must be 4 floating point numbers separated by commas. Got '{value}'"
+            )
+
+        return bbox
+
+def validate_path(src_path=None):
+    assert os.path.isabs(src_path), f'{src_path} has to be a file'
+    out_folder, file_name = os.path.split(src_path)
+    assert os.path.exists(out_folder), f'Folder {src_path} has to exist'
+
+    if os.path.exists(src_path):
+        assert os.access(src_path, os.W_OK), f'Can not write to {src_path}'

@@ -4,12 +4,11 @@ import time
 from osgeo_utils import ogrmerge
 from cbsurge import util as u
 from osgeo import ogr, gdal
-import multiprocessing
 import httpx
 from cbsurge.admin.osm import OVERPASS_API_URL
 from cbsurge.util import validate
 import logging
-from tqdm import tqdm
+
 
 
 gdal.UseExceptions()

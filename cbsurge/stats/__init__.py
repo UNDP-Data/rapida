@@ -8,21 +8,13 @@ def stats():
     f"""Command line interface for {__package__} package"""
     pass
 @stats.command(no_args_is_help=True)
-@click.option('-i', '--input',
-              required=True,
-              type=str,
-              help='Input vector file'
-              )
+@click.argument('input_file', type=click.Path())
+@click.argument('output_file', type=click.Path())
 @click.option('-r', '--raster',
               required=True,
               multiple=True,
               type = str,
               help='The list of input raster files'
-              )
-@click.option('-d','--dist',
-              required=True,
-              type=str,
-              help='Output vector file'
               )
 @click.option('-o', '--operation',
               required=True,
@@ -53,6 +45,7 @@ def stats():
               )
 @click.option('-s','--srid',
               required=False,
+              default=3857,
               type=int,
               help='SRID for output vector file. Default is 3857',
               )
@@ -62,26 +55,30 @@ def stats():
               help="Set log level to debug"
               )
 def compute(
-        input=None,
+        input_file=None,
+        output_file=None,
         raster=None,
         srid=3857,
-        dist=None,
         operation=None,
         column=None,
         debug=False):
     """
-    This command compute zonal statistics with given raster file from a vector file, and save the result to output file.
+    This command compute zonal statistics with given raster files from a vector file, and save the result to output file.
 
-    output file format supports Shapefile (.shp), GeoJSON (.geojson), FlatGeobuf (.fgb) and GeoPackage (.gpkg)
+    Arguments: \n
+        The below arguments must be specified to execute the command apart from optional parameters.
 
-    Usage:
-        The below command provides how to use the command to compute zonal statistics.
+        - input_file: input file must be vector file such as geojson, flatgeobuf.\n
+        - output_file: output file format supports Shapefile (.shp), GeoJSON (.geojson), FlatGeobuf (.fgb) and GeoPackage (.gpkg)
+
+    Usage: \n
+        The below command provides how to use the command to compute zonal statistics.\n
         python -m cbsurge.cli stats compute --help
 
-    Example:
-        python -m cbsurge.cli stats compute -i ./cbsurge/stats/tests/assets/admin2.geojson -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -d ./cbsurge/stats/tests/assets/admin2_stats.fgb -o sum -c male_5_sum -c female_5_sum
+    Example: \n
+        python -m cbsurge.cli stats compute ./cbsurge/stats/tests/assets/admin2.geojson ./cbsurge/stats/tests/assets/admin2_stats.fgb -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -o sum -c male_5_sum -c female_5_sum
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
-    with ZonalStats(input, target_srid=54009) as st:
+    with ZonalStats(input_file, target_srid=54009) as st:
         st.compute(raster, operations=operation, operation_cols=column)
-        st.write(dist, target_srid=srid)
+        st.write(output_file, target_srid=srid)

@@ -30,3 +30,12 @@ pipenv run python -m cbsurge.cli admin osm --help
 ```shell
 pipenv run python -m cbsurge.cli admin ocha --help
 ```
+
+## Run test
+
+Each `cbsurge`'s modules has its own test suite which can be ran independently
+
+```shell
+# cbsurge.stats
+python -m pytest cbsurge/stats
+```

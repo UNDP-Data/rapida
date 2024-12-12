@@ -2,9 +2,6 @@ import os
 import pytest
 from cbsurge.stats.ZonalStats import ZonalStats
 
-# To test this file, execute the below command
-# PYTHONPATH=$(pwd) pytest cbsurge/stats
-
 TEST_DIR = "./cbsurge/stats/tests"
 
 def get_test_path(relative_path):

@@ -44,12 +44,12 @@ class ZonalStats:
             target_srs = '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs'
         return target_srs
 
-    def compute(self, raster: str, operations: list = None, operation_cols: list = None):
+    def compute(self, rasters: list, operations: list = None, operation_cols: list = None):
         """
         compute zonal statistics with given raster file.
 
         Parameters:
-            raster: path to raster file
+            rasters: list of paths to raster files
             operations:
                 list of operations to compute.
                 See available operations at https://isciences.github.io/exactextract/operations.html
@@ -60,57 +60,69 @@ class ZonalStats:
         Returns:
             geopandas dataframe with zonal statistics
         """
-        logger.info(f"start computing zonal statistics for {raster}")
+        logger.info(f"start computing zonal statistics for {rasters}")
         if operations is None or len(operations) == 0:
             raise RuntimeError(f"at least one operation must be specified")
 
-        if operation_cols is not None and len(operation_cols) != len(operations):
-            raise RuntimeError(f"The number of operation columns must match the number of operations.")
+        if operation_cols is not None and len(operation_cols) > 0:
+            if len(operation_cols) != len(operations) * len(rasters):
+                raise RuntimeError(
+                    f"The number of operation columns must match the number of operations multiplied by the number of rasters.")
 
         target_srs = self.get_src(self.target_srid)
 
-        # raster
-        with GDALRasterSource(raster) as raster_ds:
-            reprojected_rast = raster_ds.reproject(target_srs)
-            logger.debug(f"raster ({raster}) was reprojected to {self.target_srid} as {reprojected_rast}")
+        with OGRDataSource(self.input_file) as cleaned_ds:
+            cleaned_input_file = cleaned_ds.clean()
+            logger.debug(f"Input file was cleaned as {cleaned_input_file}")
+            # vector
+            with OGRDataSource(filepath=cleaned_input_file, is_clear=True) as vector_ds:
+                vector_fields = vector_ds.get_fields()
+                reprojected_vector_path = vector_ds.reproject(
+                    target_srs=target_srs,
+                    data_format='FlatGeobuf')
+                logger.debug(f"vector ({cleaned_input_file}) was reprojected to {self.target_srid} as {reprojected_vector_path}")
 
-            with OGRDataSource(self.input_file) as cleaned_ds:
-                cleaned_input_file = cleaned_ds.clean()
-                logger.debug(f"Input file was cleaned as {cleaned_input_file}")
-                # vector
-                with OGRDataSource(filepath=cleaned_input_file, is_clear=True) as vector_ds:
-                    vector_fields = vector_ds.get_fields()
-                    reprojected_vector_path = vector_ds.reproject(
-                        target_srs=target_srs,
-                        data_format='FlatGeobuf')
-                    logger.debug(f"vector ({cleaned_input_file}) was reprojected to {self.target_srid} as {reprojected_vector_path}")
+                combined_results = None
+                for raster_index, raster in enumerate(rasters):
+                    # raster
+                    with GDALRasterSource(raster) as raster_ds:
+                        reprojected_rast = raster_ds.reproject(target_srs)
+                        logger.debug(f"raster ({raster}) was reprojected to {self.target_srid} as {reprojected_rast}")
+                        # only first raster keep all fields
+                        include_cols = vector_fields if raster_index == 0 else None
 
-                    self.gdf = exact_extract(
-                        reprojected_rast,
-                        reprojected_vector_path,
-                        ops=operations,
-                        include_cols=vector_fields,
-                        include_geom=True,
-                        output="pandas"
-                    )
+                        gdf = exact_extract(
+                            reprojected_rast,
+                            reprojected_vector_path,
+                            ops=operations,
+                            include_cols=include_cols,
+                            include_geom=True,
+                            output="pandas"
+                        )
+                        raster_name_with_ext = os.path.basename(raster)
+                        raster_file_name = os.path.splitext(raster_name_with_ext)[0]
 
-                    raster_name_with_ext = os.path.basename(raster)
-                    raster_file_name = os.path.splitext(raster_name_with_ext)[0]
+                        for index, ope in enumerate(operations):
+                            column_name = ope
+                            if column_name in gdf.columns:
+                                col_index = raster_index * len(operations) + index
+                                new_col_name = f"{raster_file_name}_{column_name}"
+                                if operation_cols is not None and len(operation_cols) > 0:
+                                    new_col_name = operation_cols[col_index]
+                                gdf.rename(columns={column_name: new_col_name}, inplace=True)
 
-                    for index, ope in enumerate(operations):
-                        column_name = ope
-                        if column_name in self.gdf.columns:
-                            new_col_name = f"{raster_file_name}_{column_name}"
-                            if operation_cols is not None:
-                                new_col_name = operation_cols[index]
-                            self.gdf.rename(columns={column_name: new_col_name}, inplace=True)
+                        if combined_results is None:
+                            combined_results = gdf
+                        else:
+                            combined_results = combined_results.merge(gdf, on=['geometry'], how='inner')
 
-                    os.remove(reprojected_rast)
-                    logger.debug(f"deleted {reprojected_rast}")
-                    os.remove(reprojected_vector_path)
-                    logger.debug(f"deleted {reprojected_vector_path}")
-                    logger.info(f"end computing zonal statistics for {raster}")
-                    return self.gdf
+                        os.remove(reprojected_rast)
+                        logger.debug(f"deleted {reprojected_rast}")
+                os.remove(reprojected_vector_path)
+                logger.debug(f"deleted {reprojected_vector_path}")
+                logger.info(f"end computing zonal statistics for {rasters}")
+                self.gdf = combined_results
+                return self.gdf
 
     def write(self, output_file, target_srid: int = 3857):
         """

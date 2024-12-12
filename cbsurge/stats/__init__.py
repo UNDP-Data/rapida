@@ -15,8 +15,9 @@ def stats():
               )
 @click.option('-r', '--raster',
               required=True,
+              multiple=True,
               type = str,
-              help='Input raster file'
+              help='The list of input raster files'
               )
 @click.option('-d','--dist',
               required=True,
@@ -45,7 +46,7 @@ def stats():
               multiple=True,
               help=
               """
-              list of column names for each operation. The number of columns must match the number of operations.
+              list of column names for each operation. The number of columns must match the number of operations multiplied by the number of rasters.
               If this option is not specified, raster file name is used as prefix of column names.
               For example, if aaa.tif is specified, column name will be 'aaa_sum'.
               """
@@ -78,7 +79,7 @@ def compute(
         python -m cbsurge.cli stats compute --help
 
     Example:
-        python -m cbsurge.cli stats compute -i ./osm_admin2.geojson -r ./rwa_f_0_2020_constrained_UNadj.tif -d ./osm_admin2_stats.fgb -o sum -o median -c female_sum -c female_median
+        python -m cbsurge.cli stats compute -i ./cbsurge/stats/tests/assets/admin2.geojson -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -d ./cbsurge/stats/tests/assets/admin2_stats.fgb -o sum -c male_5_sum -c female_5_sum
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     with ZonalStats(input, target_srid=54009) as st:

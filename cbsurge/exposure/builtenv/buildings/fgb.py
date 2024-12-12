@@ -1,105 +1,56 @@
-import os.path
-import tempfile
-import time
-from osgeo_utils import ogrmerge
-from cbsurge import util as u
-from osgeo import ogr, gdal
-import httpx
-from cbsurge.admin.osm import OVERPASS_API_URL
-from cbsurge.util import validate
+from cbsurge.exposure.builtenv.buildings.fgbgdal import get_countries_for_bbox_osm, GMOSM_BUILDINGS_ROOT
+from pyogrio.raw import open_arrow, write_arrow
 import logging
-
-
-
-gdal.UseExceptions()
-ogr.UseExceptions()
+import time
+import tempfile
+import os
+from tqdm import tqdm
+from cbsurge.util import generator_length
 logger = logging.getLogger(__name__)
 
-GMOSM_BUILDINGS_ROOT = 'https://data.source.coop/vida/google-microsoft-osm-open-buildings/flatgeobuf/by_country'
-ogr.UseExceptions()
-def validate_source():
-    try:
-        validate(url=GMOSM_BUILDINGS_ROOT)
-    except Exception as e:
-        logger.error(f'Failed to validate source {GMOSM_BUILDINGS_ROOT}. Error is {e}')
 
+from osgeo import ogr, osr
+srs_prj = osr.SpatialReference()
+srs_prj.ImportFromEPSG(4326)
+def download1(bbox=None, out_path=None, in_batches=True):
+    nbuildings = 0
+    with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
+        dst_lyr = dst_ds.CreateLayer('buildings', geom_type=ogr.wkbPolygon, srs=srs_prj)
+        for country in get_countries_for_bbox_osm(bbox=bbox):
+            remote_country_fgb_url = f'/vsicurl/{GMOSM_BUILDINGS_ROOT}/country_iso={country}/{country}.fgb'
+            # local_country_fgb_url = os.path.join(tmp_dir, f'buildings_{country}.fgb')
+            if in_batches:
+                with open_arrow(remote_country_fgb_url, bbox=bbox, use_pyarrow=True, batch_size=1000) as source:
+                    meta, reader = source
+                    fields = meta.pop('fields')
+                    crs = meta['crs']
+                    for field_name, field_type in  zip(reader.schema.names,reader.schema.types):
+                        if field_type == 'string':
+                            ogrft = ogr.OFTString
+                        if field_type == 'double':
+                            ogrft = ogr.OFTReal
+                        if field_type == 'int64':
+                            ogrft = ogr.OFTInteger64
+                        if 'geometry' in field_name or 'wkb' in field_name:continue
+                        dst_lyr.CreateField(ogr.FieldDefn(field_name, ogrft))
 
-def get_countries_for_bbox_osm(bbox=None, overpass_url=OVERPASS_API_URL):
-    """
-    Retrieves from overpass the geographic bounding box of the admin0 units corresponding to the
-    iso3 country code
-    :param iso3: ISO3 country code
-    :param overpass_url: the overpass URL,
-    :return: a tuple of numbers representing the geographical bbox as west, south, east, north
-    """
-    west, south, east, north = bbox
-    overpass_query = \
-        f"""
-        [out:json][timeout:1800];
-                                // Define the bounding box (replace {{bbox}} with "south,west,north,east").
-                                (
-                                  relation["admin_level"="2"]["boundary"="administrative"]({south}, {west}, {north}, {east});  // Match admin levels 0-10 // Ensure it's an administrative boundary
-                                    
-                                );
-                                
-        /*added by auto repair*/
-        (._;>;);
-        /*end of auto repair*/
-        out body;
+                    # non_empty_batches = (b for b in reader if b.num_rows > 0)
+                    # no_batches, batches = generator_length(non_empty_batches)
+                    bar_format = "{desc}: {n_fmt} buildings... {postfix}"
+                    with tqdm(total=None, desc=f'Downloaded', bar_format=bar_format) as pbar:
+                        for batch in reader:
+                            logger.debug(f'Writing {batch.num_rows} records')
+                            pbar.set_postfix_str(f'from {country}...', refresh=True)
+                            #write_arrow(batch, out_path,layer='buildings',driver='FlatGeobuf',append=True, metadata=meta)
+                            dst_lyr.WritePyArrow(batch)
+                            nbuildings+=batch.num_rows
+                            pbar.update(batch.num_rows)
 
-    
-    """
-    timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-
-    try:
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(overpass_url, data={"data": overpass_query})
-            response.raise_for_status()
-            data = response.json()
-            countries = [e['tags']['ISO3166-1:alpha3'] for e in data['elements'] if e['type'] == 'relation' and 'tags' in e]
-            return tuple(countries)
-
-    except Exception as e:
-        logger.error(f'Failed to fetch available countries from OSM. {e}')
-        raise
-def gdal_callback(complete, message, data):
-
-    timeout_event, progressbar = data
-    progressbar.update(complete*100-progressbar.n)
-    if timeout_event and timeout_event.is_set():
-        logger.info(f'GDAL was signalled to stop...')
-        return 0
-
-def download(bbox=None, out_path =None):
-        """
-        Download building from VIDA source using GDAL
-        :param bbox: iterable of floats, xmin, ymin, xmax,ymax
-        :param out_path: str, full path wheer the buildings layer will be written
-        :return:
-        """
-        u.validate_path(out_path)
-        options = gdal.VectorTranslateOptions(
-            format='FlatGeobuf',
-            spatFilter=bbox,
-            layerName='buildings'
-        )
-
-        with tempfile.TemporaryDirectory(delete=True) as tmp_dir:
-            files_to_merge = []
-            for country in get_countries_for_bbox_osm(bbox=bbox):
-                remote_country_fgb_url = f'/vsicurl/{GMOSM_BUILDINGS_ROOT}/country_iso={country}/{country}.fgb'
-                local_country_fgb_url = os.path.join(tmp_dir,f'buildings_{country}.fgb' )
-                ds = gdal.VectorTranslate(local_country_fgb_url,remote_country_fgb_url,options=options)
-                ds = None
-                files_to_merge.append(local_country_fgb_url)
-                assert os.path.exists(local_country_fgb_url)
-            logger.debug(f'merging {",".join(files_to_merge)} into {out_path}')
-            ogrmerge.ogrmerge(src_datasets=files_to_merge, dst_filename=out_path,single_layer=True, progress_arg=ogr.TermProgress_nocb, overwrite_ds=True)
-        with ogr.Open(out_path) as src:
-            l = src.GetLayer(0)
-            logger.info(f'{l.GetFeatureCount()} buildings were downloaded to {out_path}')
-
-
+                        pbar.set_postfix_str('Finished')
+            else:
+                with open_arrow(remote_country_fgb_url, bbox=bbox, use_pyarrow=False) as source:
+                    meta, reader = source
+                    write_arrow(reader, out_path,layer='buildings',driver='FlatGeobuf',append=True, metadata=meta)
 
 
 if __name__ == '__main__':
@@ -121,12 +72,13 @@ if __name__ == '__main__':
     #print(a)
     url = 'https://undpgeohub.blob.core.windows.net/userdata/9426cffc00b069908b2868935d1f3e90/datasets/bldgsc_20241029084831.fgb/bldgsc.pmtiles?sv=2025-01-05&ss=b&srt=o&se=2025-11-29T15%3A58%3A37Z&sp=r&sig=bQ8pXRRkNqdsJbxcIZ1S596u4ZvFwmQF3TJURt3jSP0%3D'
     #validate_source()
-    out_path = '/tmp/bldgs.fgb'
-    cntry = get_countries_for_bbox_osm(bbox=bbox)
+    out_path = '/tmp/bldgs1.fgb'
+    # cntry = get_countries_for_bbox_osm(bbox=bbox)
+    # print(cntry)
     start = time.time()
     #asyncio.run(download(bbox=bbox))
 
-    download(bbox=bbox, out_path=out_path)
+    download1(bbox=bbox, out_path=out_path)
 
     end = time.time()
     print((end-start))

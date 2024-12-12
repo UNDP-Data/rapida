@@ -19,3 +19,4 @@ pyarrow
 azure-core
 rasterio
 geopandas
+pytest

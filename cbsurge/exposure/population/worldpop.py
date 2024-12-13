@@ -337,28 +337,52 @@ async def process_aggregates(country_code=None, age_group=None, sex=None):
     """
     Process the aggregate files.
     Args:
-        country_code: The country code for which to process the data
-        age_group: The age group to process the data
-        sex: The sex to process the data for
+        country_code: The country code for which to process the data.
+        age_group: The age group to process the data.
+        sex: The sex to process the data for.
     """
+    assert country_code, "Country code must be provided"
     assert sex or age_group, "Either age or sex must be provided"
-    assert age_group in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
+
     async with AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")) as storage_manager:
         logging.info("Processing aggregate files for country: %s", country_code)
-        if age_group:
-            # process the specified age group for both male and female
-            male_blobs = await storage_manager.list_blobs(f"{AZ_ROOT_FILE_PATH}/2020/{country_code}/M/{age_group}")
-            female_blobs = await storage_manager.list_blobs(f"{AZ_ROOT_FILE_PATH}/2020/{country_code}/F/{age_group}")
-            # print(blobs)
-            dataset_lists = []
+
+        async def process_group(sex: str, age_group: str = None):
+            """
+            Process the files for a specific sex (M/F) and optionally an age group.
+            """
+            path = f"{AZ_ROOT_FILE_PATH}/2020/{country_code}/{sex}/"
+            if age_group:
+                assert age_group in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
+                path += f"{age_group}"
+
+            blobs = await storage_manager.list_blobs(path)
+            if not blobs:
+                logging.warning("No blobs found for path: %s", path)
+                return
+
+            dataset_files = []
             with tempfile.TemporaryDirectory(delete=False) as temp_dir:
-                for blob in male_blobs:
+                for blob in blobs:
                     await storage_manager.download_blob(blob_name=blob, local_directory=temp_dir)
-                    dataset_lists.append(f"{temp_dir}/{blob.split('/')[-1]}")
+                    dataset_files.append(f"{temp_dir}/{blob.split('/')[-1]}")
+
+                output_file = f"{temp_dir}/{country_code}_{age_group or 'ALL'}_{sex}.tif"
                 with ThreadPoolExecutor() as executor:
-                    executor.submit(create_sum, dataset_lists, f"{temp_dir}/{country_code}_{age_group}_M.tif")
-                shutil.move(f"{temp_dir}/{country_code}_{age_group}_M.tif", f"data/{country_code}_{age_group}_M.tif")
-    pass
+                    executor.submit(create_sum, dataset_files, output_file)
+                # TODO: Upload the output file to Azure Blob Storage `aggregate` folder
+                shutil.move(output_file, f"data/{country_code}_{age_group or 'ALL'}_{sex}.tif")
+
+        if sex and age_group:
+            await process_group(sex, age_group)
+        elif age_group:
+            await process_group('M', age_group)
+            await process_group('F', age_group)
+        elif sex:
+            await process_group(sex)
+
 
 if __name__ == "__main__":
-    asyncio.run(download_data(force_reprocessing=False))
+    # asyncio.run(download_data(force_reprocessing=False))
+
+    create_sum(["/media/thuha/Data/worldpop_data/m/0-12/BDI_m_0_2020_constrained.tif", "/media/thuha/Data/worldpop_data/f/0-12/BDI_f_0_2020_constrained.tif"], "data/BDI_0-12.tif")

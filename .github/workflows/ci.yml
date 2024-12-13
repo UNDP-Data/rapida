@@ -22,7 +22,7 @@ jobs:
         id: image_tag
         run: |
           # Define cache dir
-          CACHE_PATH="/tmp/docker_cache_cbsurge"
+          CACHE_PATH="/tmp/docker_cache_${{ runner.arch }}"
           # Get Dockerfile hash for image cache
           IMAGE_HASH="${{ hashFiles('./Dockerfile') }}"
           # Create image tag
@@ -59,7 +59,6 @@ jobs:
         run: |
           # Change owner of workspace to ubuntu user
           sudo chown -R 1000:1000 ${{ github.workspace }}
-          mkdir -p ${{ steps.image_tag.outputs.TAR_PATH }}
           docker run --rm -v ${{ github.workspace }}:/app -w /app  ${{ steps.image_tag.outputs.TAG }} make test
 
   deploy-acr:

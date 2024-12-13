@@ -16,6 +16,7 @@ from cbsurge.util import http_get_json
 
 logger = logging.getLogger(__name__)
 
+
 OCHA_COD_ARCGIS_SERVER_ROOT= 'https://codgis.itos.uga.edu/arcgis/rest/services'
 ARCGIS_SERVER_ROOT = 'https://services.arcgis.com/P3ePLMYs2RVChkJx/ArcGIS/rest/services'
 ARCGIS_COD_SERVICE = 'COD_External'
@@ -64,7 +65,7 @@ def fetch_ocha_countries(bounding_box = None, ):
             try:
                 service_country, service_flavour, *other = service_name.split('_')
             except ValueError:
-                logger.error(f'could not parse "{service_name}" service from {url}. Skipping.')
+                logger.debug(f'could not parse "{service_name}" service from {url}. Skipping.')
                 continue
             service_type = service['type']
             if service_flavour == 'pcode':
@@ -170,6 +171,7 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
 
 
     ocha_countries = fetch_ocha_countries()
+
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
     bbox_polygon = box(west, south, east, north)
     geojson = None

@@ -213,6 +213,10 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
 
 
     """
+    if type(admin_level) is str:
+        admin_level = int(admin_level)
+    if type(osm_level) is str:
+        osm_level = int(osm_level)
 
     west, south, east, north = bbox
     assert admin_level in ADMIN_LEVELS, f'Invalid admin level. Valid values are {list(ADMIN_LEVELS.keys())}'
@@ -272,7 +276,8 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                         pbar.set_postfix_str(f'finished', refresh=True)
                         return geojson
                 else:
-                    #logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    logger.info(f'Try changing OSM level or omitting it so eventually an OSM level is found!')
                     if osm_level is None:
                         logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
                     continue

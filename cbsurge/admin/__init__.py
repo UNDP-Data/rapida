@@ -8,15 +8,36 @@
 # asyncio.run(http_get_json(OCHA_COD_ARCGIS_SERVER_ROOT, timeout=10))
 # asyncio.run(http_get_json(OVERPASS_API_URL, timeout=10))
 #
-from random import choices
 
+import logging
 from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
 from cbsurge.util import BboxParamType
 import click
+import json
 
+def silence_httpx_az():
+    azlogger = logging.getLogger('azure.core.pipeline.policies.http_logging_policy')
+    azlogger.setLevel(logging.WARNING)
+    httpx_logger = logging.getLogger('httpx')
+    httpx_logger.setLevel(logging.WARNING)
 
+class BboxParamType(click.ParamType):
+    name = "bbox"
 
+    def convert(self, value, param, ctx):
+        try:
+            bbox = [float(x.strip()) for x in value.split(",")]
+            fail = False
+        except ValueError:  # ValueError raised when passing non-numbers to float()
+            fail = True
+
+        if fail or len(bbox) != 4:
+            self.fail(
+                f"bbox must be 4 floating point numbers separated by commas. Got '{value}'"
+            )
+
+        return bbox
 
 @click.group()
 def admin():
@@ -25,10 +46,11 @@ def admin():
 
 
 @admin.command(no_args_is_help=True)
-@click.option('-b', '--bbox', required=True, type=BboxParamType(), help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north')
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
                 required=True,
-                type=click.Choice(choices=['0','1','2'], case_sensitive=False),
+                type=click.IntRange(min=0, max=2, clamp=False),
                 help='UNDP admin level from where to extract the admin features'
                 )
 @click.option('-o', '--osm_level',
@@ -49,8 +71,15 @@ def admin():
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
+@click.option('--debug',
 
-def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7):
+    is_flag=True,
+    default=False,
+    help="Set log level to debug"
+)
+
+
+def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, debug=False):
     """
     Fetch admin boundaries from OSM
 
@@ -69,14 +98,24 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     the Overpass query. Additionally, all hierarchically superior admin levels and names are returned and attributes of
     the admin units.
 
+    To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
+
+    python -m  cbsurge.cli admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
     """
-    fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
+    silence_httpx_az()
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
+    if geojson:
+        click.echo(json.dumps(geojson))
+
+
 
 @admin.command(no_args_is_help=True)
-@click.option('-b', '--bbox', required=True, type=BboxParamType(), help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north')
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
                 required=True,
-                type=click.Choice(choices=['0','1','2'], case_sensitive=False),
+                type=click.IntRange(min=0, max=2, clamp=False),
                 help='UNDP admin level from where to extract the admin features'
                 )
 
@@ -93,8 +132,14 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
+@click.option('--debug',
 
-def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7):
+    is_flag=True,
+    default=False,
+    help="Set log level to debug"
+)
+
+def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False):
     """
     Fetch admin boundaries from OCHA COD
 
@@ -109,6 +154,12 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7):
     this function also uses a per country approach to fetch features and merge them into one layer in case the supplied
     bounding box covers several countries.
 
-    """
-    fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
+    To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
 
+    python -m  cbsurge.cli admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
+    """
+    silence_httpx_az()
+    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
+    if geojson:
+        click.echo(json.dumps(geojson))

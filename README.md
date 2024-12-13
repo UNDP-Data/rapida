@@ -36,6 +36,26 @@ pipenv run python -m cbsurge.cli admin ocha --help
 Each `cbsurge`'s modules has its own test suite which can be ran independently
 
 ```shell
-# cbsurge.stats
-python -m pytest cbsurge/stats
+make test
+```
+
+## Using docker
+
+- build docker-image
+
+```shell
+make build
+```
+
+- run CLI
+
+```shell
+ ./cbsurge.sh --help
+```
+
+- enter to Docker container
+
+```shell
+make shell
+./cbsurge.sh --help
 ```

@@ -1,0 +1,11 @@
+version: '3'
+services:
+  cbsurge:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    # default command to show help menu
+    command: "pipenv run python -m cbsurge.cli --help"
+    volumes:
+      - ./Makefile:/app/Makefile
+      - ./cbsurge:/app/cbsurge # mount app folder to container

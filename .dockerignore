@@ -1,0 +1,9 @@
+./.devcontainer/
+./.github/
+./.venv
+./venv
+.gitignore
+docker-compose.yaml
+Dockerfile
+Pipfile
+Pipfile.lock

@@ -8,9 +8,6 @@ on:
       - "v*"
   pull_request:
 
-env:
-  IMAGE_NAME: ${{ github.repository}}
-
 jobs:
   build:
     name: Build & test docker image
@@ -27,16 +24,16 @@ jobs:
           IMAGE_HASH="${{ hashFiles('./Dockerfile') }}"
           # Create image tag
           VARIANT="$(TZ=UTC-9 date +%Y%m%d)_${IMAGE_HASH:0:7}"
-          DOCKER_IMAGE_NAME="geo_cb_surge_${{ env.ARCH }}"
-          TAG="${DOCKER_IMAGE_NAME}:${VARIANT}"
+          IMAGE_NAME="geo_cb_surge_${{ runner.arch }}"
+          TAG="${IMAGE_NAME}:${VARIANT}"
           # Cache dir setting
-          TAR_NAME="${DOCKER_IMAGE_NAME}_${VARIANT}.tar"
+          TAR_NAME="${IMAGE_NAME}_${VARIANT}.tar"
           TAR_PATH="${CACHE_PATH}/${TAR_NAME}"
           echo "TAG=${TAG}" >> $GITHUB_OUTPUT
-          echo "DOCKER_IMAGE_NAME=${DOCKER_IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_OUTPUT
           echo "TAR_PATH=${TAR_PATH}" >> $GITHUB_OUTPUT
           echo "CACHE_PATH=${CACHE_PATH}" >> $GITHUB_OUTPUT
-          echo "CACHE_KEY=${DOCKER_IMAGE_NAME}_${VARIANT}" >> $GITHUB_OUTPUT
+          echo "CACHE_KEY=${IMAGE_NAME}_${VARIANT}" >> $GITHUB_OUTPUT
       - name: Enable cache
         id: cache
         uses: actions/cache@v4
@@ -66,6 +63,8 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: azure container registry
+    env:
+      IMAGE_NAME: ${{ github.repository}}
     permissions:
       contents: read
       packages: write
@@ -99,6 +98,7 @@ jobs:
       name: github container registry
     env:
       REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository}}
     permissions:
       contents: write
       packages: write

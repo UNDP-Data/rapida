@@ -13,7 +13,7 @@ cli.add_command(admin)
 cli.add_command(builtenv)
 
 from cbsurge.exposure.population import population
-from cbsurge.stats import stats
+#from cbsurge.stats import stats
 
 
 @click.group
@@ -23,7 +23,7 @@ def cli():
     pass
 cli.add_command(admin)
 cli.add_command(population)
-cli.add_command(stats)
+#cli.add_command(stats)
 
 
 

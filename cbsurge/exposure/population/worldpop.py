@@ -5,14 +5,16 @@ import shutil
 import tempfile
 from asyncio import subprocess
 from html.parser import HTMLParser
+from concurrent.futures import ThreadPoolExecutor
 
 import aiofiles
 import httpx
-
+import rasterio
+import numpy as np
 from tqdm.asyncio import tqdm_asyncio
 
 from cbsurge.azure.blob_storage import AzureBlobStorageManager
-from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH
+from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -186,8 +188,14 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
 
     try:
         async with httpx.AsyncClient() as client:
+            age = file_name.split("_")[2]
+            sex = file_name.split("_")[1]
+            for age_group, age_range in WORLDPOP_AGE_MAPPING.items():
+                if age_range[0] <= int(age) <= age_range[1]:
+                    age = age_group
+                    break
             cog_exists = await check_cog_exists(storage_manager=storage_manager,
-                                                blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
+                                            blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
             if cog_exists and not force_reprocessing:
                 logging.info("COG already exists in Azure, skipping upload: %s", file_name)
                 return
@@ -209,20 +217,21 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                             logging.info("Converting file to COG: %s", cog_path)
                             await convert_to_cog(input_file=temp_file_path, output_file=cog_path)
                             await validate_cog(file_path=cog_path)
+
                             if download_path:
                                 try:
                                     if not os.path.exists(download_path):
                                         logging.info("Download path does not exist. Creating download path: %s", download_path)
                                         os.makedirs(download_path, exist_ok=True)
                                     logging.info("Copying COG file locally: %s", cog_path)
-                                    os.makedirs(f"{download_path}/{year}/{country_code}", exist_ok=True)
-                                    shutil.move(cog_path, f"{download_path}/{year}/{country_code}/{file_name}")
-                                    logging.info("Successfully copied COG file: %s", f"{download_path}/{year}/{country_code}/{file_name}")
+                                    os.makedirs(f"{download_path}/{year}/{country_code}/{sex.upper()}/{age}", exist_ok=True)
+                                    shutil.move(cog_path, f"{download_path}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
+                                    logging.info("Successfully copied COG file: %s", f"{download_path}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
                                 except Exception as e:
                                     raise Exception(f"Error copying COG file: {e}")
                             else:
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
-                                await storage_manager.upload_blob(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{file_name}")
+                                await storage_manager.upload_blob(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
 
 
         logging.info("Successfully processed file: %s", file_name)
@@ -288,6 +297,68 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     # Close the storage manager connection after all files have been processed
     logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
+
+
+
+def create_sum(input_file_paths, output_file_path):
+    """
+    Sum multiple raster files and save the result to an output file, processing in blocks.
+
+    Args:
+        input_file_paths (list of str): Paths to input raster files.
+        output_file_path (str): Path to save the summed raster file.
+
+    Returns:
+        None
+    """
+    datasets = [rasterio.open(file_path) for file_path in input_file_paths]
+
+    # Use the first dataset as reference for metadata
+    ref_meta = datasets[0].meta.copy()
+    ref_meta.update(dtype="float32", count=1, nodata=0)
+
+    # Create the output dataset
+    with rasterio.open(output_file_path, "w", **ref_meta) as dst:
+        for ji, window in dst.block_windows(1):
+            output_data = np.zeros((window.height, window.width), dtype=np.float32)
+            for src in datasets:
+                input_data = src.read(1, window=window)
+                input_data = np.where(input_data == src.nodata, 0, input_data)
+                output_data += input_data
+
+            # Write the summed block to the output file
+            dst.write(output_data, window=window, indexes=1)
+
+    for src in datasets:
+        src.close()
+
+
+async def process_aggregates(country_code=None, age_group=None, sex=None):
+    """
+    Process the aggregate files.
+    Args:
+        country_code: The country code for which to process the data
+        age_group: The age group to process the data
+        sex: The sex to process the data for
+    """
+    assert sex or age_group, "Either age or sex must be provided"
+    assert age_group in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
+    async with AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")) as storage_manager:
+        logging.info("Processing aggregate files for country: %s", country_code)
+        if age_group:
+            # process the specified age group for both male and female
+            male_blobs = await storage_manager.list_blobs(f"{AZ_ROOT_FILE_PATH}/2020/{country_code}/M/{age_group}")
+            female_blobs = await storage_manager.list_blobs(f"{AZ_ROOT_FILE_PATH}/2020/{country_code}/F/{age_group}")
+            # print(blobs)
+            dataset_lists = []
+            with tempfile.TemporaryDirectory(delete=False) as temp_dir:
+                for blob in male_blobs:
+                    await storage_manager.download_blob(blob_name=blob, local_directory=temp_dir)
+                    dataset_lists.append(f"{temp_dir}/{blob.split('/')[-1]}")
+                with ThreadPoolExecutor() as executor:
+                    executor.submit(create_sum, dataset_lists, f"{temp_dir}/{country_code}_{age_group}_M.tif")
+                shutil.move(f"{temp_dir}/{country_code}_{age_group}_M.tif", f"data/{country_code}_{age_group}_M.tif")
+    pass
 
 if __name__ == "__main__":
     asyncio.run(download_data(force_reprocessing=False))

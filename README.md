@@ -39,3 +39,23 @@ Each `cbsurge`'s modules has its own test suite which can be ran independently
 # cbsurge.stats
 python -m pytest cbsurge/stats
 ```
+
+## Using docker
+
+- build docker-image
+
+```shell
+docker compose build
+```
+
+- run CLI
+
+```shell
+docker compose run cbsurge python -m cbsurge.cli --help
+```
+
+- enter to Docker container
+
+```shell
+docker-compose run cbsurge /bin/bash
+```

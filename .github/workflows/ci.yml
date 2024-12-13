@@ -59,7 +59,7 @@ jobs:
         run: |
           # Change owner of workspace to ubuntu user
           sudo chown -R 1000:1000 ${{ github.workspace }}
-          mkdir -p ${{ steps.image_tag.outputs.CACHE_PATH }}
+          mkdir -p ${{ steps.image_tag.outputs.TAR_PATH }}
           docker run --rm -v ${{ github.workspace }}:/app -w /app  ${{ steps.image_tag.outputs.TAG }} make test
 
   deploy-acr:

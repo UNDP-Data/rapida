@@ -51,7 +51,7 @@ jobs:
         if: steps.cache.outputs.cache-hit != 'true'
         run: |
           docker build -t ${{ steps.image_tag.outputs.TAG }} .
-          mkdir -p ${CACHE_PATH}
+          mkdir -p ${{ steps.image_tag.outputs.TAR_PATH }}
           docker save ${{ steps.image_tag.outputs.TAG }} > ${{ steps.image_tag.outputs.TAR_PATH }}
 
       - name: Run tests in container

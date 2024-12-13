@@ -2,7 +2,7 @@
 
 help:
 	@echo "Please use \`make <target>' where <target> is one of"
-    @echo "  shell            to shell in dev mode"
+	@echo "  shell            to shell in dev mode"
 	@echo "  test             to execute test cases"
 	@echo "  build            to build docker image"
 	@echo "  down             to destroy docker containers"

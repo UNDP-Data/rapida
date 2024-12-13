@@ -16,4 +16,4 @@ COPY . .
 
 RUN chmod +x cbsurge.sh
 
-CMD [ "pipenv", "run", "python", "-m", "cbsurge.cli", "--help"]
+CMD [ "./cbsurge.sh", "--help"]

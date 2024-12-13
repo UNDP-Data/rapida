@@ -39,6 +39,8 @@ Each `cbsurge`'s modules has its own test suite which can be ran independently
 make test
 ```
 
+before running the above command, please use `devcontainer` or `make shell` to enter to docker container first.
+
 ## Using docker
 
 - build docker-image
@@ -47,15 +49,15 @@ make test
 make build
 ```
 
-- run CLI
+- destroy docker container
 
 ```shell
- ./cbsurge.sh --help
+make down
 ```
 
 - enter to Docker container
 
 ```shell
 make shell
-./cbsurge.sh --help
+./cbsurge.sh --help # run CLI in shell on docker container
 ```

@@ -12,6 +12,7 @@
 import logging
 from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
+from cbsurge.util import BboxParamType
 import click
 import json
 
@@ -37,6 +38,7 @@ class BboxParamType(click.ParamType):
             )
 
         return bbox
+
 @click.group()
 def admin():
     f"""Command line interface for {__package__} package"""

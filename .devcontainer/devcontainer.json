@@ -14,7 +14,7 @@
 		"ghcr.io/devcontainers/features/git:1": {}
 	},
 	//"onCreateCommand": "apt-get update && apt-get install -y python3-pip pipenv",
-	"postCreateCommand": "pipenv --python 3 && pipenv run pip install -r requirements.txt",
+	"postCreateCommand": "pipenv --python 3 && pipenv run pip install -e .",
 
 	//"postCreateCommand": "id",
 	"customizations": {

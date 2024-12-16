@@ -9,11 +9,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pipenv --python 3 && pipenv install -r requirements.txt
-
 COPY . .
+RUN pipenv --python 3 && pipenv run pip install -e .
 
-RUN chmod +x cbsurge.sh
-
-CMD [ "./cbsurge.sh", "--help"]
+CMD [ "pipenv", "run", "rapida", "--help"]

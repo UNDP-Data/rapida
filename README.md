@@ -3,16 +3,22 @@ A repo to hold python tools that facilitate the assessment of natural hazards ov
 
 ## Usage
 
-Install dependencies to virtual environment as below.
+Install the project with dependencies to virtual environment as below.
 
 ```shell
-pipenv install -r requirements.txt
+pipenv run pip install -e .
 ```
 
 Then, run the below command to show help menu.
 
 ```shell
-pipenv run python -m cbsurge.cli --help
+pipenv run rapida --help
+```
+
+To uninstall the project from Python environment, execute the following command.
+
+```shell
+pipenv run pip uninstall geo-cb-surge
 ```
 
 ## Admin
@@ -22,13 +28,13 @@ pipenv run python -m cbsurge.cli --help
 - OSM
 
 ```shell
-pipenv run python -m cbsurge.cli admin osm --help
+pipenv run rapida admin osm --help
 ```
 
 - ocha
 
 ```shell
-pipenv run python -m cbsurge.cli admin ocha --help
+pipenv run rapida admin ocha --help
 ```
 
 ## Run test
@@ -59,5 +65,5 @@ make down
 
 ```shell
 make shell
-./cbsurge.sh --help # run CLI in shell on docker container
+pipenv run rapida --help # run CLI in shell on docker container
 ```

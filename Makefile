@@ -21,7 +21,7 @@ test:
 	@echo "------------------------------------------------------------------"
 	@echo "Execute test cases"
 	@echo "------------------------------------------------------------------"
-	pipenv run python -m pytest cbsurge/stats
+	pipenv run python -m pytest tests
 
 build:
 	@echo

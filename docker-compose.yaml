@@ -9,3 +9,4 @@ services:
     volumes:
       - ./Makefile:/app/Makefile
       - ./cbsurge:/app/cbsurge # mount app folder to container
+      - ./tests:/app/tests

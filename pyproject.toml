@@ -1,0 +1,69 @@
+[project]
+name = "geo-cb-surge"
+version = "0.0.1"
+description = "python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc"
+requires-python = ">=3.12"
+authors = [
+    { name = 'Ioan Ferencik'},
+    { name = 'Joseph Thuha'},
+    { name = 'Jin Igarashi'},
+    { name = "United Nations Development Programme", email = "data@undp.org" }
+]
+readme = "README.md"
+dependencies = [
+    "httpx",
+    "osm2geojson",
+    "shapely",
+    "h3",
+    "tqdm",
+    "GDAL==3.10.0",
+    "azure-storage-blob",
+    "overturemaps",
+    "async",
+    "aiofiles",
+    "aiohttp",
+    "azure-storage-blob",
+    "asyncclick",
+    "rio-cogeo",
+    "exactextract",
+    "pycountry",
+    "click",
+    "pyarrow",
+    "azure-core",
+    "rasterio",
+    "geopandas",
+    "pytest"
+]
+
+[project.scripts]
+rapida = "cbsurge.cli:cli"
+
+[tool.setuptools]
+py-modules = ["cbsurge"]
+
+[project.urls]
+Homepage = "https://github.com/UNDP-Data/geo-cb-surge"
+Documentation = "https://github.com/UNDP-Data/geo-cb-surge"
+Repository = "https://github.com:UNDP-Data/geo-cb-surge.git"
+Issues = "https://github.com/UNDP-Data/geo-cb-surge/issues"
+#Changelog = "https://github.com/UNDP-Data/geo-cb-surge/blob/master/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+    packages = ["cbsurge"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    ".devcontainer",
+    ".github",
+    ".dockerignore",
+    "docker-compose.yml",
+    "Dockerfile",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    "tests",
+    "Makefile"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

@@ -38,9 +38,6 @@ dependencies = [
 [project.scripts]
 rapida = "cbsurge.cli:cli"
 
-[tool.setuptools]
-py-modules = ["cbsurge"]
-
 [project.urls]
 Homepage = "https://github.com/UNDP-Data/geo-cb-surge"
 Documentation = "https://github.com/UNDP-Data/geo-cb-surge"

@@ -1,5 +1,7 @@
+from email.policy import default
+
 import click
-from cbsurge.exposure.builtenv.buildings.fgb import download_pyogrio
+from cbsurge.exposure.builtenv.buildings.fgb import download_pyogrio, download as download_admin
 from cbsurge.exposure.builtenv.buildings.pmt import download as download_pmt, GMOSM_BUILDINGS
 from cbsurge.util import BboxParamType
 import asyncio
@@ -22,10 +24,10 @@ def download():
 @click.option('-o', '--out-path', required=True, type=click.Path(),
               help='Full path to the buildings dataset' )
 
-@click.option('-bs', '--batch-size', type=int,
+@click.option('-bs', '--batch-size', type=int, default=65535,
               help='The max number of buildings to be dowloaded in one chunk or batch. '
-                   'If not supplied ')
-def fgb(bbox=None, out_path=None, batch_size:[int,None]=1000):
+                   )
+def fgbbbox(bbox=None, out_path=None, batch_size:[int,None]=1000):
     """
         Download/stream buildings from VIDA buildings using pyogrio/pyarrow API
 
@@ -36,6 +38,29 @@ def fgb(bbox=None, out_path=None, batch_size:[int,None]=1000):
 
     """
     download_pyogrio(bbox=bbox, out_path=out_path, batch_size=batch_size)
+
+
+
+@download.command(no_args_is_help=True)
+@click.option('-a', '--admin-path', required=True, type=click.Path(),
+              help='Full path to the admin dataset' )
+@click.option('-o', '--out-path', required=True, type=click.Path(),
+              help='Full path to the buildings dataset' )
+@click.option('--country-col-name', required=True, type=str,
+              help='The name of the column from the admin layer attributes that contains the ISO3 country code' )
+@click.option('--admin-col-name', required=True, type=str,
+              help='The name of the column from the admin layer attributes that contains the admin unit name' )
+@click.option('-bs', '--batch-size', type=int, default=65535,
+              help='The max number of buildings to be dowloaded in one chunk or batch. ')
+
+def fgbadmin(admin_path=None, out_path=None, country_col_name=None, admin_col_name=None, batch_size=None):
+
+    """Fetch buildings from VIDA FGB based on the boundaries of the admin units"""
+
+
+    download_admin(admin_path=admin_path,out_path=out_path,
+                   country_col_name=country_col_name, admin_col_name=admin_col_name, batch_size=batch_size)
+
 
 
 @download.command(no_args_is_help=True)

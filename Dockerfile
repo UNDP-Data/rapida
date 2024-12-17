@@ -7,6 +7,9 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
+# install azure-cli
+RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
 WORKDIR /app
 
 COPY . .

@@ -16,7 +16,8 @@ import numpy as np
 from tqdm.asyncio import tqdm_asyncio
 
 from cbsurge.azure.blob_storage import AzureBlobStorageManager
-from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR
+from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR, \
+    AGESEX_STRUCTURE_COMBINATIONS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -318,7 +319,6 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     logging.info("Input files: %s", input_file_paths)
     logging.info("Output file: %s", output_file_path)
     logging.info("Block size: %s", block_size)
-
     # Open all input files
     try:
         datasets = [rasterio.open(file_path) for file_path in input_file_paths]
@@ -359,7 +359,7 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
                             logging.error("Error reading block from raster %d: %s", idx + 1, e)
 
                     dst.write(output_data, window=window, indexes=1)
-
+                    break
             logging.info("Finished processing all blocks")
     except Exception as e:
         logging.error("Error creating or writing to output file: %s", e)
@@ -372,89 +372,81 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     logging.info("create_sum function completed successfully")
 
 
-async def process_aggregates(country_code: str, age_group: Optional[str] = None, sex: Optional[str] = None):
+async def process_aggregates(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None):
     """
-    Process the aggregate files based on sex and age group.
-
+    Process aggregate files for combinations of sex and age groups, or specific arguments passed.
     Args:
-        country_code (str): The country code to process the data for.
-        age_group (Optional[str]): The age group to process (child, active, elderly).
-        sex (Optional[str]): The sex to process (M, F).
+        country_code (str): Country code for processing.
+        sex (Optional[str]): Sex to process (M or F).
+        age_group (Optional[str]): Age group to process (child, active, elderly).
     """
     assert country_code, "Country code must be provided"
-    assert sex or age_group, "Either age or sex must be provided"
 
     async with AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")) as storage_manager:
         logging.info("Processing aggregate files for country: %s", country_code)
 
-        async def process_group(sexes: List[str], age_group: Optional[str] = None, output_blob_path: Optional[str] = None):
-            """
-            Processes a group of files for a specific sex and/or age group.
 
+        async def process_group(sexes: List[str]=None, age_grouping: Optional[str]=None, output_label: str=None):
+            """
+            Processes and sums files for specified sexes and age groups.
             Args:
-                sexes (List[str]): List of sexes to process (e.g., ['M', 'F']).
-                age_group (Optional[str]): The age group to process (child, active, elderly).
-                output_blob_path (Optional[str]): Path to store the final output file.
+                sexes (List[str]): List of sexes (e.g., ['M'], ['F'], or ['M', 'F']).
+                age_grouping (Optional[str]): Age group to process.
+                output_label (str): Label for the output file.
             """
-            # Construct paths for input blobs
-            paths = [f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/{sex_group}/" for sex_group in sexes]
-            if age_group:
-                assert age_group in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
-                paths = [f"{path}{age_group}/" for path in paths]
+            # Construct paths
+            paths = [f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/{s}" for s in sexes]
+            if age_grouping:
+                assert age_grouping in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
+                paths = [f"{path}/{age_grouping}/" for path in paths]
 
-            # Fetch blobs for all paths
+            # Fetch blobs
             blobs = []
             for path in paths:
                 blobs += await storage_manager.list_blobs(path)
-
             if not blobs:
                 logging.warning("No blobs found for paths: %s", paths)
                 return
 
-            # Download and process blobs
-            dataset_files = []
+            # Download blobs and sum them
             with tempfile.TemporaryDirectory(delete=False) as temp_dir:
+                local_files = []
                 for blob in blobs:
                     local_file = os.path.join(temp_dir, os.path.basename(blob))
-                    await storage_manager.download_blob(blob_name=blob, local_directory=temp_dir)
-                    dataset_files.append(local_file)
+                    await storage_manager.download_blob(blob, temp_dir)
+                    local_files.append(local_file)
 
-                # Prepare output directory
-                os.makedirs(f"data/{output_blob_path}", exist_ok=True)
-                output_file = f"{temp_dir}/{country_code}_{age_group or 'ALL'}_{'_'.join(sexes)}.tif"
-
-                # Perform summation using create_sum
+                output_file = f"{temp_dir}/{output_label}.tif"
                 with ThreadPoolExecutor() as executor:
-                    executor.submit(create_sum, input_file_paths=dataset_files, output_file_path=output_file, block_size=(512, 512))
+                    executor.submit(create_sum, input_file_paths=local_files, output_file_path=output_file, block_size=(512, 512))
 
-                # Save final output
-                final_output_path = f"data/{output_blob_path}/{os.path.basename(output_file)}"
-                await storage_manager.upload_blob(file_path=output_file, blob_name=f"{output_blob_path}/{os.path.basename(output_file)}")
-                # shutil.copy2(output_file, final_output_path)
-                # logging.info("Output saved to: %s", final_output_path)
-                logging.info("Output saved to: %s", f"{output_blob_path}/{os.path.basename(output_file)}")
-        # Processing logic for combinations of sex and age group
+                # Upload the result
+                blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{output_label}.tif"
+                await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
+                # shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
+                logging.info("Processed and uploaded: %s", blob_path)
+
+        # Dynamic argument-based processing
         if sex and age_group:
+            label = f"{sex}_{age_group}"
             logging.info("Processing for sex '%s' and age group '%s'", sex, age_group)
-            output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{sex}/{age_group}"
-            await process_group([sex], age_group, output_blob_path)
-        elif age_group:
-            logging.info("Processing for age group '%s' (both sexes)", age_group)
-            output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{age_group}"
-            await process_group(['M', 'F'], age_group, output_blob_path)
+            await process_group(sexes=[sex], age_grouping=age_group, output_label=label)
         elif sex:
+            label = f"{sex}_total"
             logging.info("Processing for sex '%s' (all age groups)", sex)
-            output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{sex}"
-            await process_group([sex], None, output_blob_path)
-        # else:
-        #     # Process all
-        #     logging.info("Processing all data")
-        #     output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate"
-        #     await process_group(['M', 'F'], None, output_blob_path)
-        #     await process_group(['M', 'F'], 'child', output_blob_path)
-        #     await process_group(['M', 'F'], 'active', output_blob_path)
-        #     await process_group(['M', 'F'], 'elderly', output_blob_path)
-    logging.info("Processing complete")
+            await process_group(sexes=[sex], output_label=label)
+        elif age_group:
+            label = f"{age_group}_total"
+            logging.info("Processing for age group '%s' (both sexes)", age_group)
+            await process_group(sexes=['M', 'F'], age_grouping=age_group, output_label=label)
+        else:
+            # Process predefined combinations
+            logging.info("Processing all predefined combinations...")
+            for combo in AGESEX_STRUCTURE_COMBINATIONS:
+                logging.info("Processing %s...", combo["label"])
+                await process_group(sexes=combo["sexes"], age_grouping=combo["age_group"], output_label=combo["label"])
+
+    logging.info("All processing complete for country: %s", country_code)
 
 
 if __name__ == "__main__":

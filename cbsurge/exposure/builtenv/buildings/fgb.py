@@ -1,8 +1,11 @@
+
 import os.path
 import tempfile
+import threading
 
 from cbsurge.exposure.builtenv.buildings.fgbgdal import get_countries_for_bbox_osm, GMOSM_BUILDINGS_ROOT
-from pyogrio.raw import open_arrow, write_arrow
+from pyogrio.raw import open_arrow, write_arrow, read
+
 from cbsurge.exposure.builtenv.buildings.pmt import WEB_MERCATOR_TMS
 import morecantile as m
 from cbsurge import util
@@ -13,9 +16,11 @@ from pyogrio.core import read_info
 from osgeo import ogr, osr, gdal
 from shapely.geometry import box
 from shapely import bounds
+import shapely
 from pyproj import Geod
 import math
 import concurrent
+from tqdm.contrib.logging import logging_redirect_tqdm
 ogr.UseExceptions()
 gdal.UseExceptions()
 geod = Geod(ellps='WGS84')
@@ -50,11 +55,40 @@ def add_fields_to_layer(layer=None, template_layer_info=None):
         layer.CreateField(ogr.FieldDefn(field_dict['name'], types[field_dict['type']]))
 
 
-def read_bbox(src_path=None, bbox=None):
+def read_bbox1(src_path=None, bbox=None):
     with open_arrow(src_path, bbox=bbox, use_pyarrow=True) as source:
         meta, reader = source
         table = reader.read_all()
         return meta, table
+def read_bbox(src_path=None,  mask=None, batch_size=None, signal_event=None, au_name=None, ntries=3):
+
+    for attempt in range(ntries):
+        try:
+
+            with open_arrow(src_path,  mask=mask, use_pyarrow=True, batch_size=batch_size) as source:
+                meta, reader = source
+                batches = []
+                nb = 0
+                for b in reader :
+                    if signal_event.is_set():
+                        logger.debug(f'{threading.current_thread().name} was signalled to stop')
+                        return
+                    if b.num_rows > 0:
+                        batches.append(b)
+                        nb+=b.num_rows
+                        logger.info(f"Downloaded {nb:d} buildings in admin unit {au_name}[!n]")
+
+                return meta, batches
+        except Exception as e:
+            logger.error(e)
+            if attempt == ntries-1:
+                raise e
+            time.sleep(1)
+            logger.info(f'Attempting to download {au_name} again')
+
+
+
+
 
 def download_bbox(src_path=None, tile=None, dst_dir=None):
     tile_bb = WEB_MERCATOR_TMS.bounds(tile)
@@ -95,33 +129,91 @@ def download_bbox(src_path=None, tile=None, dst_dir=None):
     return out_path
 
 
+def download(admin_path=None, out_path=None, country_col_name=None, admin_col_name=None, batch_size=5000 ):
+
+    with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
+        with ogr.Open(admin_path) as adm_ds:
+            adm_lyr = adm_ds.GetLayer(0)
+            all_features = [e for e in adm_lyr]
+            signal_event = threading.Event()
+            failed_tasks = []
+            bar_format = "{percentage:3.0f}%|{bar}| downloaded {n_fmt} admin units out of {total_fmt} [elapsed: {elapsed} remaining: {remaining}]"
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                with tqdm(total=len(all_features), desc=f'Downloaded', bar_format=bar_format, leave=False) as pbar:
+                    for features in util.chunker(all_features, size=4):
+                        futures = {}
+
+                        try:
+                            for feature in features:
+                                au_geom = feature.GetGeometryRef()
+                                au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
+                                props = feature.items()
+                                country_iso3 = props[country_col_name]
+                                au_name = props[admin_col_name]
+
+                                remote_country_fgb_url = f'{GMOSM_BUILDINGS_ROOT}/country_iso={country_iso3}/{country_iso3}.fgb'
+                                kw_args = dict(
+                                    src_path=remote_country_fgb_url,
+                                    mask=au_poly,
+                                    batch_size=batch_size,
+                                    signal_event=signal_event,
+                                    au_name=au_name,
+
+
+                                )
+                                futures[executor.submit(read_bbox, **kw_args)] = au_name
+
+                            done, not_done = concurrent.futures.wait(futures, timeout=180 * len(futures), )
+
+                            for fut in done:
+                                au_name = futures[fut]
+                                exception = fut.exception()
+                                if exception is not None:
+                                    logger.error(f'Failed to process tile {au_name} because {exception} ')
+                                    failed_tasks.append((au_name, exception))
+                                meta, batches = fut.result()
+                                for batch in batches:
+                                    if dst_ds.GetLayerCount() == 0:
+                                        src_epsg = int(meta['crs'].split(':')[-1])
+                                        src_srs = osr.SpatialReference()
+                                        src_srs.ImportFromEPSG(src_epsg)
+                                        dst_lyr = dst_ds.CreateLayer('buildings', geom_type=ogr.wkbPolygon, srs=src_srs)
+                                        for name in batch.schema.names:
+                                            if 'wkb' in name or 'geometry' in name: continue
+                                            field = batch.schema.field(name)
+                                            field_type = ARROWTYPE2OGRTYPE[field.type]
+                                            dst_lyr.CreateField(ogr.FieldDefn(name, field_type))
+                                    #logger.info(f'Going to write {batch.num_rows} features from  {au_name} admin unit')
+                                    dst_lyr.WritePyArrow(batch)
+
+                                pbar.update()
+                                assert dst_lyr.SyncToDisk() == 0
+                        except (concurrent.futures.CancelledError, KeyboardInterrupt) as pe:
+                            logger.info(f'Cancelling download. Please wait/allow for a gracefull shutdown')
+                            signal_event.set()
+
+                            for fut, au_name in futures.items():
+                                # while True:
+                                #     print(f'{au_name} running: {fut.running()} done: {fut.done()} cancelled: {fut.cancelled()} cancel: {fut.cancel()}')
+                                if fut.done():
+                                    logger.info(f'{au_name} is done')
+                                    continue
+                                c = fut.cancel() or not fut.done()
+                                while not c:
+                                    c = fut.cancel() or fut.done()
+                                logger.info(f'Building extraction in admin unit {au_name} was cancelled')
+                            if pe.__class__ == KeyboardInterrupt:
+                                raise pe
+                            else:
+                                break
+
 
 
 def dpyogrio(bbox=None, out_path=None):
 
     #bb = m.BoundingBox(*bbox)
     bb_poly = box(*bbox)
-    #
-    #
-    # zoom_levels = list(range(1, 16))
-    # selected_zoom_level, n_selected_tiles, tiles  = None, None, None
-    # for zoom_level in zoom_levels:
-    #     all_tiles = WEB_MERCATOR_TMS.tiles(west=bb.left, south=bb.bottom, east=bb.right, north=bb.top,
-    #                                        zooms=[zoom_level], )
-    #     ntiles, all_tiles = util.generator_length(all_tiles)
-    #     tiles = list(all_tiles)
-    #     t = tiles[0]
-    #     tbounds = WEB_MERCATOR_TMS.bounds(t)
-    #     tbpoly = box(tbounds.left,tbounds.bottom, tbounds.right, tbounds.top)
-    #     tarea = abs(geod.geometry_area_perimeter(tbpoly)[0])*1e-6
-    #     if tarea < 0: continue
-    #     print(zoom_level, tarea)
-    #     if ntiles> 1e2:
-    #         selected_zoom_level = zoom_level-1
-    #         n_selected_tiles = ntiles
-    #         tiles = all_tiles
-    #         break
-    # logger.info(f'{bb} {selected_zoom_level} ntiles={n_selected_tiles}')
+
 
     countries = get_countries_for_bbox_osm(bbox=bbox)
     assert len(
@@ -308,10 +400,7 @@ def download_gdal(bbox=None, out_path=None, batch_size:[int, None]=1000):
 
 if __name__ == '__main__':
     import asyncio
-    httpx_logger = logging.getLogger('httpx')
-    httpx_logger.setLevel(100)
-    logging.basicConfig()
-    logger.setLevel(logging.INFO)
+    logger = util.setup_logger(name='rapida')
 
     nf = 5829
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA
@@ -323,16 +412,17 @@ if __name__ == '__main__':
     bbox = 90.62991666666666,20.739873437511918,92.35198706632379,24.836349986316765
 
     #a =  asyncio.run(get_admin_level_bbox(iso3='ZWE'))
-    #print(a)
-    url = 'https://undpgeohub.blob.core.windows.net/userdata/9426cffc00b069908b2868935d1f3e90/datasets/bldgsc_20241029084831.fgb/bldgsc.pmtiles?sv=2025-01-05&ss=b&srt=o&se=2025-11-29T15%3A58%3A37Z&sp=r&sig=bQ8pXRRkNqdsJbxcIZ1S596u4ZvFwmQF3TJURt3jSP0%3D'
-    #validate_source()
-    out_path = '/tmp/bldgs1.fgb'
-    # cntry = get_countries_for_bbox_osm(bbox=bbox)
-    # print(cntry)
-    start = time.time()
-    #asyncio.run(download(bbox=bbox))
 
-    #download_gdal(bbox=bbox, out_path=out_path, batch_size=3000)
-    dpyogrio(bbox=bbox, out_path=out_path, )
+    out_path = '/tmp/bldgs1.fgb'
+    admin_path = '/data/surge/surge/stats/adm3_flooded.fgb'
+    start = time.time()
+
+    #asyncio.run(download(bbox=bbox))
+    try:
+        download(admin_path=admin_path, out_path=out_path,
+                 country_col_name='shapeGroup', admin_col_name='shapeName', batch_size=3000)
+    except KeyboardInterrupt:
+        pass
+    #dpyogrio(bbox=bbox, out_path=out_path, )
     end = time.time()
     print((end-start))

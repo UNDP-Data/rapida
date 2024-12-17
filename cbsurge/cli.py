@@ -1,8 +1,10 @@
-from cbsurge.util import silence_httpx_az
-
+from cbsurge.exposure.builtenv.buildings.fgb import logger
+from cbsurge.util import setup_logger
 from cbsurge.admin import admin
 from cbsurge.exposure.builtenv import builtenv
 import click
+
+
 
 @click.group
 def cli(ctx):
@@ -31,5 +33,7 @@ cli.add_command(builtenv)
 
 
 if __name__ == '__main__':
-    silence_httpx_az()
+
+    logger = setup_logger('rapida')
+
     cli()

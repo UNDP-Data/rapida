@@ -138,11 +138,11 @@ if __name__ == '__main__':
         account_url="https://undpgeohub.blob.core.windows.net"
     )
 
-    logger.DEBUG(blob_service_client)
+    logger.debug(blob_service_client)
     container_client = blob_service_client.get_container_client('stacdata')
-    logger.DEBUG(container_client)
+    logger.debug(container_client)
     blob_client = container_client.get_blob_client("catalog.json")
-    logger.DEBUG(blob_client.url)
+    logger.debug(blob_client.url)
     # I encounter authentication error when accessing blob
     # azure.core.exceptions.HttpResponseError: This request is not authorized to perform this operation using this permission.
     # probably need to assign appropriate role for storage account.

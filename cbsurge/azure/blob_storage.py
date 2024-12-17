@@ -138,6 +138,22 @@ class AzureBlobStorageManager:
         return [blob.name async for blob in self.container_client.list_blobs(name_starts_with=prefix)]
 
 
+    async def copy_file(self, source_blob=None, destination_blob=None):
+        """
+        Copy a file from one blob to another.
+        Args:
+            source_blob: (str) The name of the source blob to copy.
+            destination_blob: (str) The name of the destination blob to copy to.
+
+        Returns:
+
+        """
+        logging.info("Copying blob: %s to %s", source_blob, destination_blob)
+        source_blob_client = self.container_client.get_blob_client(blob=source_blob)
+        destination_blob_client = self.container_client.get_blob_client(blob=destination_blob)
+        await destination_blob_client.start_copy_from_url(source_blob_client.url)
+        return destination_blob_client.url
+
     async def close(self):
         """
         Close the Azure Blob Storage Manager.

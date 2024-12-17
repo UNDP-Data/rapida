@@ -138,3 +138,19 @@ class AzureFileShareManager:
         progress_bar.close()
         return file_name
 
+    async def copy_file(self, source_file, destination_file):
+        """
+        Copy a file from one location to another in the Azure File Share.
+        Args:
+            source_file: The file to copy.
+            destination_file: The destination file.
+
+        Returns:
+
+        """
+        source_file_client = self.share_client.get_file_client(source_file)
+        destination_file_client = self.share_client.get_file_client(destination_file)
+
+        await destination_file_client.start_copy_from_url(source_file_client.url)
+        return destination_file
+

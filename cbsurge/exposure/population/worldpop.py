@@ -6,15 +6,17 @@ import tempfile
 from asyncio import subprocess
 from html.parser import HTMLParser
 from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional
 
 import aiofiles
 import httpx
 import rasterio
+from rasterio.windows import Window
 import numpy as np
 from tqdm.asyncio import tqdm_asyncio
 
 from cbsurge.azure.blob_storage import AzureBlobStorageManager
-from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING
+from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -66,7 +68,7 @@ def chunker_function(iterable, chunk_size=4):
         yield iterable[i:i + chunk_size]
 
 
-async def get_available_data(country_code=None, year="2020"):
+async def get_available_data(country_code=None, year=DATA_YEAR):
     """
     Args:
         country_code: The country code for which to fetch data
@@ -256,7 +258,7 @@ async def get_links_from_table(data_id=None):
         return await extract_links_from_table(response.text)
 
 
-async def download_data(country_code=None, year="2020", force_reprocessing=False, download_path=None):
+async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=False, download_path=None):
     """
     Download all available data for a given country and year.
     Args:
@@ -299,47 +301,85 @@ async def download_data(country_code=None, year="2020", force_reprocessing=False
     await storage_manager.close()
 
 
-
-def create_sum(input_file_paths, output_file_path):
+def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     """
     Sum multiple raster files and save the result to an output file, processing in blocks.
+    If the data is not blocked, create blocks within the function.
 
     Args:
         input_file_paths (list of str): Paths to input raster files.
         output_file_path (str): Path to save the summed raster file.
+        block_size (tuple): Tuple representing the block size (rows, cols). Default is (256, 256).
 
     Returns:
         None
     """
-    datasets = [rasterio.open(file_path) for file_path in input_file_paths]
+    logging.info("Starting create_sum function")
+    logging.info("Input files: %s", input_file_paths)
+    logging.info("Output file: %s", output_file_path)
+    logging.info("Block size: %s", block_size)
+
+    # Open all input files
+    try:
+        datasets = [rasterio.open(file_path) for file_path in input_file_paths]
+    except Exception as e:
+        logging.error("Error opening input files: %s", e)
+        return
+
+    logging.info("Successfully opened input raster files")
 
     # Use the first dataset as reference for metadata
     ref_meta = datasets[0].meta.copy()
     ref_meta.update(dtype="float32", count=1, nodata=0)
 
-    # Create the output dataset
-    with rasterio.open(output_file_path, "w", **ref_meta) as dst:
-        for ji, window in dst.block_windows(1):
-            output_data = np.zeros((window.height, window.width), dtype=np.float32)
-            for src in datasets:
-                input_data = src.read(1, window=window)
-                input_data = np.where(input_data == src.nodata, 0, input_data)
-                output_data += input_data
+    rows, cols = datasets[0].shape
+    logging.info("Raster dimensions: %d rows x %d cols", rows, cols)
 
-            # Write the summed block to the output file
-            dst.write(output_data, window=window, indexes=1)
+    # Create the output file
+    try:
+        with rasterio.open(output_file_path, "w", **ref_meta) as dst:
+            logging.info("Output file created successfully")
 
-    for src in datasets:
-        src.close()
+            # Process raster in blocks
+            for i in range(0, rows, block_size[0]):
+                for j in range(0, cols, block_size[1]):
+                    window = Window(j, i, min(block_size[1], cols - j), min(block_size[0], rows - i))
+                    logging.info("Processing block: row %d to %d, col %d to %d", i, i + block_size[0], j,
+                                 j + block_size[1])
+
+                    output_data = np.zeros((window.height, window.width), dtype=np.float32)
+
+                    for idx, src in enumerate(datasets):
+                        try:
+                            input_data = src.read(1, window=window)
+                            input_data = np.where(input_data == src.nodata, 0, input_data)
+                            output_data += input_data
+                            logging.debug("Added data from raster %d", idx + 1)
+                        except Exception as e:
+                            logging.error("Error reading block from raster %d: %s", idx + 1, e)
+
+                    dst.write(output_data, window=window, indexes=1)
+
+            logging.info("Finished processing all blocks")
+    except Exception as e:
+        logging.error("Error creating or writing to output file: %s", e)
+    finally:
+        # Close all input datasets
+        for src in datasets:
+            src.close()
+        logging.info("Closed all input raster files")
+
+    logging.info("create_sum function completed successfully")
 
 
-async def process_aggregates(country_code=None, age_group=None, sex=None):
+async def process_aggregates(country_code: str, age_group: Optional[str] = None, sex: Optional[str] = None):
     """
-    Process the aggregate files.
+    Process the aggregate files based on sex and age group.
+
     Args:
-        country_code: The country code for which to process the data.
-        age_group: The age group to process the data.
-        sex: The sex to process the data for.
+        country_code (str): The country code to process the data for.
+        age_group (Optional[str]): The age group to process (child, active, elderly).
+        sex (Optional[str]): The sex to process (M, F).
     """
     assert country_code, "Country code must be provided"
     assert sex or age_group, "Either age or sex must be provided"
@@ -347,39 +387,74 @@ async def process_aggregates(country_code=None, age_group=None, sex=None):
     async with AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")) as storage_manager:
         logging.info("Processing aggregate files for country: %s", country_code)
 
-        async def process_group(sex: str, age_group: str = None):
+        async def process_group(sexes: List[str], age_group: Optional[str] = None, output_blob_path: Optional[str] = None):
             """
-            Process the files for a specific sex (M/F) and optionally an age group.
+            Processes a group of files for a specific sex and/or age group.
+
+            Args:
+                sexes (List[str]): List of sexes to process (e.g., ['M', 'F']).
+                age_group (Optional[str]): The age group to process (child, active, elderly).
+                output_blob_path (Optional[str]): Path to store the final output file.
             """
-            path = f"{AZ_ROOT_FILE_PATH}/2020/{country_code}/{sex}/"
+            # Construct paths for input blobs
+            paths = [f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/{sex_group}/" for sex_group in sexes]
             if age_group:
                 assert age_group in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
-                path += f"{age_group}"
+                paths = [f"{path}{age_group}/" for path in paths]
 
-            blobs = await storage_manager.list_blobs(path)
+            # Fetch blobs for all paths
+            blobs = []
+            for path in paths:
+                blobs += await storage_manager.list_blobs(path)
+
             if not blobs:
-                logging.warning("No blobs found for path: %s", path)
+                logging.warning("No blobs found for paths: %s", paths)
                 return
 
+            # Download and process blobs
             dataset_files = []
             with tempfile.TemporaryDirectory(delete=False) as temp_dir:
                 for blob in blobs:
+                    local_file = os.path.join(temp_dir, os.path.basename(blob))
                     await storage_manager.download_blob(blob_name=blob, local_directory=temp_dir)
-                    dataset_files.append(f"{temp_dir}/{blob.split('/')[-1]}")
+                    dataset_files.append(local_file)
 
-                output_file = f"{temp_dir}/{country_code}_{age_group or 'ALL'}_{sex}.tif"
+                # Prepare output directory
+                os.makedirs(f"data/{output_blob_path}", exist_ok=True)
+                output_file = f"{temp_dir}/{country_code}_{age_group or 'ALL'}_{'_'.join(sexes)}.tif"
+
+                # Perform summation using create_sum
                 with ThreadPoolExecutor() as executor:
-                    executor.submit(create_sum, dataset_files, output_file)
-                # TODO: Upload the output file to Azure Blob Storage `aggregate` folder
-                shutil.move(output_file, f"data/{country_code}_{age_group or 'ALL'}_{sex}.tif")
+                    executor.submit(create_sum, input_file_paths=dataset_files, output_file_path=output_file, block_size=(512, 512))
 
+                # Save final output
+                final_output_path = f"data/{output_blob_path}/{os.path.basename(output_file)}"
+                await storage_manager.upload_blob(file_path=output_file, blob_name=f"{output_blob_path}/{os.path.basename(output_file)}")
+                # shutil.copy2(output_file, final_output_path)
+                # logging.info("Output saved to: %s", final_output_path)
+                logging.info("Output saved to: %s", f"{output_blob_path}/{os.path.basename(output_file)}")
+        # Processing logic for combinations of sex and age group
         if sex and age_group:
-            await process_group(sex, age_group)
+            logging.info("Processing for sex '%s' and age group '%s'", sex, age_group)
+            output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{sex}/{age_group}"
+            await process_group([sex], age_group, output_blob_path)
         elif age_group:
-            await process_group('M', age_group)
-            await process_group('F', age_group)
+            logging.info("Processing for age group '%s' (both sexes)", age_group)
+            output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{age_group}"
+            await process_group(['M', 'F'], age_group, output_blob_path)
         elif sex:
-            await process_group(sex)
+            logging.info("Processing for sex '%s' (all age groups)", sex)
+            output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{sex}"
+            await process_group([sex], None, output_blob_path)
+        # else:
+        #     # Process all
+        #     logging.info("Processing all data")
+        #     output_blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate"
+        #     await process_group(['M', 'F'], None, output_blob_path)
+        #     await process_group(['M', 'F'], 'child', output_blob_path)
+        #     await process_group(['M', 'F'], 'active', output_blob_path)
+        #     await process_group(['M', 'F'], 'elderly', output_blob_path)
+    logging.info("Processing complete")
 
 
 if __name__ == "__main__":

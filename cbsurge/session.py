@@ -10,6 +10,12 @@ logger = logging.getLogger(__name__)
 
 class Session(object):
     def __init__(self, scopes = "https://storage.azure.com/.default"):
+        """
+        constructor
+
+        Parameters:
+            scopes: scopes for get_token method. Default to "https://storage.azure.com/.default"
+        """
         self.scopes = scopes
 
     def __enter__(self):
@@ -21,7 +27,7 @@ class Session(object):
 
     def get_credential(self):
         """
-        get credential for azure
+        get token credential for azure.
 
         Usage example:
 
@@ -44,7 +50,7 @@ class Session(object):
 
     def get_token(self):
         """
-        get access token for blob storage account
+        get access token for blob storage account. This token is required for using Azure REST API.
 
         Returns:
             Azure token is returned if authenticated.
@@ -84,24 +90,24 @@ class Session(object):
             logger.error(err)
             return None
 
-    def get_blob_service_client(self, account_url: str) -> BlobServiceClient:
+    def get_blob_service_client(self, account_name: str) -> BlobServiceClient:
         """
         get BlobServiceClient for account url
 
         Usage example:
-            session = Session()
-            blob_service_client = session.get_blob_service_client(
-                account_url="https://undpgeohub.blob.core.windows.net"
-            )
+            with Session() as session:
+                blob_service_client = session.get_blob_service_client(
+                    account_name="undpgeohub"
+                )
 
         Parameters:
-            account_url (str): url of storage account. https://{account_name}.blob.core.windows.net
+            account_name (str): name of storage account. https://{account_name}.blob.core.windows.net
         Returns:
             BlobServiceClient
         """
         credential = self.get_credential()
         blob_service_client = BlobServiceClient(
-            account_url=account_url,
+            account_url=f"https://{account_name}.blob.core.windows.net",
             credential=credential
         )
         return blob_service_client
@@ -129,23 +135,3 @@ def init(debug=False):
             return
         click.echo('Setting up was successfully done!')
 
-
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.DEBUG, force=True)
-
-    session = Session()
-    blob_service_client = session.get_blob_service_client(
-        account_url="https://undpgeohub.blob.core.windows.net"
-    )
-
-    logger.debug(blob_service_client)
-    container_client = blob_service_client.get_container_client('stacdata')
-    logger.debug(container_client)
-    blob_client = container_client.get_blob_client("catalog.json")
-    logger.debug(blob_client.url)
-    # I encounter authentication error when accessing blob
-    # azure.core.exceptions.HttpResponseError: This request is not authorized to perform this operation using this permission.
-    # probably need to assign appropriate role for storage account.
-    with open('./catalog.json', "wb") as file:
-        download_stream = blob_client.download_blob()
-        file.write(download_stream.readall())

@@ -1,7 +1,7 @@
 # geo-cb-surge
 A repo to hold python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc  
 
-## Usage
+## Installation
 
 Install the project with dependencies to virtual environment as below.
 
@@ -9,16 +9,39 @@ Install the project with dependencies to virtual environment as below.
 pipenv run pip install -e .
 ```
 
+To uninstall the project from Python environment, execute the following command.
+
+```shell
+pipenv run pip uninstall geo-cb-surge
+```
+
+## Usage
+
 Then, run the below command to show help menu.
 
 ```shell
 pipenv run rapida --help
 ```
 
-To uninstall the project from Python environment, execute the following command.
+## Setup
+
+To access blob storage in Azure, each user must have a role of `Storage Blob Data Contributor`.
+
+- inside Docker container
+
+Since it has an issue of opening browser by azure.identity package inside docker container, use `az login` to authenticate prior to use API.
 
 ```shell
-pipenv run pip uninstall geo-cb-surge
+az login # authenticate with az login
+pipenv run rapida init
+```
+
+- without Docker
+
+`init` command will open browser to authenticate to Azure
+
+```shell
+pipenv run rapida init
 ```
 
 ## Admin

@@ -1,7 +1,6 @@
-import click as click
+from cbsurge.util import silence_httpx_az
 
 from cbsurge.admin import admin
-
 from cbsurge.exposure.builtenv import builtenv
 import click
 
@@ -13,19 +12,24 @@ cli.add_command(admin)
 cli.add_command(builtenv)
 
 from cbsurge.exposure.population import population
+from cbsurge.exposure.builtenv import builtenv
 #from cbsurge.stats import stats
 
 
 @click.group
+
 
 def cli():
     """Main CLI for the application."""
     pass
 cli.add_command(admin)
 cli.add_command(population)
+cli.add_command(builtenv)
+
 #cli.add_command(stats)
 
 
 
 if __name__ == '__main__':
+    silence_httpx_az()
     cli()

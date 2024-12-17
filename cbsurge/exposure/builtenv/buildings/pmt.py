@@ -319,13 +319,13 @@ def remove_duplicate_buildings(src_path=None):
 
 async def download(bbox=None, zoom_level=None, x=None, y=None, out_path=None, url=GMOSM_BUILDINGS):
     """
-    Fetch buildings from url remotye source in PMTiles format
+    Fetch buildings from url remote source in PMTiles format
 
-    :param bbox:
-    :param zoom_level:
-    :param x:
-    :param y:
-    :param out_path:
+    :param bbox: iterable of floats, xmin, ymin, xmax,ymax
+    :param out_path: str, full path where the buildings layer will be written
+    :param zoom_level: int the zoom level, defaults to max zoom level -1
+    :param x:int,  the tile x coordinate at a specific zoom level
+    :param y: int, the tile y coodinate at a specific zoom level
     :param url:
     :return:
     """
@@ -444,9 +444,6 @@ async def download(bbox=None, zoom_level=None, x=None, y=None, out_path=None, ur
                                     logger.debug(f'Going to write {arr.num_rows} features from tile {tile_name}')
                                     dst_lyr.WritePyArrow(arr)
                                     pbar.update()
-
-
-
                         except (concurrent.futures.CancelledError, KeyboardInterrupt) as pe:
                             logger.debug('Cancelling jobs')
                             for fut, tile_name in futures.items():

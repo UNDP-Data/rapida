@@ -275,13 +275,9 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
     available_data = await get_available_data(country_code=country_code, year=year)
     storage_manager = AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     for country_code, country_id in available_data.items():
-        # if country_code == "RUS":
-        #     continue
         logging.info("Processing country: %s", country_code)
         file_links = await get_links_from_table(data_id=country_id)
         for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
-            # if i > 0:
-            #     break
             logging.info("Processing chunk %d for country: %s", i + 1, country_code)
             # Create a fresh list of tasks for each file chunk
             tasks = [process_single_file(file_url=url,
@@ -296,7 +292,10 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
             for result in results:
                 if isinstance(result, Exception):
                     logging.error("Error processing file: %s", result)
-
+        logging.info("Data download complete for country: %s", country_code)
+        logging.info("Starting aggregate processing for country: %s", country_code)
+        await process_aggregates(country_code=country_code)
+        logging.info("Aggregate processing complete for country: %s", country_code)
     # Close the storage manager connection after all files have been processed
     logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
@@ -450,6 +449,4 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
 
 
 if __name__ == "__main__":
-    # asyncio.run(download_data(force_reprocessing=False))
-
-    create_sum(["/media/thuha/Data/worldpop_data/m/0-12/BDI_m_0_2020_constrained.tif", "/media/thuha/Data/worldpop_data/f/0-12/BDI_f_0_2020_constrained.tif"], "data/BDI_0-12.tif")
+    pass

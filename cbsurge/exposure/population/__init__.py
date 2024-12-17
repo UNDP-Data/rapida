@@ -17,7 +17,6 @@ def population():
 @click.option('--download-path', help='Download data locally', required=False)
 def sync(force_reprocessing, country, download_path):
     asyncio.run(download_data(force_reprocessing=force_reprocessing, country_code=country, download_path=download_path))
-    asyncio.run(process_aggregates(country_code=country))
 
 
 @population.command()

@@ -275,6 +275,8 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
     available_data = await get_available_data(country_code=country_code, year=year)
     storage_manager = AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     for country_code, country_id in available_data.items():
+        if country_code == "RUS":
+            continue
         logging.info("Processing country: %s", country_code)
         file_links = await get_links_from_table(data_id=country_id)
         for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
@@ -408,7 +410,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                 return
 
             # Download blobs and sum them
-            with tempfile.TemporaryDirectory(delete=False) as temp_dir:
+            with tempfile.TemporaryDirectory() as temp_dir:
                 local_files = []
                 for blob in blobs:
                     local_file = os.path.join(temp_dir, os.path.basename(blob))
@@ -424,7 +426,6 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                 await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
                 # shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
                 logging.info("Processed and uploaded: %s", blob_path)
-
         # Dynamic argument-based processing
         if sex and age_group:
             label = f"{sex}_{age_group}"

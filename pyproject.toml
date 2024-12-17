@@ -32,6 +32,7 @@ dependencies = [
     "azure-core",
     "rasterio",
     "geopandas",
+    "azure-identity",
     "pytest"
 ]
 

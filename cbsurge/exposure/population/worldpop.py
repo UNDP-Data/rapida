@@ -296,12 +296,37 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
                     logging.error("Error processing file: %s", result)
         logging.info("Data download complete for country: %s", country_code)
         logging.info("Starting aggregate processing for country: %s", country_code)
-        await process_aggregates(country_code=country_code)
+        if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code):
+            logging.info("Aggregate files already exist for country: %s", country_code)
+        else:
+            await process_aggregates(country_code=country_code)
         logging.info("Aggregate processing complete for country: %s", country_code)
     # Close the storage manager connection after all files have been processed
     logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
 
+
+async def check_aggregates_exist(storage_manager=None, country_code=None):
+    """
+    Check if aggregate files exist for a given country code.
+    Args:
+        storage_manager: AzStorageManager instance
+        country_code: The country code to check for
+
+    Returns: True if all aggregate files exist, False otherwise
+
+    """
+    assert storage_manager is not None, "storage_manager is required"
+    assert country_code is not None, "country_code is required"
+    logging.info("Checking if aggregate files exist for country: %s", country_code)
+    for combo in AGESEX_STRUCTURE_COMBINATIONS:
+        blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{combo['label']}.tif"
+        cog_exists = await check_cog_exists(storage_manager=storage_manager, blob_path=blob_path)
+        if not cog_exists:
+            logging.info("Aggregate file does not exist: %s", blob_path)
+            return False
+    logging.info("All aggregate files exist for country: %s", country_code)
+    return True
 
 def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     """

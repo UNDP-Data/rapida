@@ -296,11 +296,11 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
                     logging.error("Error processing file: %s", result)
         logging.info("Data download complete for country: %s", country_code)
         logging.info("Starting aggregate processing for country: %s", country_code)
-        if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code):
-            logging.info("Aggregate files already exist for country: %s", country_code)
-        else:
-            await process_aggregates(country_code=country_code)
-        logging.info("Aggregate processing complete for country: %s", country_code)
+        # if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code) and not force_reprocessing:
+        #     logging.info("Aggregate files already exist for country: %s", country_code)
+        # else:
+        await process_aggregates(country_code=country_code)
+        # logging.info("Aggregate processing complete for country: %s", country_code)
     # Close the storage manager connection after all files have been processed
     logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
@@ -357,6 +357,8 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     # Use the first dataset as reference for metadata
     ref_meta = datasets[0].meta.copy()
     ref_meta.update(dtype="float32", count=1, nodata=0)
+    ref_meta.update(compress="ZSTD")
+    ref_meta.update(driver="COG")
 
     rows, cols = datasets[0].shape
     logging.info("Raster dimensions: %d rows x %d cols", rows, cols)

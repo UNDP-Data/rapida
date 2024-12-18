@@ -1,5 +1,5 @@
 import click as click
-from cbsurge.session import init
+from cbsurge.initialize import init
 from cbsurge.admin import admin
 from cbsurge.exposure.builtenv import builtenv
 from cbsurge.exposure.population import population

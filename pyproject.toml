@@ -22,7 +22,7 @@ dependencies = [
     "async",
     "aiofiles",
     "aiohttp",
-    "azure-storage-blob",
+    "azure-storage-file-share",
     "asyncclick",
     "rio-cogeo",
     "exactextract",

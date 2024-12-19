@@ -104,9 +104,9 @@ The below command is connecting to `localhost` with user `docker` through port `
 ```shell
 ssh docker@localhost -p 2222
 
-# make sure installing the package first
-cd /app
-pipenv run pip install -e .
+# it will automatically enter venv in /app folder
+# then run rapida command
+rapida --help
 ```
 
 ### destroy docker container

@@ -20,8 +20,7 @@ else
     # Grant sudo access (optional)
     usermod -aG sudo "$USERNAME"
     echo "User $USERNAME granted sudo privileges."
-fi
 
-# Set ownership of /app folder to the user
-chown -R "$USERNAME:$USERNAME" /app
-echo "Ownership of /app granted to $USERNAME."
+    echo "cd /app; pipenv shell;" >> /home/$USERNAME/.bashrc
+    echo "User $USERNAME profile was modified to launch venv in starting."
+fi

@@ -7,3 +7,5 @@ docker-compose.yaml
 Dockerfile
 Pipfile
 Pipfile.lock
+.env.example
+.env

@@ -72,19 +72,50 @@ before running the above command, please use `devcontainer` or `make shell` to e
 
 ## Using docker
 
-- build docker-image
+### build docker-image
 
 ```shell
 make build
 ```
 
-- destroy docker container
+### Launch SSH server
+
+- set users
+
+```
+cp .env.example .env
+vi .env
+```
+
+SSH_USERS can have multiple users (username:password) for SSH login
+
+```shell
+SSH_USERS=docker:docker user:user
+```
+
+- launch docker container
+
+```shell
+make up
+```
+
+The below command is connecting to `localhost` with user `docker` through port `2222`.
+
+```shell
+ssh docker@localhost -p 2222
+
+# make sure installing the package first
+cd /app
+pipenv run pip install -e .
+```
+
+### destroy docker container
 
 ```shell
 make down
 ```
 
-- enter to Docker container
+### enter to Docker container
 
 ```shell
 make shell

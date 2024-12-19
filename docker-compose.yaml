@@ -4,9 +4,14 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    # default command to show help menu
-    command: "pipenv run python -m cbsurge.cli --help"
     volumes:
+      - ./create_user.sh:/app/create_user.sh
+      - ./entrypoint.sh:/app/entrypoint.sh
       - ./Makefile:/app/Makefile
       - ./cbsurge:/app/cbsurge # mount app folder to container
       - ./tests:/app/tests
+    entrypoint: "/app/entrypoint.sh"
+    ports:
+      - 2222:22
+    environment:
+      - SSH_USERS=${SSH_USERS:-''}

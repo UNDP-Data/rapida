@@ -55,11 +55,16 @@ jobs:
           mkdir -p "$CACHE_DIR"
           docker save ${{ steps.image_tag.outputs.TAG }} > ${{ steps.image_tag.outputs.TAR_PATH }}
 
+      - name: Install dependencies in container
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash my-app:latest -c "
+            export LANG=C.UTF-8 && pipenv install -e .
+          "
       - name: Run tests in container
         run: |
           # Change owner of workspace to ubuntu user
           sudo chown -R 1000:1000 ${{ github.workspace }}
-          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "cd /app && make test"
+          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "make test"
 
   deploy-acr:
     name: Build and deploy to Azure Container Registry

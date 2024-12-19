@@ -13,7 +13,7 @@ shell:
 	@echo "------------------------------------------------------------------"
 	@echo "Shelling in dev mode"
 	@echo "------------------------------------------------------------------"
-	docker compose -f docker-compose.yaml run cbsurge /bin/bash
+	docker compose -f docker-compose.yaml run --entrypoint /bin/bash cbsurge
 
 
 test:
@@ -29,6 +29,13 @@ build:
 	@echo "Building Docker image"
 	@echo "------------------------------------------------------------------"
 	docker compose -f docker-compose.yaml build
+
+up:
+	@echo
+	@echo "------------------------------------------------------------------"
+	@echo "Launch docker containers"
+	@echo "------------------------------------------------------------------"
+	docker compose -f docker-compose.yaml up
 
 down:
 	@echo

@@ -31,7 +31,10 @@ RUN chmod +x /app/create_user.sh
 RUN chmod +x /app/entrypoint.sh
 
 # install package
-RUN pipenv --python 3 && pipenv run pip install -e .
+ENV PIPENV_VENV_IN_PROJECT=1
+RUN pipenv install --dev --python 3 && \
+    pipenv run pip install -e .
+ENV VIRTUAL_ENV=/app/.venv
 
 EXPOSE 22
 

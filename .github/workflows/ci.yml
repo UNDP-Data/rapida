@@ -55,6 +55,11 @@ jobs:
           mkdir -p "$CACHE_DIR"
           docker save ${{ steps.image_tag.outputs.TAG }} > ${{ steps.image_tag.outputs.TAR_PATH }}
 
+      - name: Install dependencies in container
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "
+            export LANG=C.UTF-8 && pipenv install -e .
+          "
       - name: Run tests in container
         run: |
           # Change owner of workspace to ubuntu user

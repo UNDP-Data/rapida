@@ -451,8 +451,8 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
 
                 # Upload the result
                 blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{output_label}.tif"
-                # await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
-                shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
+                await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
+                # shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
                 logging.info("Processed and uploaded: %s", blob_path)
         # Dynamic argument-based processing
         if sex and age_group:

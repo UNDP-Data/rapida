@@ -356,13 +356,10 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
 
     # Use the first dataset as reference for metadata
     ref_meta = datasets[0].meta.copy()
-
-    # Update metadata
-    ref_meta.update(count=1, nodata=0, dtype="float32")
-
-    print(ref_meta)
+    ref_meta.update(count=1, dtype="float32", nodata=0)
 
     rows, cols = datasets[0].shape
+
     logging.info("Raster dimensions: %d rows x %d cols", rows, cols)
 
     # Create the output file
@@ -384,16 +381,14 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
                             input_data = src.read(1, window=window)
 
                             input_data = np.where(input_data == src.nodata, 0, input_data)
-                            # print(input_data)
-                            # continue
+
                             output_data += input_data
 
                             logging.debug("Added data from raster %d", idx + 1)
                         except Exception as e:
                             logging.error("Error reading block from raster %d: %s", idx + 1, e)
-                    print(max(output_data.flatten()))
+
                     dst.write(output_data, window=window, indexes=1)
-                    break
             logging.info("Finished processing all blocks")
     except Exception as e:
         logging.error("Error creating or writing to output file: %s", e)

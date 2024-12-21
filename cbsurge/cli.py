@@ -1,4 +1,4 @@
-from cbsurge.exposure.builtenv.buildings.fgb import logger
+
 from cbsurge.util import setup_logger
 from cbsurge.admin import admin
 from cbsurge.exposure.builtenv import builtenv
@@ -34,6 +34,5 @@ cli.add_command(builtenv)
 
 if __name__ == '__main__':
 
-    logger = setup_logger('rapida')
-
+    logger = setup_logger('rapida', make_root=True)
     cli()

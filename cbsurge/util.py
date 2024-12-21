@@ -4,6 +4,7 @@ from osgeo import gdal
 import itertools
 import click
 import os
+from rich.logging import RichHandler
 logger = logging.getLogger(__name__)
 
 def silence_httpx_az():
@@ -87,6 +88,18 @@ def http_get_json(url=None, timeout=None):
         if response.status_code == 200:
             return response.json()
 
+def http_post_json(url=None, data=None, timeout=None):
+    """
+    Generic HTTP get function using httpx
+    :param url: str, the url to be fetched
+    :param timeout: httpx.Timeout instance
+    :return: python dict representing the result as parsed json
+    """
+    assert timeout is not None, f'Invalid timeout={timeout}'
+    with httpx.Client(timeout=timeout) as client:
+        response = client.post(url, data={"data": data})
+        response.raise_for_status()
+        return response.json()
 
 def validate(url=None, timeout=10):
     """
@@ -173,11 +186,11 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
     else:
         logger = logging.getLogger(name)
     formatter = logging.Formatter(
-        "%(asctime)s-(name)-%(filename)s:%(funcName)s:%(lineno)d:%(levelname)s:%(message)s",
+        "%(filename)s:%(funcName)s:%(lineno)d:%(levelname)s:%(message)s",
         "%Y-%m-%d %H:%M:%S",
     )
-    logging_stream_handler = CustomStreamHandler()
-    logging_stream_handler.setFormatter(formatter)
+    logging_stream_handler = RichHandler(rich_tracebacks=True)
+    #logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

@@ -6,7 +6,7 @@ from cbsurge.util import BboxParamType
 import click
 import json
 
-
+logger = logging.getLogger(__name__)
 
 @click.group()
 def admin():
@@ -126,7 +126,8 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False)
 
     python -m  cbsurge.cli admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
     """
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    #logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    logger.info('HERE')
     geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
     if geojson:
         click.echo(json.dumps(geojson))

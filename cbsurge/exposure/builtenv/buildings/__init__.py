@@ -1,7 +1,7 @@
 from email.policy import default
 
 import click
-from cbsurge.exposure.builtenv.buildings.fgb import download_pyogrio, download as download_admin
+from cbsurge.exposure.builtenv.buildings.fgb import download_bbox, download_admin
 from cbsurge.exposure.builtenv.buildings.pmt import download as download_pmt, GMOSM_BUILDINGS
 from cbsurge.util import BboxParamType
 import asyncio
@@ -37,7 +37,7 @@ def fgbbbox(bbox=None, out_path=None, batch_size:[int,None]=1000):
         If supplied, the buildings are downloaded in batches otherwise they are streamd through pyarrow library
 
     """
-    download_pyogrio(bbox=bbox, out_path=out_path, batch_size=batch_size)
+    download_bbox(bbox=bbox, out_path=out_path, batch_size=batch_size)
 
 
 

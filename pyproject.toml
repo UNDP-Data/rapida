@@ -33,6 +33,10 @@ dependencies = [
     "rasterio",
     "geopandas",
     "azure-identity",
+    "jupyterhub",
+    "jupyterlab",
+    "notebook",
+    "dockerspawner",
     "pytest"
 ]
 

@@ -4,10 +4,15 @@ FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 ARG GROUPNAME="cbsurge"
 
 # Install necessary tools and Python packages
-RUN apt-get update && \
-    apt-get install -y python3-pip pipenv gcc cmake libgeos-dev openssh-server && \
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get update && \
+    apt-get install -y python3-pip pipenv \
+        gcc cmake libgeos-dev \
+        openssh-server \
+        ca-certificates curl gnupg nodejs && \
     apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+     npm install -g configurable-http-proxy
 
 # install azure-cli
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash

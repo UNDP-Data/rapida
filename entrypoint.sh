@@ -15,7 +15,7 @@ fi
 
 # Determine the port based on the PRODUCTION environment variable
 if [ "$PRODUCTION" = "true" ]; then
-    JUPYTER_PORT=443
+    JUPYTER_PORT=80
 else
     JUPYTER_PORT=8000
 fi

@@ -13,5 +13,15 @@ if [ ! -z "$SSH_USERS" ]; then
     done
 fi
 
-# launch ssh server
-/usr/sbin/sshd -D
+# Determine the port based on the PRODUCTION environment variable
+if [ "$PRODUCTION" = "true" ]; then
+    JUPYTER_PORT=443
+else
+    JUPYTER_PORT=8000
+fi
+
+# Start SSH server in the background
+/usr/sbin/sshd -D &
+
+# Start JupyterLab in the foreground (so the container keeps running)
+pipenv run jupyterhub -f jupyterhub_config.py --port=$JUPYTER_PORT

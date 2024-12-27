@@ -296,7 +296,7 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
                     logging.error("Error processing file: %s", result)
         logging.info("Data download complete for country: %s", country_code)
         logging.info("Starting aggregate processing for country: %s", country_code)
-        if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code) and not force_reprocessing:
+        if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code):
             logging.info("Aggregate files already exist for country: %s", country_code)
         else:
             await process_aggregates_for_country(country_code=country_code)

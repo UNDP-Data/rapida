@@ -2,7 +2,7 @@ import asyncio
 
 import click
 
-from cbsurge.exposure.population.worldpop import download_data, process_aggregates
+from cbsurge.exposure.population.worldpop import download_data, process_aggregates_for_country
 
 
 @click.group()
@@ -24,4 +24,4 @@ def sync(force_reprocessing, country, download_path):
 @click.option('--age-group', help='The age group to process the data for', type=click.Choice(['child', 'active', 'elderly']))
 @click.option('--sex', help='Path to the downloaded data', type=click.Choice(['M', 'F']))
 def run_aggregate(country, age_group, sex):
-    asyncio.run(process_aggregates(country_code=country, age_group=age_group, sex=sex))
+    asyncio.run(process_aggregates_for_country(country_code=country, age_group=age_group, sex=sex))

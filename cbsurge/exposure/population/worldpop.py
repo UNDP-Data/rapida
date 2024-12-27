@@ -296,11 +296,11 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
                     logging.error("Error processing file: %s", result)
         logging.info("Data download complete for country: %s", country_code)
         logging.info("Starting aggregate processing for country: %s", country_code)
-        if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code) and not force_reprocessing:
-            logging.info("Aggregate files already exist for country: %s", country_code)
-        else:
-            await process_aggregates(country_code=country_code)
-        logging.info("Aggregate processing complete for country: %s", country_code)
+        # if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code) and not force_reprocessing:
+        #     logging.info("Aggregate files already exist for country: %s", country_code)
+        # else:
+        await process_aggregates_for_country(country_code=country_code)
+        # logging.info("Aggregate processing complete for country: %s", country_code)
     # Close the storage manager connection after all files have been processed
     logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
@@ -356,7 +356,7 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
 
     # Use the first dataset as reference for metadata
     ref_meta = datasets[0].meta.copy()
-    ref_meta.update(count=1, dtype="float32", nodata=0)
+    ref_meta.update(count=1, dtype="float32", nodata=0, compress="ZSTD")
 
     rows, cols = datasets[0].shape
 
@@ -401,20 +401,19 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     logging.info("create_sum function completed successfully")
 
 
-async def process_aggregates(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None):
+async def process_aggregates_for_country(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None, year="2020"):
     """
     Process aggregate files for combinations of sex and age groups, or specific arguments passed.
     Args:
         country_code (str): Country code for processing.
         sex (Optional[str]): Sex to process (M or F).
         age_group (Optional[str]): Age group to process (child, active, elderly).
+        year (Optional[str]): (Unimplemented). The year for which the data should be produced for
     """
-    assert country_code, "Country code must be provided"
 
+    assert country_code, "Country code must be provided"
     async with AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")) as storage_manager:
         logging.info("Processing aggregate files for country: %s", country_code)
-
-
         async def process_group(sexes: List[str]=None, age_grouping: Optional[str]=None, output_label: str=None):
             """
             Processes and sums files for specified sexes and age groups.
@@ -447,7 +446,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
 
                 output_file = f"{temp_dir}/{output_label}.tif"
                 with ThreadPoolExecutor() as executor:
-                    executor.submit(create_sum, input_file_paths=local_files, output_file_path=output_file, block_size=(256, 256))
+                    executor.submit(create_sum, input_file_paths=local_files, output_file_path=output_file, block_size=(1028, 1028))
 
                 # Upload the result
                 blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{output_label}.tif"

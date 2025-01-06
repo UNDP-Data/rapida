@@ -1,10 +1,20 @@
-import click as click
-from cbsurge.initialize import init
+
+from cbsurge.util import setup_logger
 from cbsurge.admin import admin
+from cbsurge.initialize import init
 from cbsurge.exposure.builtenv import builtenv
+import click
+
+@click.group
+def cli(ctx):
+    """Main CLI for the application."""
+    pass
+cli.add_command(admin)
+cli.add_command(builtenv)
+
 from cbsurge.exposure.population import population
 from cbsurge.stats import stats
-import click
+
 
 @click.group
 
@@ -21,4 +31,6 @@ cli.add_command(stats)
 
 
 if __name__ == '__main__':
+
+    logger = setup_logger('rapida', make_root=True)
     cli()

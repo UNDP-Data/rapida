@@ -81,7 +81,7 @@ def fetch_ocha_countries(bounding_box = None, ):
                         countries.append(service_country)
                 else:
                     countries.append(service_country)
-        return tuple(countries)
+        return tuple(set(countries))
     except Exception as e:
         logger.error(f'Failed to fetch available countries. {e}')
         raise
@@ -152,6 +152,7 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
     bounding box covers several countries.
 
     """
+
     west, south, east, north = bbox
     try:
         int(admin_level)
@@ -171,6 +172,8 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
 
 
     ocha_countries = fetch_ocha_countries()
+    print(len(ocha_countries))
+
 
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
     bbox_polygon = box(west, south, east, north)

@@ -19,7 +19,6 @@ import math
 import concurrent
 from pyarrow import compute as pc
 from rich.progress import Progress, TaskProgressColumn,BarColumn,SpinnerColumn, TimeRemainingColumn, TextColumn
-from rich.text import Text
 import httpx
 from osm2geojson import json2geojson
 

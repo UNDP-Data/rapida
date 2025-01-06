@@ -2,7 +2,7 @@ import os
 import pytest
 from cbsurge.stats.ZonalStats import ZonalStats
 
-TEST_DIR = "./cbsurge/stats/tests"
+TEST_DIR = "./tests/cbsurge/stats"
 
 def get_test_path(relative_path):
     """Helper function to generate absolute paths for test assets."""

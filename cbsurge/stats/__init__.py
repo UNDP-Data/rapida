@@ -73,10 +73,10 @@ def compute(
 
     Usage: \n
         The below command provides how to use the command to compute zonal statistics.\n
-        python -m cbsurge.cli stats compute --help
+        rapida stats compute --help
 
     Example: \n
-        python -m cbsurge.cli stats compute ./cbsurge/stats/tests/assets/admin2.geojson ./cbsurge/stats/tests/assets/admin2_stats.fgb -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -o sum -c male_5_sum -c female_5_sum
+        rapida stats compute ./cbsurge/stats/tests/assets/admin2.geojson ./cbsurge/stats/tests/assets/admin2_stats.fgb -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -o sum -c male_5_sum -c female_5_sum
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     with ZonalStats(input_file, target_srid=54009) as st:

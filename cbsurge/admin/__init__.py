@@ -69,7 +69,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
     To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
 
-    python -m  cbsurge.cli admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
+    rapida admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
@@ -124,7 +124,7 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False)
 
     To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
 
-    python -m  cbsurge.cli admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
+    rapida admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
     """
     #logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
     logger.info('HERE')

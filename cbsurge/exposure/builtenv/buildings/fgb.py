@@ -1,14 +1,9 @@
-import json
+
 import random
-
 import threading
-import traceback
 from collections import deque
-
-
 from cbsurge.exposure.builtenv.buildings.fgbgdal import OVERPASS_API_URL, GMOSM_BUILDINGS_ROOT
 from pyogrio.raw import open_arrow, write_arrow, read
-
 from cbsurge.exposure.builtenv.buildings.pmt import WEB_MERCATOR_TMS
 import morecantile as m
 from cbsurge import util
@@ -67,242 +62,6 @@ ZOOMLEVEL_TILE_AREA =  {
 logger = logging.getLogger(__name__)
 
 ARROWTYPE2OGRTYPE = {'string':ogr.OFTString, 'double':ogr.OFTReal, 'int64':ogr.OFTInteger64, 'int':ogr.OFTInteger}
-#
-#
-# def add_fields_to_layer(layer=None, template_layer_info=None):
-#
-#     types = dict([(e[3:], getattr(ogr, e)) for e in dir(ogr) if e.startswith('OFT')])
-#     for field_dict in template_layer_info['layers'][0]['fields']:
-#         layer.CreateField(ogr.FieldDefn(field_dict['name'], types[field_dict['type']]))
-#
-#
-# def read_bbox1(src_path=None, bbox=None):
-#     with open_arrow(src_path, bbox=bbox, use_pyarrow=True) as source:
-#         meta, reader = source
-#         table = reader.read_all()
-#         return meta, table
-#
-# def download_bbox(src_path=None, tile=None, dst_dir=None):
-#     tile_bb = WEB_MERCATOR_TMS.bounds(tile)
-#     tile_bbox = tile_bb.left, tile_bb.bottom, tile_bb.right, tile_bb.top
-#     out_path = os.path.join(dst_dir, f'buildings_{tile.z}_{tile.x}_{tile.y}.fgb')
-#     with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
-#         with open_arrow(src_path, bbox=tile_bbox, use_pyarrow=True, batch_size=5000) as source:
-#             meta, reader = source
-#             fields = meta.pop('fields')
-#             schema = reader.schema
-#
-#             if dst_ds.GetLayerCount() == 0:
-#                 src_epsg = int(meta['crs'].split(':')[-1])
-#                 src_srs = osr.SpatialReference()
-#                 src_srs.ImportFromEPSG(src_epsg)
-#                 dst_lyr = dst_ds.CreateLayer('buildings', geom_type=ogr.wkbPolygon, srs=src_srs)
-#                 for name in schema.names:
-#                     if 'wkb' in name or 'geometry' in name: continue
-#                     field = schema.field(name)
-#                     field_type = ARROWTYPE2OGRTYPE[field.type]
-#                     dst_lyr.CreateField(ogr.FieldDefn(name, field_type))
-#             logger.debug(f'Downloading buildings in batches from {src_path} {tile_bbox}')
-#             for batch in reader:
-#                 if batch.num_rows > 0:
-#                     logger.debug(f'Writing {batch.num_rows} records in tile {tile}')
-#                     dst_lyr.WritePyArrow(batch)
-#         del dst_ds
-#
-#     nf = 0
-#     with ogr.Open(out_path) as ds:
-#         l = ds.GetLayer(0)
-#         nf = l.GetFeatureCount()
-#         logger.debug(f'{tile} - {nf}')
-#         del ds
-#     if nf == 0:
-#         if os.path.exists(out_path):os.remove(out_path)
-#         return
-#     return out_path
-#
-#
-# def download1(admin_path=None, out_path=None, country_col_name=None, admin_col_name=None, batch_size=5000 ):
-#
-#     with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
-#         with ogr.Open(admin_path) as adm_ds:
-#             adm_lyr = adm_ds.GetLayer(0)
-#             all_features = [e for e in adm_lyr]
-#             signal_event = threading.Event()
-#             failed_tasks = []
-#             ndownloaded = 0
-#             #bar_format = "{percentage:3.0f}%|{bar}| downloaded {n_fmt} admin units out of {total_fmt} [elapsed: {elapsed} remaining: {remaining}]"
-#             with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-#                 #with tqdm(total=len(all_features), desc=f'Downloaded', bar_format=bar_format, leave=False) as pbar:
-#                 with Progress() as progress:
-#                     total_task = progress.add_task(description=f'[red]Downloaded (0/{len(all_features)}) admin units', total=len(all_features))
-#                     for features in util.chunker(all_features, size=4):
-#                         futures = {}
-#                         try:
-#                             for feature in features:
-#                                 au_geom = feature.GetGeometryRef()
-#                                 au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
-#                                 props = feature.items()
-#                                 country_iso3 = props[country_col_name]
-#                                 au_name = props[admin_col_name]
-#
-#                                 remote_country_fgb_url = f'{GMOSM_BUILDINGS_ROOT}/country_iso={country_iso3}/{country_iso3}.fgb'
-#                                 kw_args = dict(
-#                                     src_path=remote_country_fgb_url,
-#                                     mask=au_poly,
-#                                     batch_size=batch_size,
-#                                     signal_event=signal_event,
-#                                     au_name=au_name,
-#                                     progress=progress
-#
-#                                 )
-#                                 futures[executor.submit(read_bbox, **kw_args)] = au_name
-#
-#                             #done, not_done = concurrent.futures.wait(futures, timeout=180 * len(futures), )
-#
-#                             for fut in concurrent.futures.as_completed(futures, timeout=180 * len(futures)):
-#                                 au_name = futures[fut]
-#                                 exception = fut.exception()
-#                                 if exception is not None:
-#                                     logger.error(f'Failed to process admin unit {au_name} because {exception} ')
-#                                     failed_tasks.append((au_name, exception))
-#                                 meta, batches = fut.result()
-#                                 for batch in batches:
-#                                     if dst_ds.GetLayerCount() == 0:
-#                                         src_epsg = int(meta['crs'].split(':')[-1])
-#                                         src_srs = osr.SpatialReference()
-#                                         src_srs.ImportFromEPSG(src_epsg)
-#                                         dst_lyr = dst_ds.CreateLayer('buildings', geom_type=ogr.wkbPolygon, srs=src_srs)
-#                                         for name in batch.schema.names:
-#                                             if 'wkb' in name or 'geometry' in name: continue
-#                                             field = batch.schema.field(name)
-#                                             field_type = ARROWTYPE2OGRTYPE[field.type]
-#                                             dst_lyr.CreateField(ogr.FieldDefn(name, field_type))
-#                                     #logger.info(f'Going to write {batch.num_rows} features from  {au_name} admin unit')
-#                                     mask = pc.is_null(batch['wkb_geometry'])
-#                                     should_filter = pc.any(mask).as_py()
-#                                     if should_filter:
-#                                         batch = batch.filter(mask)
-#                                         for b in batch:
-#                                             logger.info(b)
-#                                     dst_lyr.WritePyArrow(batch)
-#
-#                                 #pbar.update()
-#                                 assert dst_lyr.SyncToDisk() == 0
-#                                 ndownloaded += 1
-#                                 progress.update(total_task, description=f'[red]Downloaded ({ndownloaded}/{len(all_features)}) admin units',advance=1)
-#                         except (concurrent.futures.CancelledError, KeyboardInterrupt) as pe:
-#                             logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')
-#                             signal_event.set()
-#                             for fut, au_name in futures.items():
-#                                 if fut.done():
-#                                     logger.info(f'Finished downloading admin unit {au_name} ')
-#                                     continue
-#                                 c = fut.cancel() or not fut.done()
-#                                 while not c:
-#                                     c = fut.cancel() or fut.done()
-#                                 logger.info(f'Building extraction in admin unit {au_name} was cancelled')
-#                             if pe.__class__ == KeyboardInterrupt:
-#                                 raise pe
-#                             else:
-#                                 break
-#
-
-#
-# def download_pyogrio(bbox=None, out_path=None, batch_size:[int,None]=1000):
-#     """
-#     Download/stream buildings from VIDA buildings using pyogrio/pyarrow API
-#
-#     :param bbox: iterable of floats, xmin, ymin, xmax,ymax
-#     :param out_path: str, full path where the buildings layer will be written
-#     :param batch_size: int, default=1000, the max number of buildings to download in one batch
-#     If supplied, the buildings are downloaded in batches otherwise they are streamd through pyarrow library
-#     :return:
-#     """
-#
-#
-#     countries = get_countries_for_bbox_osm(bbox=bbox)
-#     assert len(countries)> 0, f'The bounding box {bbox} does not intersect any country. Please make sure it makes sense!'
-#
-#     with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
-#         for country in countries :
-#             remote_country_fgb_url = f'/vsicurl/{GMOSM_BUILDINGS_ROOT}/country_iso={country}/{country}.fgb'
-#             if batch_size is not None:
-#                 with open_arrow(remote_country_fgb_url, bbox=bbox, use_pyarrow=True, batch_size=batch_size) as source:
-#                     meta, reader = source
-#                     fields = meta.pop('fields')
-#                     schema = reader.schema
-#
-#                     if dst_ds.GetLayerCount() == 0:
-#                         src_epsg = int(meta['crs'].split(':')[-1])
-#                         src_srs = osr.SpatialReference()
-#                         src_srs.ImportFromEPSG(src_epsg)
-#                         dst_lyr = dst_ds.CreateLayer('buildings', geom_type=ogr.wkbPolygon, srs=src_srs)
-#                         for name in schema.names:
-#                             if 'wkb' in name or 'geometry' in name:continue
-#                             field = schema.field(name)
-#                             field_type = ARROWTYPE2OGRTYPE[field.type]
-#                             dst_lyr.CreateField(ogr.FieldDefn(name, field_type))
-#                     logger.info(f'Downloading buildings in batches from {remote_country_fgb_url}')
-#                     for batch in reader:
-#                         logger.debug(f'Writing {batch.num_rows} records')
-#                         dst_lyr.WritePyArrow(batch)
-#             else:
-#                 with open_arrow(remote_country_fgb_url, bbox=bbox, use_pyarrow=False) as source:
-#                     meta, reader = source
-#                     src_epsg = int(meta['crs'].split(':')[-1])
-#                     src_srs = osr.SpatialReference()
-#                     src_srs.ImportFromEPSG(src_epsg)
-#                     logger.info(f'Streaming buildings from {remote_country_fgb_url}')
-#                     write_arrow(reader, out_path,layer='buildings',driver='FlatGeobuf',append=True,
-#                                 geometry_name='wkb_geometry', geometry_type='Polygon', crs=src_srs.ExportToWkt())
-#     info = read_info(out_path, layer='buildings')
-#     logger.info(f'{info["features"]} buildings were downloaded from {",".join(countries)} country datasets')
-#
-# def download_gdal(bbox=None, out_path=None, batch_size:[int, None]=1000):
-#     """
-#     Download/stream buildings from VIDA buildings using gdal/pyarrow API
-#     :param bbox: iterable of floats, xmin, ymin, xmax,ymax
-#     :param out_path: str, full path where the buildings layer will be written
-#     :param batch_size: int, default=1000, the max number of buildings to be downloaded in one batch
-#     If supplied, the buildings are downloaded in batches otherwise they are streamd through pyarrow library.
-#     Batch downloading should be preferred in case of large bounding boxes/area
-#
-#     :return:
-#     """
-#
-#
-#     countries = get_countries_for_bbox_osm(bbox=bbox)
-#     assert len(countries)> 0, f'The bounding box {bbox} does not intersect any country. Please make sure it makes sense!'
-#     buildings = 0
-#     with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
-#
-#         for country in get_countries_for_bbox_osm(bbox=bbox) :
-#             remote_country_fgb_url = f'/vsicurl/{GMOSM_BUILDINGS_ROOT}/country_iso={country}/{country}.fgb'
-#             with ogr.Open(remote_country_fgb_url, gdal.OF_READONLY) as src_ds:
-#                 src_lyr = src_ds.GetLayer(0)
-#                 src_lyr.SetSpatialFilterRect(*bbox)
-#                 if batch_size is not None:
-#                     stream = src_lyr.GetArrowStream([f"MAX_FEATURES_IN_BATCH={batch_size}"])
-#                 else:
-#                     stream = src_lyr.GetArrowStream()
-#                 schema = stream.GetSchema()
-#                 if dst_ds.GetLayerCount() == 0:
-#                     src_srs = src_lyr.GetSpatialRef()
-#                     dst_lyr = dst_ds.CreateLayer('buildings', geom_type=ogr.wkbPolygon, srs=src_srs)
-#                     for i in range(schema.GetChildrenCount()):
-#                         if 'wkb' in schema.GetChild(i).GetName() or 'geometry' in schema.GetChild(i).GetName():continue
-#                         dst_lyr.CreateFieldFromArrowSchema(schema.GetChild(i))
-#                 if batch_size is not None:
-#                     logger.info(f'Downloading buildings in batches from {remote_country_fgb_url}')
-#                 else:
-#                     logger.info(f'Streaming buildings from {remote_country_fgb_url}')
-#                 while True:
-#                     array = stream.GetNextRecordBatch()
-#                     if array is None:
-#                         break
-#                     assert dst_lyr.WriteArrowBatch(schema, array) == ogr.OGRERR_NONE
-#                     buildings+= array.GetLength()
-#     logger.info(f'{buildings} buildings were downloaded from {",".join(countries)} country datasets')
 
 def country_info(bbox=None, overpass_url=OVERPASS_API_URL):
     """
@@ -390,7 +149,7 @@ def read_bbox(src_path=None, bbox=None, mask=None, batch_size=None, signal_event
                             batches.append(b)
                             nb+=b.num_rows
                             progress.update(task, description=f'[green]Downloaded {nb} buildings in {name}', advance=nb, completed=None)
-                            task.advance(nb)
+                            #task.advance(nb)
                             #logger.info(f"Downloaded {nb:d} buildings in admin unit {au_name}[!n]")
 
                     return name, meta, batches
@@ -430,13 +189,32 @@ def downloader(work=None, result=None, finished=None):
         result.append(read_bbox(**job))
 
 
-def download_bbox(bbox=None, out_path=None, batch_size=5000):
-    assert batch_size>=1000, f'This is a very small batch  size that will render the download inefficient'
+def download_bbox(bbox=None, out_path=None, batch_size=5000, NWORKERS=4):
+    """
+    Download building from Google+Microsoft+OSM VIDA dataset based on bounds provided by
+    equally sized blocks of space generated automatically in 3857 projection.
 
-    #bb = m.BoundingBox(*bbox)
+
+    :param out_path: str, abs path to buildings dataset
+    :param bbox: iterable of floats, xmin, ymin, xmax,ymax
+    :param batch_size: int, defaults to 5000, the number of buildings to download in one batch
+    :param NWORKERS, int, defaults to 4. The number of threads to use for parallel download.
+    :return:
+
+    The implementation features several optimisations as to reduce the download:
+        the number of countries that intersect the bbox are retrieved first from OSM
+        a 3857 zoom level is computed from where tiles will ge generated in such a way that
+        the average number of buildings in a tile would be roughly downloaded in one batch
+        max NWORKERS tiles are downloaded in parallel
+
+    the batch size can be used to control the size of a tile and the number of tiles used to download the
+    buildings
+
+    """
+    assert batch_size>=1000, f'This is a small batch  size that will render the download inefficient'
+
     bb_poly = box(*bbox)
 
-    NWORKERS = 4
     ndownloaded = 0
     countries = country_info(bbox=bbox)
     assert len(
@@ -459,15 +237,12 @@ def download_bbox(bbox=None, out_path=None, batch_size=5000):
             intersection_bbox = bounds(inters_pol)
             intersection_bb = m.BoundingBox(*intersection_bbox)
             intersection_area, _ = geod.geometry_area_perimeter(geometry=inters_pol)
-            #intersection_area_km2 = math.ceil(abs(intersection_area*1e-6))
-            #intersection_no_buildings = intersection_area_km2*country_bbox_buildings_density_km2
+
             batch_km2 = batch_size//country_bbox_buildings_density_km2
             for zoom_level, tile_area in ZOOMLEVEL_TILE_AREA.items():
                 if tile_area<batch_km2:
                     sel_zom_level = zoom_level - 2 if zoom_level>2 else zoom_level
                     break
-
-
 
             all_tiles = WEB_MERCATOR_TMS.tiles( west=intersection_bb.left, south=intersection_bb.bottom,
                                                 east=intersection_bb.right, north=intersection_bb.top,
@@ -526,6 +301,7 @@ def download_bbox(bbox=None, out_path=None, batch_size=5000):
                                             field_type = ARROWTYPE2OGRTYPE[field.type]
                                             dst_lyr.CreateField(ogr.FieldDefn(name, field_type))
                                     #logger.info(f'Going to write {batch.num_rows} features from  {au_name} admin unit')
+                                    # filter out empty/invalid
                                     lengths = pc.binary_length(batch.column("wkb_geometry"))
                                     mask = pc.greater(lengths, 0)
                                     should_filter = pc.any(pc.invert(mask)).as_py()
@@ -572,25 +348,33 @@ def download_bbox(bbox=None, out_path=None, batch_size=5000):
 
 
 
-def download_admin(admin_path=None, out_path=None, country_col_name=None, admin_col_name=None, batch_size=5000 ):
+def download_admin(admin_path=None, out_path=None, country_col_name=None, admin_col_name=None, batch_size=5000,
+                   NWORKERS=4,
+                   ):
     """
-    Download building from Google+Microsoft+OSM VIDA dataset
-    :param admin_path:
-    :param out_path:
-    :param country_col_name:
-    :param admin_col_name:
-    :param batch_size:
-    :return:
+    Download building from Google+Microsoft+OSM VIDA dataset based on bounds provided by admin units
+
+
+    :param admin_path: str, absolute path to a geospatial vector dataset representing administrative unit names
+    :param out_path: str, abs path to buildings dataset
+    :param country_col_name: str, name of the column from admin attr table that contains iso3 country code
+    :param admin_col_name: str, name of the column from the admin attr table that contains amin unit name
+    :param batch_size: int, defaults to 5000, the number of buildings to download in one batch
+    :param NWORKERS, int, defaults to 4. The number of threads to use for parallel download.
+    :return: None
+
+    The buildings are downloaded in batches from country level disaggregated buildings dataset using  OGR Arrow protocol
+    The buildings are downloaded in parallel using threads and double ended queues.
+    NWORKERS specifies how many admin units are downloaded at the same time.
+
     """
 
-    NWORKERS = 4
     ndownloaded = 0
     failed = []
     with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
         with ogr.Open(admin_path) as adm_ds:
             adm_lyr = adm_ds.GetLayer(0)
             all_features = [e for e in adm_lyr]
-            nfeatures = len(all_features)
             stop = threading.Event()
             jobs = deque()
             results = deque()
@@ -706,8 +490,8 @@ if __name__ == '__main__':
 
     #asyncio.run(download(bbox=bbox))
     try:
-        # download_admin(admin_path=admin_path, out_path=out_path,
-        #           country_col_name='shapeGroup', admin_col_name='shapeName', batch_size=3000)
+        #download_admin(admin_path=admin_path, out_path=out_path,
+        #          country_col_name='shapeGroup', admin_col_name='shapeName', batch_size=3000)
         download_bbox(bbox=bbox, out_path=out_path, batch_size=5000 )
     except KeyboardInterrupt:
         pass

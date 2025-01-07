@@ -401,6 +401,7 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
     logging.info("create_sum function completed successfully")
 
 
+
 async def process_aggregates_for_country(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None, year="2020"):
     """
     Process aggregate files for combinations of sex and age groups, or specific arguments passed.
@@ -439,10 +440,18 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
             # Download blobs and sum them
             with tempfile.TemporaryDirectory() as temp_dir:
                 local_files = []
-                for blob in blobs:
+                # download blobs concurrently
+                async def create_local_files(blob):
                     local_file = os.path.join(temp_dir, os.path.basename(blob))
                     await storage_manager.download_blob(blob, temp_dir)
                     local_files.append(local_file)
+                tasks = [create_local_files(blob) for blob in blobs]
+                await asyncio.gather(*tasks)
+
+                # for blob in blobs:
+                #     local_file = os.path.join(temp_dir, os.path.basename(blob))
+                #     await storage_manager.download_blob(blob, temp_dir)
+                #     local_files.append(local_file)
 
                 output_file = f"{temp_dir}/{output_label}.tif"
                 with ThreadPoolExecutor() as executor:
@@ -450,8 +459,8 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
 
                 # Upload the result
                 blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{output_label}.tif"
-                await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
-                # shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
+                # await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
+                shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
                 logging.info("Processed and uploaded: %s", blob_path)
         # Dynamic argument-based processing
         if sex and age_group:

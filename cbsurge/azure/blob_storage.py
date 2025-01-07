@@ -154,6 +154,34 @@ class AzureBlobStorageManager:
         await destination_blob_client.start_copy_from_url(source_blob_client.url)
         return destination_blob_client.url
 
+    async def delete_blob(self, blob_name=None):
+        """
+        Delete a blob from Azure Blob Storage.
+        Args:
+            blob_name:
+
+        Returns:
+
+        """
+        logging.info("Deleting blob: %s", blob_name)
+        blob_client = self.container_client.get_blob_client(blob=blob_name)
+        await blob_client.delete_blob()
+        return blob_name
+
+    async def rename_file(self, source_blob=None, destination_blob=None):
+        """
+        Rename a blob file
+        Args:
+            source_blob:
+            destination_blob:
+
+        Returns:
+
+        """
+        await self.copy_file(source_blob=source_blob, destination_blob=destination_blob)
+        await self.delete_blob(blob_name=source_blob)
+        return destination_blob
+
     async def close(self):
         """
         Close the Azure Blob Storage Manager.

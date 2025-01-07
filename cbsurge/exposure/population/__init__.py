@@ -22,6 +22,6 @@ def sync(force_reprocessing, country, download_path):
 @population.command()
 @click.option('--country', help='The ISO3 code of the country to process the data for')
 @click.option('--age-group', help='The age group to process the data for', type=click.Choice(['child', 'active', 'elderly']))
-@click.option('--sex', help='Path to the downloaded data', type=click.Choice(['M', 'F']))
+@click.option('--sex', help='Path to the downloaded data', type=click.Choice(['male', 'female']))
 def run_aggregate(country, age_group, sex):
     asyncio.run(process_aggregates_for_country(country_code=country, age_group=age_group, sex=sex))

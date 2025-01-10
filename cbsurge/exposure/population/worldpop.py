@@ -17,7 +17,7 @@ from tqdm.asyncio import tqdm_asyncio
 
 from cbsurge.azure.blob_storage import AzureBlobStorageManager
 from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR, \
-    AGESEX_STRUCTURE_COMBINATIONS
+    AGESEX_STRUCTURE_COMBINATIONS, SEX_MAPPING
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -192,13 +192,14 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
     try:
         async with httpx.AsyncClient() as client:
             age = file_name.split("_")[2]
-            sex = file_name.split("_")[1]
+            sex = SEX_MAPPING[file_name.split("_")[1].upper()]
+
             for age_group, age_range in WORLDPOP_AGE_MAPPING.items():
                 if age_range[0] <= int(age) <= age_range[1]:
                     age = age_group
                     break
             cog_exists = await check_cog_exists(storage_manager=storage_manager,
-                                            blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
+                                            blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex}/{age}/{file_name}")
             if cog_exists and not force_reprocessing:
                 logging.info("COG already exists in Azure, skipping upload: %s", file_name)
                 return
@@ -227,14 +228,14 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                                         logging.info("Download path does not exist. Creating download path: %s", download_path)
                                         os.makedirs(download_path, exist_ok=True)
                                     logging.info("Copying COG file locally: %s", cog_path)
-                                    os.makedirs(f"{download_path}/{year}/{country_code}/{sex.upper()}/{age}", exist_ok=True)
-                                    shutil.move(cog_path, f"{download_path}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
-                                    logging.info("Successfully copied COG file: %s", f"{download_path}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
+                                    os.makedirs(f"{download_path}/{year}/{country_code}/{sex}/{age}", exist_ok=True)
+                                    shutil.move(cog_path, f"{download_path}/{year}/{country_code}/{sex}/{age}/{file_name}")
+                                    logging.info("Successfully copied COG file: %s", f"{download_path}/{year}/{country_code}/{sex}/{age}/{file_name}")
                                 except Exception as e:
                                     raise Exception(f"Error copying COG file: {e}")
                             else:
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
-                                await storage_manager.upload_blob(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex.upper()}/{age}/{file_name}")
+                                await storage_manager.upload_blob(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex}/{age}/{file_name}")
 
 
         logging.info("Successfully processed file: %s", file_name)
@@ -407,7 +408,7 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
     Process aggregate files for combinations of sex and age groups, or specific arguments passed.
     Args:
         country_code (str): Country code for processing.
-        sex (Optional[str]): Sex to process (M or F).
+        sex (Optional[str]): Sex to process (male or female).
         age_group (Optional[str]): Age group to process (child, active, elderly).
         year (Optional[str]): (Unimplemented). The year for which the data should be produced for
     """
@@ -419,7 +420,7 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
             """
             Processes and sums files for specified sexes and age groups.
             Args:
-                sexes (List[str]): List of sexes (e.g., ['M'], ['F'], or ['M', 'F']).
+                sexes (List[str]): List of sexes (e.g., ['male'], ['female'], or ['male', 'female']).
                 age_grouping (Optional[str]): Age group to process.
                 output_label (str): Label for the output file.
             """
@@ -474,7 +475,7 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
         elif age_group:
             label = f"{age_group}_total"
             logging.info("Processing for age group '%s' (both sexes)", age_group)
-            await process_group(sexes=['M', 'F'], age_grouping=age_group, output_label=label)
+            await process_group(sexes=['male', 'female'], age_grouping=age_group, output_label=label)
         else:
             # Process predefined combinations
             logging.info("Processing all predefined combinations...")

@@ -7,7 +7,11 @@ WORLDPOP_AGE_MAPPING = {
     "active": [15, 64],
     "elderly": [65, 100],
 }
-WORLDPOP_SEXES = ["M", "F"]
+SEX_MAPPING = {
+    "M": "male",
+    "F": "female",
+}
+
 DATA_YEAR = 2020
 
 AGESEX_STRUCTURE_COMBINATIONS = [

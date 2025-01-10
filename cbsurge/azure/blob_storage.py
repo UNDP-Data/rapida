@@ -7,7 +7,6 @@ from azure.storage.blob.aio import ContainerClient
 from tqdm.asyncio import tqdm_asyncio, tqdm
 
 from cbsurge.constants import AZURE_BLOB_CONTAINER_NAME
-from cbsurge.exposure.population.constants import WORLDPOP_AGE_MAPPING
 
 
 class AzureBlobStorageManager:

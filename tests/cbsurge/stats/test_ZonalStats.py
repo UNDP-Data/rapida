@@ -100,7 +100,7 @@ def test_zonal_stats(input_file, input_raster, operations, operation_cols, expec
         input_raster[index] = get_test_path(input_raster[index])
     output_file = get_test_path(output_file) if output_file else None
 
-    with ZonalStats(input_file, target_srid=54009) as st:
+    with ZonalStats(input_file, target_crs="ESRI:54009") as st:
         gdf = st.compute(
             input_raster,
             operations=operations,
@@ -112,7 +112,7 @@ def test_zonal_stats(input_file, input_raster, operations, operation_cols, expec
         assert len(gdf.columns) == num_columns, f"The number of columns {len(gdf.columns)} does not match the expected number of columns."
 
         if output_file:
-            st.write(output_file, target_srid=3857)
+            st.write(output_file, target_crs="EPSG:3857")
             assert os.path.exists(output_file), f"Output file {output_file} not found."
             if os.path.exists(output_file):
                 os.remove(output_file)

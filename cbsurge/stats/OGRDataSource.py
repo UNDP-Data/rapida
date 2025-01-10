@@ -65,7 +65,7 @@ class OGRDataSource:
 
         dir_name = os.path.dirname(self.filepath)
         file, ext = self.split_filename(self.filepath)
-        output_file = f"{dir_name}/{file}_cleaned.{ext}"
+        output_file = f"{dir_name}/{file}_cleaned{ext}"
 
         gdf.to_file(output_file, driver="GeoJSON")
 
@@ -82,16 +82,16 @@ class OGRDataSource:
         return field_names
 
     def reproject(self,
-                  target_srs,
-                  src_srs=None,
+                  target_crs,
+                  src_crs=None,
                   data_format="FlatGeobuf",
                   output_file=None):
         """
         Reproject the vector file to FlatGeobuf format with a specified coordinate reference system.
 
         Parameters:
-            target_srs (str): EPSG code or PROJ.4 string for the target projection.
-            src_srs (str): EPSG code or PROJ.4 string for the source projection (optional).
+            target_crs (str): EPSG code for the target projection. Example: "EPSG:3857"
+            src_crs (str): EPSG code for the source projection (optional). Example: "EPSG:4326"
             data_format (str): The format to use (defaults to "FlatGeobuf").
             output_file (str): Optional. Path to save the reprojected vector file if specified. Otherwise, it creates a new file with _reprojected suffix.
         """
@@ -101,16 +101,17 @@ class OGRDataSource:
 
         translate_options = gdal.VectorTranslateOptions(
             format=data_format,
-            dstSRS=target_srs,
-            srcSRS=src_srs,
+            dstSRS=target_crs,
+            srcSRS=src_crs,
             layerName=self.split_filename(output_file)[0]
         )
 
         gdal.VectorTranslate(
             destNameOrDestDS=output_file,
-            srcDS=self.datasource,
+            srcDS=self.filepath,
             options=translate_options,
         )
+
         logger.debug(f"Reprojected vector saved to {output_file} in {format} format")
         return output_file
 

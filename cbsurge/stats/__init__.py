@@ -43,11 +43,11 @@ def stats():
               For example, if aaa.tif is specified, column name will be 'aaa_sum'.
               """
               )
-@click.option('-s','--srid',
+@click.option('-s','--target-crs',
               required=False,
-              default=3857,
-              type=int,
-              help='SRID for output vector file. Default is 3857',
+              default="EPSG:3857",
+              type=str,
+              help='SRID for output vector file. Default is EPSG:3857',
               )
 @click.option('--debug',
               is_flag=True,
@@ -58,7 +58,7 @@ def compute(
         input_file=None,
         output_file=None,
         raster=None,
-        srid=3857,
+        target_crs="EPSG:3857",
         operation=None,
         column=None,
         debug=False):
@@ -79,6 +79,7 @@ def compute(
         rapida stats compute ./cbsurge/stats/tests/assets/admin2.geojson ./cbsurge/stats/tests/assets/admin2_stats.fgb -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -o sum -c male_5_sum -c female_5_sum
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
-    with ZonalStats(input_file, target_srid=54009) as st:
+
+    with ZonalStats(input_file, target_crs="ESRI:54009") as st:
         st.compute(raster, operations=operation, operation_cols=column)
-        st.write(output_file, target_srid=srid)
+        st.write(output_file, target_crs=target_crs)

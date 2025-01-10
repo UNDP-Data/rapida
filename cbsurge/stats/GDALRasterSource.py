@@ -12,7 +12,7 @@ class GDALRasterSource:
 
     Example:
         with GDALRasterSource(input_raster) as raster:
-            raster.reproject_raster(output_raster, target_srs)
+            raster.reproject_raster(output_raster, target_crs)
     """
 
     def __init__(self, filepath: str, is_clear: bool = False):
@@ -49,23 +49,25 @@ class GDALRasterSource:
 
 
     def reproject(self,
-                  target_srs,
+                  target_crs,
                   resample_alg=gdal.GRA_Bilinear,
                   data_format="GTiff"):
         """
         Reproject the raster file to a specified coordinate reference system.
 
         Parameters:
-            target_srs (str): EPSG code or PROJ.4 string for the target projection.
+            target_crs (str): EPSG code for the target projection. Example: "EPSG:3857".
             resample_alg (int): Resampling algorithm (default: gdal.GRA_Bilinear).
             data_format (str): Output raster format (default: "GTiff").
         """
         file_name_with_ext = os.path.basename(self.filepath)
+
         raster_file = os.path.splitext(file_name_with_ext)[0]
         reprojected_rast = f"{raster_file}_reprojected.tif"
 
+
         warp_options = gdal.WarpOptions(
-            dstSRS=target_srs,
+            dstSRS=target_crs,
             resampleAlg=resample_alg,
             format=data_format
         )

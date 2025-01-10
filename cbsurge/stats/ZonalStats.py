@@ -30,19 +30,6 @@ class ZonalStats:
         self.target_srs = None
         self.gdf = None
 
-    # def get_src(self, srid: int):
-    #     """
-    #     get src definition from srid
-    #
-    #     Parameters:
-    #         srid: EPSG code
-    #     """
-    #     target_srs = f"ESRI:{str(srid)}"
-    #     # Some EPSG code like Mollweide is not defined in GDAL Python API, thus it can convert it to proj.4 string manually if necessary
-    #     # if srid == 54009:
-    #         # Mollweide projection https://epsg.io/54009
-    #     # target_srs = '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs'
-    #     return target_srs
 
     def compute(self, rasters: list, operations: list = None, operation_cols: list = None):
         """
@@ -78,6 +65,7 @@ class ZonalStats:
             # vector
             with OGRDataSource(filepath=cleaned_input_file, is_clear=True) as vector_ds:
                 vector_fields = vector_ds.get_fields()
+
                 reprojected_vector_path = vector_ds.reproject(
                     target_srs=self.target_srs,
                     data_format='FlatGeobuf')
@@ -92,7 +80,6 @@ class ZonalStats:
                         # only first raster keep all fields
                         include_cols = vector_fields if raster_index == 0 else None
 
-                        print(reprojected_vector_path)
 
                         gdf = exact_extract(
                             reprojected_rast,
@@ -134,7 +121,7 @@ class ZonalStats:
 
         Parameters:
             output_file: path to output file. Only supports .shp, .gpkg, .fgb, .geojson currently.
-            target_srid: target spatial resolution in EPSG code. Default is 3857
+            target_srs: target spatial resolution in EPSG code. Default is 3857
         """
         if self.gdf is None:
             raise RuntimeError(f"execute compute() method first to compute ZonalStats.")

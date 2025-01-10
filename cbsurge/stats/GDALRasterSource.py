@@ -65,9 +65,7 @@ class GDALRasterSource:
         raster_file = os.path.splitext(file_name_with_ext)[0]
         reprojected_rast = f"{raster_file}_reprojected.tif"
 
-        filepath, filename = os.path.split(self.filepath)
 
-        reprojected_rast_path = os.path.join(filepath, reprojected_rast)
         warp_options = gdal.WarpOptions(
             dstSRS=target_srs,
             resampleAlg=resample_alg,
@@ -75,7 +73,7 @@ class GDALRasterSource:
         )
 
         result = gdal.Warp(
-            destNameOrDestDS=reprojected_rast_path,
+            destNameOrDestDS=reprojected_rast,
             srcDSOrSrcDSTab=self.filepath,
             options=warp_options
         )
@@ -84,4 +82,4 @@ class GDALRasterSource:
             raise RuntimeError("gdal.Warp failed to reproject the raster.")
         result = None
         logger.debug(f"Reprojected raster saved to {reprojected_rast}")
-        return reprojected_rast_path
+        return reprojected_rast

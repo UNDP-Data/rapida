@@ -6,8 +6,6 @@ from osgeo import ogr, gdal
 
 logger = logging.getLogger(__name__)
 
-ogr.UseExceptions()
-gdal.UseExceptions()
 
 class OGRDataSource:
     """
@@ -98,27 +96,24 @@ class OGRDataSource:
             output_file (str): Optional. Path to save the reprojected vector file if specified. Otherwise, it creates a new file with _reprojected suffix.
         """
         if not output_file:
-            # vector_file = self.split_filename(self.filepath)[0]
-            filepath, filename = os.path.split(self.filepath)
-            fname, ext = os.path.splitext(filename)
-            output_file_name = f"{fname}_reprojected.fgb"
-            output_filepath = os.path.join(filepath, output_file_name)
+            vector_file = self.split_filename(self.filepath)[0]
+            output_file = f"{vector_file}_reprojected.fgb"
 
         translate_options = gdal.VectorTranslateOptions(
             format=data_format,
             dstSRS=target_srs,
             srcSRS=src_srs,
-            layerName=f"{fname}_reprojected"
+            layerName=self.split_filename(output_file)[0]
         )
 
         gdal.VectorTranslate(
-            destNameOrDestDS=output_filepath,
+            destNameOrDestDS=output_file,
             srcDS=self.filepath,
             options=translate_options,
         )
 
         logger.debug(f"Reprojected vector saved to {output_file} in {format} format")
-        return output_filepath
+        return output_file
 
     def split_filename(self, filename):
         """

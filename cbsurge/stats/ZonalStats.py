@@ -9,40 +9,27 @@ logger = logging.getLogger(__name__)
 
 
 class ZonalStats:
-    def __init__(self, input_file: str, target_srid: int=54009):
+    def __init__(self, input_file: str, target_crs: str="ESRI:54009"):
         """
         constructor
 
         parameters:
             input_file: path to input file
-            target_srs: target spatial resolution in EPSG code. Default is 54009 (Mollweide projection https://epsg.io/54009).
+            target_crs: target spatial reference in EPSG code. Default is ESRI:54009 (Mollweide projection https://epsg.io/54009).
         """
         self.input_file = input_file
-        self.target_srid = target_srid
+        self.target_crs = target_crs
         self.gdf = None
-        logger.debug(f"input_file: {self.input_file}, target_srs: {self.target_srid}")
+        logger.debug(f"input_file: {self.input_file}, target_crs: {self.target_crs}")
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.input_file = None
-        self.target_srid = None
+        self.target_crs = None
         self.gdf = None
 
-    def get_src(self, srid: int):
-        """
-        get src definition from srid
-
-        Parameters:
-            srid: EPSG code
-        """
-        target_srs = f"EPSG:{str(srid)}"
-        # Some EPSG code like Mollweide is not defined in GDAL Python API, thus it can convert it to proj.4 string manually if necessary
-        if srid == 54009:
-            # Mollweide projection https://epsg.io/54009
-            target_srs = '+proj=moll +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs +type=crs'
-        return target_srs
 
     def compute(self, rasters: list, operations: list = None, operation_cols: list = None):
         """
@@ -69,27 +56,29 @@ class ZonalStats:
                 raise RuntimeError(
                     f"The number of operation columns must match the number of operations multiplied by the number of rasters.")
 
-        target_srs = self.get_src(self.target_srid)
 
         with OGRDataSource(self.input_file) as cleaned_ds:
             cleaned_input_file = cleaned_ds.clean()
+
             logger.debug(f"Input file was cleaned as {cleaned_input_file}")
             # vector
             with OGRDataSource(filepath=cleaned_input_file, is_clear=True) as vector_ds:
                 vector_fields = vector_ds.get_fields()
+
                 reprojected_vector_path = vector_ds.reproject(
-                    target_srs=target_srs,
+                    target_crs=self.target_crs,
                     data_format='FlatGeobuf')
-                logger.debug(f"vector ({cleaned_input_file}) was reprojected to {self.target_srid} as {reprojected_vector_path}")
+                logger.debug(f"vector ({cleaned_input_file}) was reprojected to {self.target_crs} as {reprojected_vector_path}")
 
                 combined_results = None
                 for raster_index, raster in enumerate(rasters):
                     # raster
                     with GDALRasterSource(raster) as raster_ds:
-                        reprojected_rast = raster_ds.reproject(target_srs)
-                        logger.debug(f"raster ({raster}) was reprojected to {self.target_srid} as {reprojected_rast}")
+                        reprojected_rast = raster_ds.reproject(self.target_crs)
+                        logger.debug(f"raster ({raster}) was reprojected to {self.target_crs} as {reprojected_rast}")
                         # only first raster keep all fields
                         include_cols = vector_fields if raster_index == 0 else None
+
 
                         gdf = exact_extract(
                             reprojected_rast,
@@ -124,21 +113,20 @@ class ZonalStats:
                 self.gdf = combined_results
                 return self.gdf
 
-    def write(self, output_file, target_srid: int = 3857):
+    def write(self, output_file, target_crs: str = "EPSG:3857"):
         """
         write zonal statistics to output file.
         compute method must be executed prior to calling this method.
 
         Parameters:
             output_file: path to output file. Only supports .shp, .gpkg, .fgb, .geojson currently.
-            target_srid: target spatial resolution in EPSG code. Default is 3857
+            target_crs: target spatial resolution in EPSG code. Default is 3857
         """
         if self.gdf is None:
             raise RuntimeError(f"execute compute() method first to compute ZonalStats.")
         gdf_copy = self.gdf.copy()
-        if target_srid:
-            target_srs = self.get_src(target_srid)
-            gdf_copy = gdf_copy.to_crs(target_srs)
+        if target_crs:
+            gdf_copy = gdf_copy.to_crs(self.target_crs)
 
         driver = None
         if output_file.endswith(".shp"):

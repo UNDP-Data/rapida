@@ -56,7 +56,7 @@ class GDALRasterSource:
         Reproject the raster file to a specified coordinate reference system.
 
         Parameters:
-            target_crs (str): EPSG code for the target projection.
+            target_crs (str): EPSG code for the target projection. Example: "EPSG:3857".
             resample_alg (int): Resampling algorithm (default: gdal.GRA_Bilinear).
             data_format (str): Output raster format (default: "GTiff").
         """

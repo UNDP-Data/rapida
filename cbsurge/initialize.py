@@ -3,7 +3,7 @@ import click
 import os
 import shutil
 from cbsurge.session import Session
-from cbsurge.admin import silence_httpx_az
+from cbsurge.util import silence_httpx_az
 
 logger = logging.getLogger(__name__)
 

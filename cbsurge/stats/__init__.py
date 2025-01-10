@@ -43,7 +43,7 @@ def stats():
               For example, if aaa.tif is specified, column name will be 'aaa_sum'.
               """
               )
-@click.option('-s','--target-srs',
+@click.option('-s','--target-crs',
               required=False,
               default="EPSG:3857",
               type=str,
@@ -58,7 +58,7 @@ def compute(
         input_file=None,
         output_file=None,
         raster=None,
-        target_srs="EPSG:3857",
+        target_crs="EPSG:3857",
         operation=None,
         column=None,
         debug=False):
@@ -80,6 +80,6 @@ def compute(
     """
     logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
 
-    with ZonalStats(input_file, target_srs="ESRI:54009") as st:
+    with ZonalStats(input_file, target_crs="ESRI:54009") as st:
         st.compute(raster, operations=operation, operation_cols=column)
-        st.write(output_file, target_srs=target_srs)
+        st.write(output_file, target_crs=target_crs)

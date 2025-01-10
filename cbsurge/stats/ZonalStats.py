@@ -15,7 +15,7 @@ class ZonalStats:
 
         parameters:
             input_file: path to input file
-            target_crs: target spatial resolution in EPSG code. Default is 54009 (Mollweide projection https://epsg.io/54009).
+            target_crs: target spatial reference in EPSG code. Default is ESRI:54009 (Mollweide projection https://epsg.io/54009).
         """
         self.input_file = input_file
         self.target_crs = target_crs

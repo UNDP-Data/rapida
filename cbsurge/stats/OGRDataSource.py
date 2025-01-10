@@ -83,7 +83,7 @@ class OGRDataSource:
 
     def reproject(self,
                   target_crs,
-                  src_srs=None,
+                  src_crs=None,
                   data_format="FlatGeobuf",
                   output_file=None):
         """
@@ -91,7 +91,7 @@ class OGRDataSource:
 
         Parameters:
             target_crs (str): EPSG code or PROJ.4 string for the target projection.
-            src_srs (str): EPSG code or PROJ.4 string for the source projection (optional).
+            src_crs (str): EPSG code or PROJ.4 string for the source projection (optional).
             data_format (str): The format to use (defaults to "FlatGeobuf").
             output_file (str): Optional. Path to save the reprojected vector file if specified. Otherwise, it creates a new file with _reprojected suffix.
         """
@@ -102,7 +102,7 @@ class OGRDataSource:
         translate_options = gdal.VectorTranslateOptions(
             format=data_format,
             dstSRS=target_crs,
-            srcSRS=src_srs,
+            srcSRS=src_crs,
             layerName=self.split_filename(output_file)[0]
         )
 

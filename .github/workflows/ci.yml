@@ -1,0 +1,137 @@
+name: Build docker image
+
+on:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "v*"
+  pull_request:
+
+jobs:
+  build:
+    name: Build & test docker image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Create image tag
+        id: image_tag
+        run: |
+          # Define cache dir
+          ARCH=${{ runner.arch }}
+          CACHE_PATH="/tmp/docker_cache_${ARCH,,}"
+          # Get Dockerfile hash for image cache
+          IMAGE_HASH="${{ hashFiles('./Dockerfile') }}"
+          # Create image tag
+          VARIANT="$(TZ=UTC-9 date +%Y%m%d)_${IMAGE_HASH:0:7}"
+          IMAGE_NAME="geo_cb_surge_${ARCH,,}"
+          TAG="${IMAGE_NAME}:${VARIANT}"
+          # Cache dir setting
+          TAR_NAME="${IMAGE_NAME}_${VARIANT}.tar"
+          TAR_PATH="${CACHE_PATH}/${TAR_NAME}"
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+          echo "IMAGE_NAME=${IMAGE_NAME}" >> $GITHUB_OUTPUT
+          echo "TAR_PATH=${TAR_PATH}" >> $GITHUB_OUTPUT
+          echo "CACHE_PATH=${CACHE_PATH}" >> $GITHUB_OUTPUT
+          echo "CACHE_KEY=${IMAGE_NAME}_${VARIANT}" >> $GITHUB_OUTPUT
+      - name: Enable cache
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.image_tag.outputs.CACHE_PATH }}
+          key: ${{ steps.image_tag.outputs.CACHE_KEY }}
+
+      - name: Load image from cache if exists
+        if: steps.cache.outputs.cache-hit == 'true'
+        run: |
+          docker load -i ${{ steps.image_tag.outputs.TAR_PATH }}
+
+      - name: Build image if cache does not exist
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          docker build -t ${{ steps.image_tag.outputs.TAG }} .
+          CACHE_DIR=$(dirname "${{ steps.image_tag.outputs.TAR_PATH }}")
+          mkdir -p "$CACHE_DIR"
+          docker save ${{ steps.image_tag.outputs.TAG }} > ${{ steps.image_tag.outputs.TAR_PATH }}
+
+      - name: Install dependencies in container
+        run: |
+          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "
+            export LANG=C.UTF-8 && pipenv install -e .
+          "
+      - name: Run tests in container
+        run: |
+          # Change owner of workspace to ubuntu user
+          sudo chown -R 1000:1000 ${{ github.workspace }}
+          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "make test"
+
+  deploy-acr:
+    name: Build and deploy to Azure Container Registry
+    runs-on: ubuntu-latest
+    environment:
+      name: azure container registry
+    env:
+      IMAGE_NAME: ${{ github.repository}}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+    - name: Extract Docker metadata
+      id: meta
+      uses: docker/metadata-action@v4
+      with:
+        images: ${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    - name: Log into ACR
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ secrets.ACR_ENDPOINT }}
+        username: ${{ secrets.ACR_USERNAME }}
+        password: ${{ secrets.ACR_PASSWORD }}
+    - name: Build and push
+      uses: docker/build-push-action@v5
+      with:
+        push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
+        context: .
+        file: Dockerfile
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+
+  deploy-github:
+    name: Build and deploy to GitHub container registry
+    runs-on: ubuntu-latest
+    environment:
+      name: github container registry
+    env:
+      REGISTRY: ghcr.io
+      IMAGE_NAME: ${{ github.repository}}
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

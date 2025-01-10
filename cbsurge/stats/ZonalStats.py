@@ -3,7 +3,7 @@ import os
 from exactextract import exact_extract
 from cbsurge.stats.GDALRasterSource import GDALRasterSource
 from cbsurge.stats.OGRDataSource import OGRDataSource
-
+import geopandas
 
 logger = logging.getLogger(__name__)
 
@@ -76,17 +76,14 @@ class ZonalStats:
                     with GDALRasterSource(raster) as raster_ds:
                         reprojected_rast = raster_ds.reproject(self.target_crs)
                         logger.debug(f"raster ({raster}) was reprojected to {self.target_crs} as {reprojected_rast}")
-                        # only first raster keep all fields
-                        include_cols = vector_fields if raster_index == 0 else None
-
 
                         gdf = exact_extract(
                             reprojected_rast,
                             reprojected_vector_path,
                             ops=operations,
-                            include_cols=include_cols,
                             include_geom=True,
-                            output="pandas"
+                            output="pandas",
+                            progress=True
                         )
                         raster_name_with_ext = os.path.basename(raster)
                         raster_file_name = os.path.splitext(raster_name_with_ext)[0]
@@ -107,6 +104,7 @@ class ZonalStats:
 
                         os.remove(reprojected_rast)
                         logger.debug(f"deleted {reprojected_rast}")
+                combined_results = combined_results.merge(geopandas.read_file(reprojected_vector_path), on='geometry', how='inner')
                 os.remove(reprojected_vector_path)
                 logger.debug(f"deleted {reprojected_vector_path}")
                 logger.info(f"end computing zonal statistics for {rasters}")

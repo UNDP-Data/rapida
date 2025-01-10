@@ -47,7 +47,7 @@ def stats():
               required=False,
               default="EPSG:3857",
               type=str,
-              help='SRID for output vector file. Default is 3857',
+              help='SRID for output vector file. Default is EPSG:3857',
               )
 @click.option('--debug',
               is_flag=True,

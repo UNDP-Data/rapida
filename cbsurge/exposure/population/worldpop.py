@@ -300,14 +300,14 @@ async def download_data(country_code=None, year=DATA_YEAR, force_reprocessing=Fa
         if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code):
             logging.info("Aggregate files already exist for country: %s", country_code)
         else:
-            await process_aggregates_for_country(country_code=country_code)
+            await process_aggregates_for_country(country_code=country_code, download_path=download_path)
             logging.info("Aggregate processing complete for country: %s", country_code)
     # Close the storage manager connection after all files have been processed
     logging.info("Closing storage manager after processing all files")
     await storage_manager.close()
 
 
-async def check_aggregates_exist(storage_manager=None, country_code=None):
+async def check_aggregates_exist(storage_manager=AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")), country_code=None):
     """
     Check if aggregate files exist for a given country code.
     Args:
@@ -403,7 +403,7 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
 
 
 
-async def process_aggregates_for_country(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None, year="2020"):
+async def process_aggregates_for_country(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None, year="2020", download_path=None):
     """
     Process aggregate files for combinations of sex and age groups, or specific arguments passed.
     Args:
@@ -411,6 +411,7 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
         sex (Optional[str]): Sex to process (male or female).
         age_group (Optional[str]): Age group to process (child, active, elderly).
         year (Optional[str]): (Unimplemented). The year for which the data should be produced for
+        download_path (Optional[str]): Local path to download the COG files to. If provided, the files will not be uploaded to Azure.
     """
 
     assert country_code, "Country code must be provided"
@@ -449,20 +450,19 @@ async def process_aggregates_for_country(country_code: str, sex: Optional[str] =
                 tasks = [create_local_files(blob) for blob in blobs]
                 await asyncio.gather(*tasks)
 
-                # for blob in blobs:
-                #     local_file = os.path.join(temp_dir, os.path.basename(blob))
-                #     await storage_manager.download_blob(blob, temp_dir)
-                #     local_files.append(local_file)
-
                 output_file = f"{temp_dir}/{output_label}.tif"
                 with ThreadPoolExecutor() as executor:
                     executor.submit(create_sum, input_file_paths=local_files, output_file_path=output_file, block_size=(1028, 1028))
 
                 # Upload the result
                 blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{output_label}.tif"
-                # await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
-                shutil.copy2(output_file, f"data/{country_code}_{output_label}.tif")
+                if download_path:
+                    os.makedirs(f"{download_path}/{DATA_YEAR}/{country_code}/aggregate", exist_ok=True)
+                    shutil.copy2(output_file, f"{download_path}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{output_label}.tif")
+                else:
+                    await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
                 logging.info("Processed and uploaded: %s", blob_path)
+
         # Dynamic argument-based processing
         if sex and age_group:
             label = f"{sex}_{age_group}"

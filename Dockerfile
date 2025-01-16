@@ -7,7 +7,7 @@ ARG GROUPNAME="cbsurge"
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get update && \
     apt-get install -y python3-pip pipenv \
-        gcc cmake libgeos-dev \
+        gcc cmake libgeos-dev git \
         openssh-server \
         ca-certificates curl gnupg nodejs && \
     apt-get clean && \

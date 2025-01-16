@@ -7,6 +7,8 @@ from asyncio import subprocess
 from html.parser import HTMLParser
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
+import random
+
 
 import aiofiles
 import httpx
@@ -435,6 +437,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
 
         if not country_code:
             country_codes = list((await get_available_data()).keys())
+            random.shuffle(country_codes)
         else:
             country_codes = [country_code]
         for c_code in country_codes:

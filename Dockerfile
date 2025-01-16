@@ -1,7 +1,11 @@
 # Use the GDAL image as the base
 FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 
-ARG GROUPNAME="cbsurge"
+ARG GROUP_NAME="cbsurge"
+ARG DATA_DIR='/data'
+
+ENV GROUP_NAME $GROUP_NAME
+ENV DATA_DIR $DATA_DIR
 
 # Install necessary tools and Python packages
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
@@ -21,17 +25,13 @@ WORKDIR /app
 COPY . .
 
 # Create a group and set permissions for /app
-RUN groupadd ${GROUPNAME} && \
-    usermod -aG ${GROUPNAME} root && \
+RUN groupadd ${GROUP_NAME} && \
+    usermod -aG ${GROUP_NAME} root && \
     mkdir -p /app && \
-    chown -R :${GROUPNAME} /app && \
-    chmod -R g+rwx /app
-
-# create home directory under /data folder
-ARG HOME_DIR='/data/home'
-RUN mkdir -p $HOME_DIR
-RUN chown -R :${GROUPNAME} $HOME_DIR
-ENV HOME $HOME_DIR
+    chown -R :${GROUP_NAME} /app && \
+    chmod -R g+rwx /app && \
+    mkdir -p $DATA_DIR && \
+    chown -R :${GROUP_NAME} $DATA_DIR
 
 RUN chmod +x /app/create_user.sh
 RUN chmod +x /app/entrypoint.sh

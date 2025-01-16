@@ -101,7 +101,11 @@ JUPYTER_USERS can have multiple users (username:password) for authentication
 JUPYTER_USERS=docker:docker user:user
 ```
 
-User home folder will be under `/data/home/{username}`.
+folder structure in the container will be as follows:
+
+- /data - it will be mounted to fileshare. All files under this folder will be kept
+  - /data/{username} - users can explore all users file, a user has no permission to edit other users' folder.
+- /home/{username} - user home folder. This data will be lost when the server is restarted.
 
 ### destroy docker container
 

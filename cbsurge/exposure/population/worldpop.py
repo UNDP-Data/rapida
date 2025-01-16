@@ -508,7 +508,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                 # Process predefined combinations
                 logging.info("Processing all predefined combinations...")
                 # random.shuffle(AGESEX_STRUCTURE_COMBINATIONS)
-                for combo in AGESEX_STRUCTURE_COMBINATIONS[2:4]:
+                for combo in AGESEX_STRUCTURE_COMBINATIONS[4:6]:
                     logging.info("Processing %s...", combo["label"])
                     await process_group(sexes=combo["sexes"], age_grouping=combo["age_group"], output_label=combo["label"])
             logging.info("All processing complete for country: %s", c_code)

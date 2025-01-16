@@ -37,7 +37,11 @@ dependencies = [
     "jupyterlab",
     "notebook",
     "dockerspawner",
-    "pytest"
+    "pytest",
+    "rich",
+    "morecantile",
+    "mapbox_vector_tile",
+    "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles"
 ]
 
 [project.scripts]
@@ -65,6 +69,9 @@ exclude = [
     "tests",
     "Makefile"
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [build-system]
 requires = ["hatchling"]

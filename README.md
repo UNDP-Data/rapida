@@ -101,7 +101,6 @@ JUPYTER_USERS can have multiple users (username:password) for authentication
 JUPYTER_USERS=docker:docker user:user
 ```
 
-
 User home folder will be under `/data/home/{username}`.
 
 ### destroy docker container

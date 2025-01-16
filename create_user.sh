@@ -21,6 +21,14 @@ else
     usermod -aG sudo "$USERNAME"
     echo "User $USERNAME granted sudo privileges."
 
-    echo "cd /app; pipenv shell;" >> /home/$USERNAME/.bashrc
+    # change user home directory
+    USER_HOME_DIR=$HOME/$USERNAME
+    mkdir -p "$USER_HOME_DIR"
+    chown "$USERNAME:$GROUPNAME" "$USER_HOME_DIR"  # Ensure ownership is set
+    usermod -d "$USER_HOME_DIR" "$USERNAME"
+    echo "User $USERNAME home directory changed to $USER_HOME_DIR."
+    rm -rf /home/$USERNAME
+
+    echo "cd /app; pipenv shell;" >> $USER_HOME_DIR/.bashrc
     echo "User $USERNAME profile was modified to launch venv in starting."
 fi

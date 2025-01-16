@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # Create multiple users from environment variable SSH_USERS
-# Format: SSH_USERS="user1:password1 user2:password2 user3:password3"
-if [ ! -z "$SSH_USERS" ]; then
-    for user_info in $SSH_USERS; do
+# Format: JUPYTER_USERS="user1:password1 user2:password2 user3:password3"
+if [ ! -z "$JUPYTER_USERS" ]; then
+    for user_info in $JUPYTER_USERS; do
         IFS=':' read -r username password <<< "$user_info"
         if [ ! -z "$username" ] && [ ! -z "$password" ]; then
             /app/create_user.sh "$username" "$password"
@@ -19,9 +19,6 @@ if [ "$PRODUCTION" = "true" ]; then
 else
     JUPYTER_PORT=8000
 fi
-
-# Start SSH server in the background
-/usr/sbin/sshd -D &
 
 # Start JupyterLab in the foreground (so the container keeps running)
 pipenv run jupyterhub -f jupyterhub_config.py --port=$JUPYTER_PORT

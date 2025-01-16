@@ -1893,7 +1893,9 @@ c.Authenticator.allow_all = True
 #
 #      c.Spawner.pre_spawn_hook = my_hook
 #  Default: None
-# c.Spawner.pre_spawn_hook = None
+def modify_home_dir(spawner):
+    spawner.notebook_dir = '/data'
+c.Spawner.pre_spawn_hook = modify_home_dir
 
 ## An optional hook function that you can implement to modify the ready event,
 #  which will be shown to the user on the spawn progress page when their server

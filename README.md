@@ -78,36 +78,34 @@ before running the above command, please use `devcontainer` or `make shell` to e
 make build
 ```
 
-### Launch SSH server
-
-- set users
-
-```
-cp .env.example .env
-vi .env
-```
-
-SSH_USERS can have multiple users (username:password) for SSH login
-
-```shell
-SSH_USERS=docker:docker user:user
-```
-
 - launch docker container
 
 ```shell
 make up
 ```
 
-The below command is connecting to `localhost` with user `docker` through port `2222`.
+You can access to JupyterHub through `http:localhost:8100` in your browser. 
+
+- set users
+
+Authenticate users can be set through `JUPYTER_USERS` variable at `.env` file.
+
+```
+cp .env.example .env
+vi .env
+```
+
+JUPYTER_USERS can have multiple users (username:password) for authentication
 
 ```shell
-ssh docker@localhost -p 2222
-
-# it will automatically enter venv in /app folder
-# then run rapida command
-rapida --help
+JUPYTER_USERS=docker:docker user:user
 ```
+
+folder structure in the container will be as follows:
+
+- /data - it will be mounted to fileshare. All files under this folder will be kept
+  - /data/{username} - users can explore all users file, a user has no permission to edit other users' folder.
+- /home/{username} - user home folder. This data will be lost when the server is restarted.
 
 ### destroy docker container
 

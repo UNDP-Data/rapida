@@ -14,7 +14,6 @@ services:
     entrypoint: "/app/entrypoint.sh"
 #    entrypoint: "pipenv run jupyterhub"
     ports:
-      - 2222:22
       - 8100:8000
     environment:
-      - SSH_USERS=${SSH_USERS:-''}
+      - JUPYTER_USERS=${JUPYTER_USERS:-''}

@@ -8,7 +8,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get update && \
     apt-get install -y python3-pip pipenv \
         gcc cmake libgeos-dev git \
-        openssh-server \
         ca-certificates curl gnupg nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
@@ -16,10 +15,6 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
 
 # install azure-cli
 RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
-
-RUN mkdir /var/run/sshd && \
-    echo 'PermitRootLogin no' >> /etc/ssh/sshd_config && \
-    echo 'PasswordAuthentication yes' >> /etc/ssh/sshd_config
 
 WORKDIR /app
 
@@ -32,6 +27,12 @@ RUN groupadd ${GROUPNAME} && \
     chown -R :${GROUPNAME} /app && \
     chmod -R g+rwx /app
 
+# create home directory under /data folder
+ARG HOME_DIR='/data/home'
+RUN mkdir -p $HOME_DIR
+RUN chown -R :${GROUPNAME} $HOME_DIR
+ENV HOME $HOME_DIR
+
 RUN chmod +x /app/create_user.sh
 RUN chmod +x /app/entrypoint.sh
 
@@ -40,7 +41,5 @@ ENV PIPENV_VENV_IN_PROJECT=1
 RUN pipenv install --dev --python 3 && \
     pipenv run pip install -e .
 ENV VIRTUAL_ENV=/app/.venv
-
-EXPOSE 22
 
 ENTRYPOINT ["/app/entrypoint.sh"]

@@ -7,7 +7,6 @@ from asyncio import subprocess
 from html.parser import HTMLParser
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional
-import random
 
 
 import aiofiles
@@ -437,7 +436,6 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
 
         if not country_code:
             country_codes = list((await get_available_data()).keys())
-            random.shuffle(country_codes)
         else:
             country_codes = [country_code]
         for c_code in country_codes:
@@ -508,7 +506,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                 # Process predefined combinations
                 logging.info("Processing all predefined combinations...")
                 # random.shuffle(AGESEX_STRUCTURE_COMBINATIONS)
-                for combo in AGESEX_STRUCTURE_COMBINATIONS[4:6]:
+                for combo in AGESEX_STRUCTURE_COMBINATIONS:
                     logging.info("Processing %s...", combo["label"])
                     await process_group(sexes=combo["sexes"], age_grouping=combo["age_group"], output_label=combo["label"])
             logging.info("All processing complete for country: %s", c_code)

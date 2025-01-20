@@ -305,7 +305,7 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
         credential=credential
     )
 
-    container_client = blob_service_client.get_container_client(container="stacdata")
+    container_client = blob_service_client.get_container_client(container=session.get_container_name())
 
     file_path, file_name = await __construct_file_name__()
 
@@ -352,7 +352,7 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
         session.get_blob_service_account_url(),
         credential=credential
     )
-    container_client = blob_service_client.get_container_client(container="stacdata")
+    container_client = blob_service_client.get_container_client(container=session.get_container_name())
     # storage_manager = AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
     for country_code, country_id in available_data.items():
         if country_code == "RUS":
@@ -509,7 +509,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
         credential=credential
     )
 
-    container_client = blob_service_client.get_container_client(container="stacdata")
+    container_client = blob_service_client.get_container_client(container=session.get_container_name())
 
     async def __progress__(current, total):
         logging.info("Progress: %s/%s", current, total)

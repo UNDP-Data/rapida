@@ -1,9 +1,10 @@
+import asyncio
 import logging
 import os
 
 import aiofiles
 from azure.storage.blob.aio import ContainerClient
-from tqdm.asyncio import tqdm
+from tqdm.asyncio import tqdm_asyncio, tqdm
 
 from cbsurge.constants import AZURE_BLOB_CONTAINER_NAME
 
@@ -19,16 +20,18 @@ class AzureBlobStorageManager:
         await az.download_blob(blob_name, local_directory)
         await az.download_files(azure_directory, local_directory)
     """
-    def __aenter__(self):
-        return self
-
-    def __aexit__(self, exc_type, exc_val, exc_tb):
-        return self.close()
-
     def __init__(self, conn_str):
         logging.info("Initializing Azure Blob Storage Manager")
         self.conn_str = conn_str
         self.container_client = ContainerClient.from_connection_string(conn_str=conn_str, container_name=AZURE_BLOB_CONTAINER_NAME)
+
+    async def __aenter__(self):
+        self.container_client = ContainerClient.from_connection_string(conn_str=self.conn_str, container_name=AZURE_BLOB_CONTAINER_NAME)
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if self.container_client:
+            return await self.close()
 
     async def upload_blob(self, file_path=None, blob_name=None):
         """
@@ -47,7 +50,7 @@ class AzureBlobStorageManager:
         file_size = os.path.getsize(file_path)
 
         async def __progress__(current, total):
-            tqdm(total=total, unit="B", unit_scale=True, desc=f"Uploading {blob_name}").update(current)
+            tqdm_asyncio(total=total, unit="B", unit_scale=True, desc=f"Uploading {blob_name}").update(current)
 
         async with aiofiles.open(file_path, "rb") as data:
             await blob_client.upload_blob(data, overwrite=True, max_concurrency=4, blob_type="BlockBlob", length=file_size, progress_hook=__progress__)
@@ -69,20 +72,24 @@ class AzureBlobStorageManager:
         for root, _, files in os.walk(local_directory):
             for file in files:
                 async def __progress__(current, total):
-                    tqdm(total=total, unit="B", unit_scale=True, desc=f"Uploading {blob_name}").update(current)
+                    tqdm_asyncio(total=total, unit="B", unit_scale=True, desc=f"Uploading {blob_name}").update(current)
                 file_path = os.path.join(root, file)
                 blob_name = f"{azure_directory}/{file}"
                 await self.upload_blob(file_path=file_path, blob_name=blob_name)
         return
 
+
+
     async def download_blob(self, blob_name=None, local_directory=None):
         """
         Download a blob from Azure Blob Storage.
+
         Args:
             blob_name: (str) The name of the blob to download.
             local_directory: (str) The local path to save the downloaded blob. If not provided, the blob will be saved in the current working directory.
-        Returns:
 
+        Returns:
+            str: The path to the downloaded file.
         """
         logging.info("Downloading blob: %s", blob_name)
         blob_client = self.container_client.get_blob_client(blob=blob_name)
@@ -90,9 +97,17 @@ class AzureBlobStorageManager:
         if local_directory:
             os.makedirs(local_directory, exist_ok=True)
             file_name = f"{local_directory}/{file_name}"
+
+        blob_properties = await blob_client.get_blob_properties()
+        total_size = blob_properties.size
+
         async with aiofiles.open(file_name, "wb") as data:
             blob = await blob_client.download_blob()
-            await data.write(await blob.readall())
+            progress = tqdm_asyncio(total=total_size, unit="B", unit_scale=True, desc=file_name)
+            async for chunk in blob.chunks():
+                await data.write(chunk)
+                progress.update(len(chunk))
+            progress.close()
         logging.info("Download completed for blob: %s", blob_name)
         return file_name
 
@@ -106,10 +121,65 @@ class AzureBlobStorageManager:
         Returns:
 
         """
-        async for blob in self.container_client.list_blobs(name_starts_with=azure_directory):
-            await self.download_blob(blob_name=blob.name, local_directory=local_directory)
+        blobs = await self.list_blobs(prefix=azure_directory)
+        for blob in blobs:
+            await self.download_blob(blob_name=blob, local_directory=local_directory)
         return
 
+    async def list_blobs(self, prefix=None):
+        """
+        List blobs in the Azure Blob Storage container.
+        Args:
+            prefix: (str) The prefix to filter blobs by.
+
+        Returns:
+        """
+        return [blob.name async for blob in self.container_client.list_blobs(name_starts_with=prefix)]
+
+
+    async def copy_file(self, source_blob=None, destination_blob=None):
+        """
+        Copy a file from one blob to another.
+        Args:
+            source_blob: (str) The name of the source blob to copy.
+            destination_blob: (str) The name of the destination blob to copy to.
+
+        Returns:
+
+        """
+        logging.info("Copying blob: %s to %s", source_blob, destination_blob)
+        source_blob_client = self.container_client.get_blob_client(blob=source_blob)
+        destination_blob_client = self.container_client.get_blob_client(blob=destination_blob)
+        await destination_blob_client.start_copy_from_url(source_blob_client.url)
+        return destination_blob_client.url
+
+    async def delete_blob(self, blob_name=None):
+        """
+        Delete a blob from Azure Blob Storage.
+        Args:
+            blob_name:
+
+        Returns:
+
+        """
+        logging.info("Deleting blob: %s", blob_name)
+        blob_client = self.container_client.get_blob_client(blob=blob_name)
+        await blob_client.delete_blob()
+        return blob_name
+
+    async def rename_file(self, source_blob=None, destination_blob=None):
+        """
+        Rename a blob file
+        Args:
+            source_blob:
+            destination_blob:
+
+        Returns:
+
+        """
+        await self.copy_file(source_blob=source_blob, destination_blob=destination_blob)
+        await self.delete_blob(blob_name=source_blob)
+        return destination_blob
 
     async def close(self):
         """
@@ -118,4 +188,3 @@ class AzureBlobStorageManager:
         """
         logging.info("Closing Azure Blob Storage Manager")
         return await self.container_client.close()
-

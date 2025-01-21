@@ -127,7 +127,6 @@ def filter_buildings_in_block(buildings_ds_path=None, mask_ds=None, block=None, 
         bbox = rasterio.windows.bounds(window=window, transform=mask_ds.transform)
 
         ds = read_dataframe(buildings_ds_path, bbox=bbox, read_geometry=True)
-        ds.rename_geometry('wkb_geometry')
 
         if len(ds) == 0:
             return block_id, None, None

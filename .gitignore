@@ -166,3 +166,5 @@ Pipfile
 Pipfile.lock
 
 data/
+cbsurge/azure/auth.py
+cbsurge/azure/token_cache.json

@@ -16,9 +16,9 @@ from rasterio.windows import Window
 import numpy as np
 from tqdm.asyncio import tqdm_asyncio
 
-from cbsurge.azure.blob_storage import AzureBlobStorageManager
 from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR, \
     AGESEX_STRUCTURE_COMBINATIONS, SEX_MAPPING
+from cbsurge.session import Session
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -157,22 +157,23 @@ async def validate_cog(file_path=None):
 
 
 
-async def check_cog_exists(storage_manager=None, blob_path=None):
+async def check_cog_exists(container_client=None, blob_path=None):
     """
     Validate that a COG file exists and is valid.
     Args:
-        storage_manager: AzStorageManager instance
+        container_client: azure.storage.blob.ContainerClient instance
         blob_path: Path to the COG file
     """
-    assert storage_manager is not None, "storage_manager is required"
+    assert container_client is not None, "Session instance is required"
     assert blob_path is not None, "blob_path is required"
     logging.info("Checking if COG exists: %s", blob_path)
-    blob_client = storage_manager.container_client.get_blob_client(blob_path)
+
+    blob_client = container_client.get_blob_client(blob_path)
     return await blob_client.exists()
 
 
 
-async def process_single_file(file_url=None, storage_manager=None, country_code=None, year=None, force_reprocessing=False, download_path=None):
+async def process_single_file(file_url=None, container_client=None, country_code=None, year=None, force_reprocessing=False, download_path=None):
     """
     Download a single file, convert the file to a COG and upload it to Azure Blob Storage.
     Args:
@@ -181,12 +182,12 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
         country_code: The country code for which the file is being processed
         file_url: URL to download the file from
         download_path: (Path) The local path to download the COG files to. It will upload to Azure if not provided.
-        storage_manager: AzStorageManager instance
+        container_client: azure.storage.blob.ContainerClient instance
     Returns: None
 
     """
     assert file_url is not None, "file_url is required"
-    assert storage_manager is not None, "storage_manager is required"
+    assert container_client is not None, "container client is required"
     assert file_url.endswith(".tif"), "Only .tif files are supported"
 
     file_name = file_url.split("/")[-1]
@@ -200,7 +201,7 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                 if age_range[0] <= int(age) <= age_range[1]:
                     age = age_group
                     break
-            cog_exists = await check_cog_exists(storage_manager=storage_manager,
+            cog_exists = await check_cog_exists(container_client=container_client,
                                             blob_path=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex}/{age}/{file_name}")
             if cog_exists and not force_reprocessing:
                 logging.info("COG already exists in Azure, skipping upload: %s", file_name)
@@ -237,7 +238,16 @@ async def process_single_file(file_url=None, storage_manager=None, country_code=
                                     raise Exception(f"Error copying COG file: {e}")
                             else:
                                 logging.info("Uploading COG file to Azure: %s", cog_path)
-                                await storage_manager.upload_blob(file_path=cog_path, blob_name=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex}/{age}/{file_name}")
+                                blob_name = f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex}/{age}/{file_name}"
+                                blob_client = container_client.get_blob_client(blob=blob_name)
+                                file_size = os.path.getsize(cog_path)
+
+                                async def __progress__(current, total):
+                                    logging.info("Progress: %s/%s", current, total)
+                                async with aiofiles.open(cog_path, "rb") as data:
+                                    await blob_client.upload_blob(data, overwrite=True, max_concurrency=4,
+                                                                  blob_type="BlockBlob", length=file_size,
+                                                                  progress_hook=__progress__)
 
 
         logging.info("Successfully processed file: %s", file_name)
@@ -261,21 +271,55 @@ async def get_links_from_table(data_id=None):
             return []
         return await extract_links_from_table(response.text)
 
-async def download(country_code=None, year=DATA_YEAR, force_reprocessing=False, download_path=None, sex=None, age_group=None):
+async def run_download(country_code=None, year=DATA_YEAR, download_path=None, sex=None, age_group=None, aggregate=True):
     """
     Args:
-        country_code: The country code of the country intended to be downloaded
-        year:
-        force_reprocessing:
-        download_path:
-        sex:
-        age_group:
 
+        country_code: The country code of the country intended to be downloaded
+        year: The year to download the data for
+        download_path: local download path
+        sex: The sex classification of the data to download
+        age_group: The age group classification of the data to download
+        aggregate: (bool) Whether to download the aggregate files
     Returns:
 
     """
-    # TODO: Should try to download data from azure, if the data is available
-    pass
+
+    async def __construct_file_name__():
+        if aggregate:
+            # construct the path for the aggregate files based of the WORLDPOP_AGE_MAPPING and get the label from the AGESEX_STRUCTURE_COMBINATIONS
+            for combo in AGESEX_STRUCTURE_COMBINATIONS:
+                if combo["age_group"] == age_group:
+                    return f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/aggregate", f"{country_code}_{combo['label']}.tif"
+        else:
+            # construct the path for the individual files checking where the age group falls in the WORLDPOP_AGE_MAPPING
+            pass
+    logging.info("Starting data download from azure")
+    session = Session()
+    async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
+        container_client = blob_service_client.get_container_client(container=session.get_container_name())
+
+        file_path, file_name = await __construct_file_name__()
+
+        blob_client = container_client.get_blob_client(blob=f"{file_path}/{file_name}")
+        if download_path:
+            os.makedirs(os.path.join(download_path), exist_ok=True)
+            local_download_path = os.path.join(download_path, file_name)
+
+            blob_properties = await blob_client.get_blob_properties()
+            total_size = blob_properties.size
+            async with aiofiles.open(local_download_path, "wb") as data:
+                blob = await blob_client.download_blob()
+                progress = tqdm_asyncio(total=total_size, unit="B", unit_scale=True, desc=file_name)
+                async for chunk in blob.chunks():
+                    await data.write(chunk)
+                    progress.update(len(chunk))
+                progress.close()
+
+            logging.info("Download completed for blob: %s", file_name)
+        return file_name
+
+
 
 async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=False, download_path=None):
     """
@@ -291,56 +335,56 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
     """
     logging.info("Starting data download")
     available_data = await get_available_data(country_code=country_code, year=year)
-    storage_manager = AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"))
-    for country_code, country_id in available_data.items():
-        if country_code == "RUS":
-            continue
-        logging.info("Processing country: %s", country_code)
-        file_links = await get_links_from_table(data_id=country_id)
-        for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
-            logging.info("Processing chunk %d for country: %s", i + 1, country_code)
-            # Create a fresh list of tasks for each file chunk
-            tasks = [process_single_file(file_url=url,
-                                         storage_manager=storage_manager,
-                                         year=year,
-                                         country_code=country_code,
-                                         force_reprocessing=force_reprocessing,
-                                         download_path=download_path) for url in file_urls_chunk]
+    session = Session()
+    async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
+        container_client = blob_service_client.get_container_client(container=session.get_container_name())
+        for country_code, country_id in available_data.items():
+            if country_code == "RUS":
+                continue
+            logging.info("Processing country: %s", country_code)
+            file_links = await get_links_from_table(data_id=country_id)
+            for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
+                logging.info("Processing chunk %d for country: %s", i + 1, country_code)
+                # Create a fresh list of tasks for each file chunk
+                tasks = [process_single_file(file_url=url,
+                                             container_client=container_client,
+                                             year=year,
+                                             country_code=country_code,
+                                             force_reprocessing=force_reprocessing,
+                                             download_path=download_path) for url in file_urls_chunk]
 
-            # Gather tasks and process results
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for result in results:
-                if isinstance(result, Exception):
-                    logging.error("Error processing file: %s", result)
-        logging.info("Data download complete for country: %s", country_code)
-        logging.info("Starting aggregate processing for country: %s", country_code)
-        await process_aggregates(country_code=country_code, download_path=download_path, force_reprocessing=force_reprocessing, )
-        # if await check_aggregates_exist(storage_manager=storage_manager, country_code=country_code):
-        #     logging.info("Aggregate files already exist for country: %s", country_code)
-        # else:
+                # Gather tasks and process results
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+                for result in results:
+                    if isinstance(result, Exception):
+                        logging.error("Error processing file: %s", result)
+            logging.info("Data download complete for country: %s", country_code)
+            logging.info("Starting aggregate processing for country: %s", country_code)
 
-            # logging.info("Aggregate processing complete for country: %s", country_code)
-    # Close the storage manager connection after all files have been processed
-    logging.info("Closing storage manager after processing all files")
-    await storage_manager.close()
+            if await check_aggregates_exist(container_client=container_client, country_code=country_code):
+                logging.info("Aggregate files already exist for country: %s", country_code)
+            else:
+                await process_aggregates(country_code=country_code, download_path=download_path,
+                                         force_reprocessing=force_reprocessing)
+    logging.info("All data download and processing complete for country: %s", country_code)
 
 
-async def check_aggregates_exist(storage_manager=AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")), country_code=None):
+async def check_aggregates_exist(container_client, country_code=None):
     """
     Check if aggregate files exist for a given country code.
     Args:
-        storage_manager: AzStorageManager instance
+        container_client: azure.storage.blob.ContainerClient instance
         country_code: The country code to check for
 
     Returns: True if all aggregate files exist, False otherwise
 
     """
-    assert storage_manager is not None, "storage_manager is required"
+    assert container_client is not None, "container_client is required"
     assert country_code is not None, "country_code is required"
     logging.info("Checking if aggregate files exist for country: %s", country_code)
     for combo in AGESEX_STRUCTURE_COMBINATIONS:
         blob_path = f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{country_code}/aggregate/{country_code}_{combo['label']}.tif"
-        cog_exists = await check_cog_exists(storage_manager=storage_manager, blob_path=blob_path)
+        cog_exists = await check_cog_exists(blob_path=blob_path, container_client=container_client)
         if not cog_exists:
             logging.info("Aggregate file does not exist: %s", blob_path)
             return False
@@ -421,7 +465,7 @@ def create_sum(input_file_paths, output_file_path, block_size=(256, 256)):
 
 
 
-async def process_aggregates(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None, year="2020", download_path=None, force_reprocessing=False):
+async def process_aggregates(country_code: str, sex: Optional[str] = None, age_group: Optional[str] = None, year="2020", download_path=None, force_reprocessing: bool=False, session=None):
     """
     Process aggregate files for combinations of sex and age groups, or specific arguments passed.
     Args:
@@ -432,12 +476,20 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
         download_path (Optional[str]): Local path to download the COG files to. If provided, the files will not be uploaded to Azure.
         force_reprocessing (Optional[bool]): Force reprocessing of the files even if they already exist in Azure.
     """
-    async with AzureBlobStorageManager(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING")) as storage_manager:
 
-        if not country_code:
-            country_codes = list((await get_available_data()).keys())
-        else:
-            country_codes = [country_code]
+    if not session:
+        session = Session()
+    if not country_code:
+        country_codes = list((await get_available_data()).keys())
+    else:
+        country_codes = [country_code]
+
+    async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
+        container_client = blob_service_client.get_container_client(container=session.get_container_name())
+
+        async def __progress__(current, total):
+            logging.info("Progress: %s/%s", current, total)
+
         for c_code in country_codes:
             logging.info("Processing aggregate files for country: %s", c_code)
             async def process_group(sexes: List[str]=None, age_grouping: Optional[str]=None, output_label: str=None):
@@ -454,10 +506,12 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                     assert age_grouping in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
                     paths = [f"{path}/{age_grouping}/" for path in paths]
 
-                # Fetch blobs
-                blobs = []
-                for path in paths:
-                    blobs += await storage_manager.list_blobs(path)
+                blobs = [
+                    blob.name
+                    for path in paths
+                    async for blob in container_client.list_blobs(name_starts_with=path)
+                ]
+
                 if not blobs:
                     logging.warning("No blobs found for paths: %s", paths)
                     return
@@ -467,8 +521,18 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                     local_files = []
                     # download blobs concurrently
                     async def create_local_files(blob):
+
+                        blob_client = container_client.get_blob_client(blob)
+                        blob_properties = await blob_client.get_blob_properties()
+                        total_size = blob_properties.size
                         local_file = os.path.join(temp_dir, os.path.basename(blob))
-                        await storage_manager.download_blob(blob, temp_dir)
+                        async with aiofiles.open(local_file, "wb") as data:
+                            blob = await blob_client.download_blob()
+                            progress = tqdm_asyncio(total=total_size, unit="B", unit_scale=True, desc=f"Downloading....{local_file}")
+                            async for chunk in blob.chunks():
+                                await data.write(chunk)
+                                progress.update(len(chunk))
+                            progress.close()
                         local_files.append(local_file)
                     tasks = [create_local_files(blob) for blob in blobs]
                     await asyncio.gather(*tasks)
@@ -483,10 +547,12 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                         os.makedirs(f"{download_path}/{DATA_YEAR}/{c_code}/aggregate", exist_ok=True)
                         shutil.copy2(output_file, f"{download_path}/{DATA_YEAR}/{c_code}/aggregate/{c_code}_{output_label}.tif")
                     else:
-                        await storage_manager.upload_blob(file_path=output_file, blob_name=blob_path)
+                        blob_client = container_client.get_blob_client(blob=blob_path)
+                        async with aiofiles.open(output_file, "rb") as data:
+                            await blob_client.upload_blob(data, overwrite=True, progress_hook=__progress__)
                     logging.info("Processed and uploaded: %s", blob_path)
 
-            if not force_reprocessing and await check_aggregates_exist(storage_manager=storage_manager, country_code=c_code):
+            if not force_reprocessing and await check_aggregates_exist(country_code=c_code, container_client=container_client):
                 logging.info("Aggregate files already exist for country: %s", c_code)
                 continue
             # Dynamic argument-based processing
@@ -505,11 +571,10 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
             else:
                 # Process predefined combinations
                 logging.info("Processing all predefined combinations...")
-                # random.shuffle(AGESEX_STRUCTURE_COMBINATIONS)
                 for combo in AGESEX_STRUCTURE_COMBINATIONS:
                     logging.info("Processing %s...", combo["label"])
                     await process_group(sexes=combo["sexes"], age_grouping=combo["age_group"], output_label=combo["label"])
-            logging.info("All processing complete for country: %s", c_code)
+    logging.info("All processing complete for country: %s", country_code)
 
 
 if __name__ == "__main__":

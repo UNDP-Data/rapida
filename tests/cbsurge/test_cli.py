@@ -1,7 +1,7 @@
 import pytest
 from typing import List
 from click.testing import CliRunner
-from cbsurge.cli import cli  # あなたの CLI コマンドが定義されているモジュールをインポート
+from cbsurge.cli import cli
 
 
 @pytest.mark.parametrize(

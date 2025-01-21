@@ -183,6 +183,7 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
 
     if make_root:
         logger = logging.getLogger()
+
     else:
         logger = logging.getLogger(name)
     formatter = logging.Formatter(

@@ -5,6 +5,7 @@ from collections import deque
 from cbsurge.exposure.builtenv.buildings.fgbgdal import OVERPASS_API_URL, GMOSM_BUILDINGS_ROOT
 from pyogrio.raw import open_arrow, write_arrow, read
 from cbsurge.exposure.builtenv.buildings.pmt import WEB_MERCATOR_TMS
+from cbsurge.constants import ARROWTYPE2OGRTYPE
 import morecantile as m
 from cbsurge import util
 import logging
@@ -60,7 +61,7 @@ ZOOMLEVEL_TILE_AREA =  {
                     }
 logger = logging.getLogger(__name__)
 
-ARROWTYPE2OGRTYPE = {'string':ogr.OFTString, 'double':ogr.OFTReal, 'int64':ogr.OFTInteger64, 'int':ogr.OFTInteger}
+
 
 def country_info(bbox=None, overpass_url=OVERPASS_API_URL):
     """

@@ -41,7 +41,9 @@ dependencies = [
     "rich",
     "morecantile",
     "mapbox_vector_tile",
-    "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles"
+    "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
+    "matplotlib",
+    "folium"
 ]
 
 [project.scripts]

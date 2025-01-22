@@ -1,7 +1,6 @@
 import asyncio
 
 import click
-from sqlalchemy import True_
 
 from cbsurge.exposure.population.worldpop import population_sync, process_aggregates, run_download
 

@@ -11,7 +11,7 @@ ENV DATA_DIR $DATA_DIR
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get update && \
     apt-get install -y python3-pip pipenv \
-        gcc cmake libgeos-dev git \
+        gcc cmake libgeos-dev git vim \
         ca-certificates curl gnupg nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \

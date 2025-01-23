@@ -13,7 +13,7 @@ shell:
 	@echo "------------------------------------------------------------------"
 	@echo "Shelling in dev mode"
 	@echo "------------------------------------------------------------------"
-	docker compose -f docker-compose.yaml run --entrypoint /bin/bash cbsurge
+	docker compose -f docker-compose.yaml run --remove-orphans --entrypoint /bin/bash cbsurge
 
 
 test:

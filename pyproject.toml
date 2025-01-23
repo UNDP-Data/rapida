@@ -43,7 +43,8 @@ dependencies = [
     "mapbox_vector_tile",
     "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
     "matplotlib",
-    "folium"
+    "folium",
+    "ipywidgets"
 ]
 
 [project.scripts]

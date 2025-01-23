@@ -273,8 +273,9 @@ async def get_links_from_table(data_id=None):
 
 async def run_download(country_code=None, year=DATA_YEAR, download_path=None, sex=None, age_group=None, non_aggregates=False):
     """
-    Args:
+    Download population data (Cloud Optimised GeoTiff format) from UNDP Azure Blob Storage.
 
+    Args:
         country_code: (Required) The country code of the country intended to be downloaded
         year: (Not implemented) The year to download the data for
         download_path: (Required) local download path
@@ -318,6 +319,8 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
                 return [b.name async for b in
                         c_client.list_blobs(name_starts_with=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/aggregate")]
         else:
+            assert age_group!='total', "age-group=total is not supported for non aggregated data mode."
+
             if sex and age_group:
                 return [b.name async for b in c_client.list_blobs(name_starts_with=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/{sex}/{age_group}")]
             elif sex:

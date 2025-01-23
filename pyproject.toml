@@ -44,6 +44,7 @@ dependencies = [
     "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
     "matplotlib",
     "folium",
+    "jupyterlab_widgets",
     "ipywidgets"
 ]
 

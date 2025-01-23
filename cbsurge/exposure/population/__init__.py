@@ -37,5 +37,5 @@ def download(country, download_path, age_group, sex, non_aggregates):
 @click.option('--sex', help='The sex (male or female) to process the data for', type=click.Choice(['male', 'female']))
 @click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
 @click.option('--force-reprocessing', help='Force reprocessing of data even if the data specified already exists', is_flag=True)
-def run_aggregate(country, age_group, sex, download_path, force_reprocessing):
+def aggregate(country, age_group, sex, download_path, force_reprocessing):
     asyncio.run(process_aggregates(country_code=country, age_group=age_group, sex=sex, download_path=download_path, force_reprocessing=force_reprocessing))

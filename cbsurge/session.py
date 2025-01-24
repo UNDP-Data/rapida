@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+
 from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
@@ -27,6 +28,11 @@ class Session(object):
     def __exit__(self, exc_type, exc_value, traceback):
         pass
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        pass
 
     def get_config_file_path(self) -> str:
         user_dir = os.path.expanduser("~")
@@ -210,10 +216,9 @@ class Session(object):
         If the parameter is not set, use default account name from config.
 
         Usage example:
-            with Session() as session:
-                blob_service_client = session.get_blob_service_client(
-                    account_name="undpgeohub"
-                )
+            async with Session() as session:
+                async with session.get_blob_service_client(account_name="undpgeohub") as blob_service_client:
+                    # do something
 
         Parameters:
             account_name (str): name of storage account. https://{account_name}.blob.core.windows.net
@@ -234,15 +239,25 @@ class Session(object):
 
         If the parameter is not set, use default account name from config.
 
+        Usage example:
+        async with Session() as session:
+            async with session.get_blob_container_client() as container_client:
+                # do something
+
         Parameters:
             account_name (str): name of storage account. https://{account_name}.blob.core.windows.net
             container_name (str): name of storage container name. https://{account_name}.blob.core.windows.net/{container_name}
         Returns:
             ContainerClient
         """
-        blob_service_client = self.get_blob_service_client(account_name)
+        credential = self.get_credential()
+        account_url = self.get_blob_service_account_url(account_name)
         ct_name = container_name if container_name is not None else self.get_container_name()
-        container_client = blob_service_client.get_container_client(ct_name)
+        container_client = ContainerClient(
+            account_url=account_url,
+            credential=credential,
+            container_name=ct_name
+        )
         return container_client
 
     def get_blob_service_account_url(self, account_name: str = None) -> str:
@@ -281,7 +296,7 @@ class Session(object):
             ShareServiceClient
         """
         credential = self.get_credential()
-        account_url = self.get_share_service_account_url(account_name, share_name)
+        account_url = self.get_file_share_account_url(account_name, share_name)
         share_service_client = ShareServiceClient(
             account_url=account_url,
             credential=credential
@@ -301,3 +316,26 @@ class Session(object):
         ac_name = account_name if account_name is not None else self.get_account_name()
         sh_name = share_name if share_name is not None else self.get_file_share_name()
         return f"https://{ac_name}.file.core.windows.net/{sh_name}"
+
+
+# for testing
+# import asyncio
+# async def main():
+#     # Create the session object
+#     async with Session() as session:
+#         async with session.get_blob_container_client(container_name="stacdata") as container_client:
+#             blob_name = "worldpop/2020/ABW/aggregate/ABW_active_total.tif"
+#             print(f"Downloading blob: {blob_name}")
+#             stream = await container_client.download_blob(blob=blob_name)
+#             data = await stream.readall()
+#             await container_client.close()
+#
+#             # Save the blob data to a local file
+#             output_file = "ABW_active_total.tif"
+#             with open(output_file, "wb") as file:
+#                 file.write(data)
+#
+#             print(f"Blob downloaded successfully and saved as '{output_file}'")
+#
+# if __name__ == "__main__":
+#     asyncio.run(main())

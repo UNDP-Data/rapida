@@ -526,49 +526,49 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
         async def __progress__(current, total):
             logging.info("Progress: %s/%s", current, total)
 
-        for c_code in country_codes:
-            logging.info("Processing aggregate files for country: %s", c_code)
-            async def process_group(sexes: List[str]=None, age_grouping: Optional[str]=None, output_label: str=None):
-                """
-                Processes and sums files for specified sexes and age groups.
-                Args:
-                    sexes (List[str]): List of sexes (e.g., ['male'], ['female'], or ['male', 'female']).
-                    age_grouping (Optional[str]): Age group to process.
-                    output_label (str): Label for the output file.
-                """
-                # Construct paths
-                paths = [f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{c_code}/{s}" for s in sexes]
-                if age_grouping:
-                    assert age_grouping in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
-                    paths = [f"{path}/{age_grouping}/" for path in paths]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for c_code in country_codes:
+                logging.info("Processing aggregate files for country: %s", c_code)
+                async def process_group(sexes: List[str]=None, age_grouping: Optional[str]=None, output_label: str=None):
+                    """
+                    Processes and sums files for specified sexes and age groups.
+                    Args:
+                        sexes (List[str]): List of sexes (e.g., ['male'], ['female'], or ['male', 'female']).
+                        age_grouping (Optional[str]): Age group to process.
+                        output_label (str): Label for the output file.
+                    """
+                    # Construct paths
+                    paths = [f"{AZ_ROOT_FILE_PATH}/{DATA_YEAR}/{c_code}/{s}" for s in sexes]
+                    if age_grouping:
+                        assert age_grouping in WORLDPOP_AGE_MAPPING, "Invalid age group provided"
+                        paths = [f"{path}/{age_grouping}/" for path in paths]
 
-                blobs = [
-                    blob.name
-                    for path in paths
-                    async for blob in container_client.list_blobs(name_starts_with=path)
-                ]
+                    blobs = [
+                        blob.name
+                        for path in paths
+                        async for blob in container_client.list_blobs(name_starts_with=path)
+                    ]
 
-                if not blobs:
-                    logging.warning("No blobs found for paths: %s", paths)
-                    return
+                    if not blobs:
+                        logging.warning("No blobs found for paths: %s", paths)
+                        return
 
-                # Download blobs and sum them
-                with tempfile.TemporaryDirectory() as temp_dir:
+                    # Download blobs and sum them
                     local_files = []
                     # download blobs concurrently
                     async def create_local_files(blob):
-
                         blob_client = container_client.get_blob_client(blob)
                         blob_properties = await blob_client.get_blob_properties()
                         total_size = blob_properties.size
                         local_file = os.path.join(temp_dir, os.path.basename(blob))
-                        async with aiofiles.open(local_file, "wb") as data:
-                            blob = await blob_client.download_blob()
-                            progress = tqdm_asyncio(total=total_size, unit="B", unit_scale=True, desc=f"Downloading....{local_file}")
-                            async for chunk in blob.chunks():
-                                await data.write(chunk)
-                                progress.update(len(chunk))
-                            progress.close()
+                        if not os.path.exists(local_file):
+                            async with aiofiles.open(local_file, "wb") as data:
+                                blob = await blob_client.download_blob()
+                                progress = tqdm_asyncio(total=total_size, unit="B", unit_scale=True, desc=f"Downloading....{local_file}")
+                                async for chunk in blob.chunks():
+                                    await data.write(chunk)
+                                    progress.update(len(chunk))
+                                progress.close()
                         local_files.append(local_file)
                     tasks = [create_local_files(blob) for blob in blobs]
                     await asyncio.gather(*tasks)
@@ -588,28 +588,28 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                             await blob_client.upload_blob(data, overwrite=True, progress_hook=__progress__)
                     logging.info("Processed and uploaded: %s", blob_path)
 
-            if not force_reprocessing and await check_aggregates_exist(country_code=c_code, container_client=container_client):
-                logging.info("Aggregate files already exist for country: %s", c_code)
-                continue
-            # Dynamic argument-based processing
-            if sex and age_group:
-                label = f"{sex}_{age_group}"
-                logging.info("Processing for sex '%s' and age group '%s'", sex, age_group)
-                await process_group(sexes=[sex], age_grouping=age_group, output_label=label)
-            elif sex:
-                label = f"{sex}_total"
-                logging.info("Processing for sex '%s' (all age groups)", sex)
-                await process_group(sexes=[sex], output_label=label)
-            elif age_group:
-                label = f"{age_group}_total"
-                logging.info("Processing for age group '%s' (both sexes)", age_group)
-                await process_group(sexes=['male', 'female'], age_grouping=age_group, output_label=label)
-            else:
-                # Process predefined combinations
-                logging.info("Processing all predefined combinations...")
-                for combo in AGESEX_STRUCTURE_COMBINATIONS:
-                    logging.info("Processing %s...", combo["label"])
-                    await process_group(sexes=combo["sexes"], age_grouping=combo["age_group"], output_label=combo["label"])
+                if not force_reprocessing and await check_aggregates_exist(country_code=c_code, container_client=container_client):
+                    logging.info("Aggregate files already exist for country: %s", c_code)
+                    continue
+                # Dynamic argument-based processing
+                if sex and age_group:
+                    label = f"{sex}_{age_group}"
+                    logging.info("Processing for sex '%s' and age group '%s'", sex, age_group)
+                    await process_group(sexes=[sex], age_grouping=age_group, output_label=label)
+                elif sex:
+                    label = f"{sex}_total"
+                    logging.info("Processing for sex '%s' (all age groups)", sex)
+                    await process_group(sexes=[sex], output_label=label)
+                elif age_group:
+                    label = f"{age_group}_total"
+                    logging.info("Processing for age group '%s' (both sexes)", age_group)
+                    await process_group(sexes=['male', 'female'], age_grouping=age_group, output_label=label)
+                else:
+                    # Process predefined combinations
+                    logging.info("Processing all predefined combinations...")
+                    for combo in AGESEX_STRUCTURE_COMBINATIONS:
+                        logging.info("Processing %s...", combo["label"])
+                        await process_group(sexes=combo["sexes"], age_grouping=combo["age_group"], output_label=combo["label"])
     logging.info("All processing complete for country: %s", country_code)
 
 

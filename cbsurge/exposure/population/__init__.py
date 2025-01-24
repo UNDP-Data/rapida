@@ -17,6 +17,30 @@ def population():
 @click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
 @click.option('--all-data', help='Sync all datasets for all countries. It should not be used together with --country flag', is_flag=True, default=False)
 def sync(force_reprocessing, country, download_path, all_data):
+    """
+    Download population data (sex and age structures) from worldpop,
+    then do additional processing to convert them to Cloud Optimised GeoTiff and aggregate them for our needs.
+
+    If `--download-path` is provided, it will save the data to a local folder. Otherwise, it will automatically save to the provided azure container.
+
+    You can process for a specific country by using `--country` option or all countries with `--all-data` option.
+
+    Use `--force-reprocessing` parameter, it will force reprocessing of data even if the data specified already exists.
+
+    Usage example:
+
+    - Download for a country to a local folder
+
+        rapida population sync --country=RWA --download-path=/data
+
+    - Download for all countries to a local folder
+
+        rapida population sync --all-data --download-path=/data
+
+    - Download and upload to Azure Blob Storage container for a country
+
+        rapida population sync --country=RWA
+    """
     if all_data and country:
         raise click.UsageError("The --country flag should not be used together with --all-data flag")
     asyncio.run(population_sync(force_reprocessing=force_reprocessing, country_code=country, download_path=download_path, all_data=all_data))
@@ -77,4 +101,13 @@ def download(country, download_path, age_group, sex, non_aggregates):
 @click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
 @click.option('--force-reprocessing', help='Force reprocessing of data even if the data specified already exists', is_flag=True)
 def aggregate(country, age_group, sex, download_path, force_reprocessing):
+    """
+    Aggregate original worldpop data and aggregate them
+
+    If ` --download-path` is provided, it will save aggregated data to a local folder. Otherwise it will automatically save to the provided azure container.
+
+    Use `--country` to specify a country ISO3 code to process it.
+
+    You can only aggregate for a specific age group or sex by using `--age-group` or `--sex` options.
+    """
     asyncio.run(process_aggregates(country_code=country, age_group=age_group, sex=sex, download_path=download_path, force_reprocessing=force_reprocessing))

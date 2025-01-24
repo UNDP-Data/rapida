@@ -26,5 +26,4 @@ AGESEX_STRUCTURE_COMBINATIONS = [
             {"sexes": ["male", "female"], "age_group": "elderly", "label": "elderly_total"},
             {"sexes": ["male", "female"], "age_group": "child", "label": "child_total"},
             {"sexes": ["male", "female"], "age_group": "active", "label": "active_total"},
-            {"sexes": ["male", "female"], "age_group": None, "label": "total"},
         ]

@@ -1,7 +1,6 @@
 import logging
 import os
 import json
-from typing import List
 
 from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError

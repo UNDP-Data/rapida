@@ -42,6 +42,7 @@ class ComponentBase(metaclass=ABCMeta):
                admin_file: str,
                output_folder: str,
                mask_file: str = None,
+               masked_value: float = None,
                variables: List[str] = None
                )->str:
         """
@@ -50,7 +51,8 @@ class ComponentBase(metaclass=ABCMeta):
         Args:
             admin_file: admin vector file path. Interested area either BBOX or country ISO3 codes are computed from a given admin file
             output_folder: output folder to store all intermediary files and output files
-            mask_file: optional. raster mask file path. If provided, mask all component variables to compute affected variables.
+            mask_file: optional. raster mask file path. If provided, mask all component variables to compute affected variables. Affected variables will be named like `affected_XXXX`.
+            masked_value: optional. As default, 1 is used to mask unless masked value is provided through the argument.
             variables: optional. The list of names of a variable to process. If skipped, all variables are processed.
         Returns:
             A file path of output file

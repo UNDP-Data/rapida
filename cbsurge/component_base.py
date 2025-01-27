@@ -12,16 +12,18 @@ class ComponentBase(metaclass=ABCMeta):
 
     @abstractmethod
     def download(self,
-                 bbox: List[float],
                  output_folder: str,
+                 bbox: List[float] = None,
+                 countries: List[str] = None,
                  variables: List[str] = None
                  )->List[str]:
         """
-        Download files for a component
+        Download files for a component. Either `bbox` or `countries` must be provided.
 
         Args:
-            bbox: The bounding box for an interested area (the list of float values: minx, miny, maxx, maxy)
             output_folder: output folder to store downloaded files
+            bbox: The bounding box for an interested area (the list of float values: minx, miny, maxx, maxy)
+            countries: List of country ISO 3 codes.
             variables: Optional. The list of names of a variable to download. If skipped, all variables are downloaded.
         Returns:
             the list of downloaded file paths

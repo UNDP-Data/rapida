@@ -11,6 +11,13 @@ class ComponentBase(metaclass=ABCMeta):
     """
 
     @abstractmethod
+    def get_available_variables(self) -> List[str]:
+        """
+        Returns a list of available variables for this component.
+        """
+        pass
+
+    @abstractmethod
     def download(self,
                  output_folder: str,
                  bbox: List[float] = None,

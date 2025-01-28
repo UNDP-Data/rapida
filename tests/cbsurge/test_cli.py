@@ -35,7 +35,7 @@ from cbsurge.cli import cli
         # test for rapida population --help
         (
             ["population", "--help"],
-            ["download", "run-aggregate", "sync"]
+            ["download", "aggregate", "sync"]
         ),
         # test for rapida population download --help
         (
@@ -44,8 +44,8 @@ from cbsurge.cli import cli
         ),
         # test for rapida population run-aggregate --help
         (
-            ["population", "run-aggregate", "--help"],
-            ["population run-aggregate"]
+            ["population", "aggregate", "--help"],
+            ["population aggregate"]
         ),
         # test for rapida population sync --help
         (

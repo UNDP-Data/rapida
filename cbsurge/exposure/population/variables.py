@@ -89,11 +89,13 @@ def generate_wpop_files(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sex_grou
 if __name__ == '__main__':
     logger = util.setup_logger(name='rapida', level=logging.INFO)
 
-
-
-
-
-
     variables = generate_wpop_files()
     print(json.dumps(variables, indent=2))
+
+    with Session() as ses:
+        pop = ses.config['variables']['population']
+
+        ses.config['variables']['population'].update(**variables)
+        print(json.dumps(ses.config, indent=2))
+        ses.save_config()
 

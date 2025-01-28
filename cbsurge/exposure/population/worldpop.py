@@ -336,6 +336,7 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
 
     logging.info("Starting data download from azure")
     session = Session()
+    downloaded_files = []
     async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
         container_client = blob_service_client.get_container_client(container=session.get_container_name())
 
@@ -353,8 +354,10 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
                     await data.write(chunk)
                     progress.update(len(chunk))
                 progress.close()
+            downloaded_files.append(local_download_path)
             logging.info("Download completed for blob: %s", blob_path.split("/")[-1])
         logging.info("All data download complete")
+        return downloaded_files
 
 
 

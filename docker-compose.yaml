@@ -10,6 +10,7 @@ services:
       - ./Makefile:/app/Makefile
       - ./cbsurge:/app/cbsurge # mount app folder to container
       - ./tests:/app/tests
+      - ./data:/data
     entrypoint: "/app/entrypoint.sh"
 #    entrypoint: "pipenv run jupyterhub"
     ports:

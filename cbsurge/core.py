@@ -2,10 +2,14 @@ import json
 from sympy.parsing.sympy_parser import parse_expr
 from osgeo_utils import gdal_calc
 from pydantic import BaseModel, Field
-import typing
+from typing import Optional, List
 import pkgutil
 import os
 import re
+
+from cbsurge.session import Session
+
+
 def list_surge_packages(path=os.path.dirname(__file__), valid_names = ('exposure',)):
     for e in pkgutil.walk_packages([path]):
         for vname in valid_names:
@@ -14,15 +18,17 @@ def list_surge_packages(path=os.path.dirname(__file__), valid_names = ('exposure
 
 
 class Variable(BaseModel):
-    id: str
     name: str
+    title: str
     source: str = None
-    file: str = None
+    files: Optional[List[str]] = None
     _extractor_:str = r"\{([^}]+)\}"
-    _default_operators_ = '+-/*'
-    computed: typing.Optional[bool] = None
-    operators: typing.Optional[set[str]] = None
-    _source_file_:str = None
+    _default_operators_ = '+-/*%'
+    is_computable: Optional[bool] = True
+    is_raster: Optional[bool] = True
+    #operators: Optional[set[str]] = None
+    #_source_file_:str = None
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.resolve(**kwargs)
@@ -35,30 +41,31 @@ class Variable(BaseModel):
             assert varname in kwargs, f'"{varname}" kwarg is required to generate source files'
         return self.file.format(**kwargs)
 
+    def download(self, **kwargs):
+        pass
+
     def compute(self):
         parsed_expr = parse_expr(self.source)
         variables = parsed_expr.free_symbols
 
-
+    def __call__(self, *args, **kwargs):
+        raise NotImplemented(f'Only subclasses of {self.__class__.__name__} implement this method')
 
     def resolve(self, **kwargs):
         if self.source is not None:
+
             operators = set(self._default_operators_).intersection(self.source)
-            if operators:
-                self.operators = operators
-                self.computed = True
-                self.compute()
+            if operators:pass
+        else:
+            self.is_computable = False
 
 
 
 
 if __name__ == '__main__':
 
-    #list_surge_packages()
-    with open('./exposure/population/variables.json') as vsrc:
-        json_data = json.load(vsrc)
-        for v in json_data:
-            if v['id'] == 'dependency':
-                vr = Variable(**v)
+    with Session() as ses:
+        for var_name, var_data in ses.config['variables']['population'].items():
 
-                print(vr)
+            v = Variable(name=var_name, **var_data)
+            print(v)

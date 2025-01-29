@@ -10,6 +10,10 @@ class ComponentBase(metaclass=ABCMeta):
     - assess: A command to do all processing for a component including downloading component data, merging and making stats for a given admin data.
     """
 
+
+
+
+
     @abstractmethod
     def get_available_variables(self) -> List[str]:
         """
@@ -58,3 +62,5 @@ class ComponentBase(metaclass=ABCMeta):
             A file path of output file
         """
         pass
+
+

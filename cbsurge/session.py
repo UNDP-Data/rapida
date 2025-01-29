@@ -1,6 +1,7 @@
 import logging
 import os
 import json
+import typing
 
 from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
@@ -317,7 +318,32 @@ class Session(object):
         sh_name = share_name if share_name is not None else self.get_file_share_name()
         return f"https://{ac_name}.file.core.windows.net/{sh_name}"
 
+    def get_components(self):
+        """
+        Gets the available components in the config file
+        :return: iterator[str]
+        """
+        variables = self.get_config_value_by_key(key='variables')
+        return set(variables.keys())
 
+    def get_component(self, component:str = None):
+        """
+        Get the config dict for a component
+        :param component: str, name of the component
+        :return: dict with its config extracted from the config  file
+        """
+        variables = self.get_config_value_by_key(key='variables')
+        return variables[component]
+
+    def get_variable(self, component:str= None, variable=None ):
+        """
+        Gets the config for a given variable from a component
+        :param component:
+        :param variable:
+        :return:
+        """
+        component = self.get_component(component=component)
+        return component[variable]
 # for testing
 # import asyncio
 # async def main():

@@ -139,11 +139,11 @@ class Session(object):
 
     def get_credential(self):
         """
-        get token credential for azure.
+        get token credential for az.
 
         Usage example:
 
-        from azure.storage.blob import BlobServiceClient
+        from az.storage.blob import BlobServiceClient
         from cbsurge.session import Session
 
         session = Session()

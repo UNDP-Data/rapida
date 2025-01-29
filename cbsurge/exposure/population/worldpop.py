@@ -21,7 +21,7 @@ from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AG
 from cbsurge.session import Session
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logging.getLogger("azure").setLevel(logging.WARNING)
+logging.getLogger("az").setLevel(logging.WARNING)
 
 
 
@@ -161,7 +161,7 @@ async def check_cog_exists(container_client=None, blob_path=None):
     """
     Validate that a COG file exists and is valid.
     Args:
-        container_client: azure.storage.blob.ContainerClient instance
+        container_client: az.storage.blob.ContainerClient instance
         blob_path: Path to the COG file
     """
     assert container_client is not None, "Session instance is required"
@@ -182,7 +182,7 @@ async def process_single_file(file_url=None, container_client=None, country_code
         country_code: The country code for which the file is being processed
         file_url: URL to download the file from
         download_path: (Path) The local path to download the COG files to. It will upload to Azure if not provided.
-        container_client: azure.storage.blob.ContainerClient instance
+        container_client: az.storage.blob.ContainerClient instance
     Returns: None
 
     """
@@ -334,7 +334,7 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
             else:
                 return list(filter(lambda x : not x.startswith(f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}/aggregate/"), [b.name async for b in c_client.list_blobs(name_starts_with=f"{AZ_ROOT_FILE_PATH}/{year}/{country_code}")]))
 
-    logging.info("Starting data download from azure")
+    logging.info("Starting data download from az")
     session = Session()
     async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
         container_client = blob_service_client.get_container_client(container=session.get_container_name())
@@ -362,7 +362,7 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
     """
     Download all available data for a given country and year.
     Args:
-        force_reprocessing: (bool) Force reprocessing of any files found in azure
+        force_reprocessing: (bool) Force reprocessing of any files found in az
         country_code: (str) The country code for which to download data
         year: (Not implemented) The year for which to download data
         download_path: (Path) The local path to download the COG files to. It will upload to Azure if not provided.
@@ -409,7 +409,7 @@ async def check_aggregates_exist(container_client, country_code=None):
     """
     Check if aggregate files exist for a given country code.
     Args:
-        container_client: azure.storage.blob.ContainerClient instance
+        container_client: az.storage.blob.ContainerClient instance
         country_code: The country code to check for
 
     Returns: True if all aggregate files exist, False otherwise

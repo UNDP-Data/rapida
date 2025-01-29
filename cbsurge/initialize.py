@@ -40,7 +40,7 @@ def setup_prompt(session: Session):
             root_data_folder = data_folder
     session.set_root_data_folder(root_data_folder)
 
-    # azure blob container setting
+    # az blob container setting
     account_name = click.prompt('Please enter account name for UNDP Azure. Enter to skip if use default value',
                                 type=str, default='undpgeohub')
     session.set_account_name(account_name)
@@ -51,7 +51,7 @@ def setup_prompt(session: Session):
     session.set_container_name(container_name)
     click.echo(f"container name: {container_name}")
 
-    # azure file share setting
+    # az file share setting
     share_name = click.prompt('Please enter share name for UNDP Azure. Enter to skip if use default value',
                               type=str, default='cbrapida')
     session.set_file_share_name(share_name)

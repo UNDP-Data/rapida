@@ -16,10 +16,12 @@ def validate_azure_storage_path(a_path:str|None = None):
 
 
 def silence_httpx_az():
-    azlogger = logging.getLogger('azure.core.pipeline.policies.http_logging_policy')
+    #azlogger = logging.getLogger('az.core.pipeline.policies.http_logging_policy')
+    azlogger = logging.getLogger('azure')
     azlogger.setLevel(logging.WARNING)
     httpx_logger = logging.getLogger('httpx')
     httpx_logger.setLevel(logging.WARNING)
+
 
 def chunker(iterable, size):
     it = iter(iterable)

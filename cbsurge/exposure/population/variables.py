@@ -95,10 +95,10 @@ if __name__ == '__main__':
     variables = generate_wpop_files()
     print(json.dumps(variables, indent=2))
 
-    with Session() as ses:
-        pop = ses.config['variables']['population']
-
-        ses.config['variables']['population'] = variables
-        print(json.dumps(ses.config, indent=2))
-        ses.save_config()
+    # with Session() as ses:
+    #     pop = ses.config['variables']['population']
+    #
+    #     ses.config['variables']['population'] = variables
+    #     print(json.dumps(ses.config, indent=2))
+    #     ses.save_config()
 

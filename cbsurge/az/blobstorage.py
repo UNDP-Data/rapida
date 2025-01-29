@@ -201,7 +201,7 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder = None, max_
                                                 description=f'[red]Downloaded  {len(downloaded_files)} out of {len(src_blobs)} ',
                                                 advance=1)
                             except Exception as e:
-                                logger.error(f'Failed to download tile {downloaded_file_name}. {e}')
+                                logger.error(f'Failed to download  {downloaded_file_name}. {e}')
                                 failed_tasks.append((downloaded_file_name, e))
                         # handle pending
                         for pending_task in pending:
@@ -211,7 +211,7 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder = None, max_
                                 await pending_task
                                 failed_tasks.append((downloaded_file_name, asyncio.Timeout))
                             except Exception as e:
-                                logger.error(f'Failed to download tile {filename_to_download}. {e}')
+                                logger.error(f'Failed to download {filename_to_download}. {e}')
                                 failed_tasks.append((filename_to_download, e))
                     except (asyncio.CancelledError, KeyboardInterrupt) as de:
                         logger.debug(f'Cancelling download tasks')

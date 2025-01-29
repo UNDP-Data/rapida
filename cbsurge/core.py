@@ -7,7 +7,7 @@ from osgeo_utils import gdal_calc
 from pydantic import BaseModel, FilePath
 from typing import Optional, List, Union
 import re
-
+from cbsurge.stats.zst import zonal_stats
 from cbsurge.az.blobstorage import download
 from cbsurge.session import Session
 from cbsurge import util
@@ -154,7 +154,8 @@ class SurgeVariable(BaseModel):
             src_path = self.interpolate(template=self.source, **kwargs)
             _, file_name = os.path.split(src_path)
             self.local_path = os.path.join(self._source_folder_, file_name)
-            logger.info(f'Going to download {src_path} to {self.local_path} ')
+            if os.path.exists(self.local_path): return self.local_path
+            logger.idebug(f'Going to download {src_path} to {self.local_path} ')
             downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path)                             )
             assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
             return downloaded_file
@@ -163,19 +164,35 @@ class SurgeVariable(BaseModel):
         pass
 
     def resolve(self, **kwargs):
-        for var in self.variables:
-            print(var)
 
-    def __call__(self,  **kwargs):
+        with Session() as s:
+            src_rasters = list()
+            vars_ops = list()
+            for var in self.variables:
+                var_dict = s.get_variable(component=self.component, variable=var)
+                v = self.__class__(name=var, component=self.component, **var_dict)
+                p = v(**kwargs) # resolve
+                logger.info(f'{var} was resolved to {p}')
+                src_rasters.append(p)
+                vars_ops.append((var, 'sum'))
 
-            # # first try to download from source
-            # if self.source:
-            #     self.download(**kwargs)
+            gdf = zonal_stats(src_rasters=src_rasters,src_vector=kwargs['admin'], vars_ops=vars_ops)
+            expr = f'{self.name}={self.sources}'
+            gdf.eval(expr, inplace=True)
+            gdf.to_file(f'/tmp/popstats.fgb', driver='FlatGeobuf',index=False,engine='pyogrio', )
+
+    def __call__(self, force_compute=False, **kwargs):
+
+
+            # first try to download from source
+            if self.source and not force_compute:
+                return self.download(**kwargs)
             # use sources to compute
             if self.sources:
                 if self.variables:
                     logger.info(f'Going to compute {self.name} from {self.sources}')
-                    self.resolve()
+                    assert 'admin' in kwargs, f'Admin layer is required to compute zonal stats'
+                    return self.resolve(**kwargs)
 
                 else:
                     logger.info(f'Going to sum up {self.name} from source files')
@@ -206,14 +223,15 @@ class SurgeVariable(BaseModel):
 
 if __name__ == '__main__':
     logger = util.setup_logger(name='rapida', level=logging.INFO)
+    admin_layer = '/data/adhoc/MDA/adm/adm3transn.fgb'
     with Session() as ses:
         for var_name, var_data in ses.config['variables']['population'].items():
 
             v = SurgeVariable(name=var_name, component='population', **var_data)
             if not v.variables:
                 continue
-            print(var_name)
-            r = v(year=2020, country='MDA')
+            print(var_name, var_data)
+            r = v(year=2020, country='MDA', force_compute=True, admin=admin_layer)
             #print(v)
             break
 

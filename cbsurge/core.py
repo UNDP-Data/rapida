@@ -8,7 +8,7 @@ from osgeo_utils import gdal_calc
 from pydantic import BaseModel, FilePath
 from typing import Optional, List, Union
 import re
-from cbsurge.stats.zst import zonal_stats
+from cbsurge.stats.zst import zonal_stats, sumup
 from cbsurge.az.blobstorage import download
 from cbsurge.session import Session
 from cbsurge import util
@@ -150,13 +150,9 @@ class SurgeVariable(BaseModel):
 
     def download(self, **kwargs):
 
-            if not os.path.exists(self._source_folder_):
-                os.makedirs(self._source_folder_)
+
             src_path = self.interpolate(template=self.source, **kwargs)
-            _, file_name = os.path.split(src_path)
-            self.local_path = os.path.join(self._source_folder_, file_name)
             if os.path.exists(self.local_path): return self.local_path
-            logger.idebug(f'Going to download {src_path} to {self.local_path} ')
             downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path)                             )
             assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
             return downloaded_file
@@ -180,10 +176,19 @@ class SurgeVariable(BaseModel):
             gdf = zonal_stats(src_rasters=src_rasters,src_vector=kwargs['admin'], vars_ops=vars_ops)
             expr = f'{self.name}={self.sources}'
             gdf.eval(expr, inplace=True)
-            gdf.to_file(f'/tmp/popstats.fgb', driver='FlatGeobuf',index=False,engine='pyogrio', )
+            gdf.to_file(f'/tmp/popstats.fgb', driver='FlatGeobuf',index=False,engine='pyogrio')
 
     def __call__(self, force_compute=False, **kwargs):
 
+            if self.source:
+                if not os.path.exists(self._source_folder_):
+                    os.makedirs(self._source_folder_)
+                src_path = self.interpolate(template=self.source, **kwargs)
+                _, file_name = os.path.split(src_path)
+                self.local_path = os.path.join(self._source_folder_, file_name)
+                if os.path.exists(self.local_path):
+                    #os.remove(self.local_path)
+                    return self.local_path
 
             # first try to download from source
             if self.source and not force_compute:
@@ -196,14 +201,19 @@ class SurgeVariable(BaseModel):
                     return self.resolve(**kwargs)
 
                 else:
-                    logger.info(f'Going to sum up {self.name} from source files')
+                    logger.info(f'Going to sum up {self.name} from source files')\
                     # interpolate templates
                     source_blobs = list()
                     for source_template in self.sources:
-                        source_blobs.append(self.interpolate(template=source_template, **kwargs))
+                        source_file_path = self.interpolate(template=source_template, **kwargs)
+                        source_blobs.append(source_file_path)
                     downloaded_files = asyncio.run(
-                        blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_)
+                        blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
+                                                   progress=kwargs['progress'])
                     )
+                    assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
+                    sumup(src_rasters=downloaded_files,dst_raster=self.local_path)
+                    logger.info(f'{self.local_path} was created for variable {self.name}')
 
 
 
@@ -230,16 +240,25 @@ if __name__ == '__main__':
     with Session() as ses:
 
             popvars = ses.config['variables']['population']
-            with Progress() as progress:
-                total_task = progress.add_task(
-                    description=f'[red]Going to download {len(popvars)} blobs', total=len(popvars))
-                for var_name, var_data in popvars.items():
-                    v = SurgeVariable(name=var_name, component='population', **var_data)
-                    progress.update(task_id=total_task,advance=1)
+            fk = list(popvars.keys())[0]
+            fv = popvars[fk]
+            d = popvars
 
-                    if not v.variables:
-                        continue
-                    r = v(year=2020, country='MDA', force_compute=True, admin=admin_layer)
+
+
+            with Progress(disable=False) as progress:
+                total_task = progress.add_task(
+                    description=f'[red]Going to process {len(d)} variable', total=len(d))
+                for var_name, var_data in d.items():
+                    v = SurgeVariable(name=var_name, component='population', **var_data)
+
+
+                    # if not v.variables:
+                    #     continue
+                    r = v(year=2020, country='MDA', force_compute=True, admin=admin_layer, progress=progress)
+                    progress.update(task_id=total_task, advance=1, description=f'Processing {var_name}')
                     #print(v)
-                    break
+
+                progress.remove_task(total_task)
+
 

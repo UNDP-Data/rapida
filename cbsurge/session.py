@@ -2,7 +2,6 @@ import logging
 import os
 import json
 import typing
-
 from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
@@ -13,13 +12,21 @@ logger = logging.getLogger(__name__)
 
 
 class Session(object):
+
+    _instance = None  # Stores the single instance
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
         """
         constructor
         """
         self.config = self.get_config()
         if self.config is not None:
-            logger.debug(f"config was loaded: {self.config}")
+            logger.debug(f"rapida config was loaded")
 
 
     def __enter__(self):
@@ -159,6 +166,7 @@ class Session(object):
             Azure TokenCredential is returned if authenticated.
         """
         credential = DefaultAzureCredential()
+
         return credential
 
 

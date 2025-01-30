@@ -1,22 +1,103 @@
+import io
 import os.path
 import logging
+import pyarrow as pa
+import geopandas
 from exactextract import exact_extract
 from typing import Iterable
-from geopandas import GeoDataFrame, read_file
+from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
 from cbsurge.util import proj_are_equal
+from osgeo_utils.gdal_calc import Calc
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
+ogr.UseExceptions()
 
-def add(src_rasters:Iterable[str]=None, dst_raster=None) -> str:
-    pass
+def geoarrow_schema_adapter(schema: pa.Schema, geom_field_name=None) -> pa.Schema:
+    """
+    Convert a geoarrow-compatible schema to a proper geoarrow schema
 
-def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops=None,  target_proj='ESRI:54009') -> GeoDataFrame:
+    This assumes there is a single "geometry" column with WKB formatting
+
+    Parameters
+    ----------
+    schema: pa.Schema
+
+    Returns
+    -------
+    pa.Schema
+    A copy of the input schema with the geometry field replaced with
+    a new one with the proper geoarrow ARROW:extension metadata
+
+    """
+    geometry_field_index = schema.get_field_index(geom_field_name)
+    geometry_field = schema.field(geometry_field_index)
+    geoarrow_geometry_field = geometry_field.with_metadata(
+        {b"ARROW:extension:name": b"geoarrow.wkb"}
+    )
+
+    geoarrow_schema = schema.set(geometry_field_index, geoarrow_geometry_field)
+
+    return geoarrow_schema
+
+
+
+def sumup(src_rasters:Iterable[str]=None, dst_raster=None) -> str:
+    target_srs = None
+    files_to_sum = list()
+    for n, src_raster in enumerate(src_rasters):
+        prep_src_raster = None
+        with gdal.OpenEx(src_raster) as src_rds:
+            src_rast_srs = src_rds.GetSpatialRef()
+            assert src_rast_srs is not None, f'Could not fetch SRS for {src_raster}'
+            target_srs = src_rast_srs
+            srs_are_equal = proj_are_equal(src_srs=target_srs, dst_srs=src_rast_srs)
+            if not srs_are_equal:
+                _, ext = os.path.splitext(src_raster)
+                _, raster_fname = os.path.split(src_raster)
+                prep_src_raster = f'/vsimem/{raster_fname.replace(ext, ".vrt")}'
+                logger.info(f'Creating {prep_src_raster} VRT for {src_raster}')
+                gdal.Warp(prep_src_raster, src_raster, format='VRT', dstSRS=target_srs,
+                          creationOptions={'BLOCKXSIZE': 256, 'BLOCKYSIZE': 256})
+            band = src_rds.GetRasterBand(1)
+            block_size_x, block_size_y = band.GetBlockSize()
+            # Get raster size
+            width = src_rds.RasterXSize  # Number of columns
+            height = src_rds.RasterYSize  # Number of rows
+
+            intrs = set((height,width)).intersection((block_size_y,block_size_x))
+            if intrs:
+                _, ext = os.path.splitext(src_raster)
+                _, raster_fname = os.path.split(src_raster)
+                prep_src_raster = f'/vsimem/{raster_fname.replace(ext, ".vrt")}'
+                logger.info(f'Creating {prep_src_raster} VRT for {src_raster}')
+                gdal.Warp(prep_src_raster, src_raster, format='VRT',
+                          creationOptions={'BLOCKXSIZE': 256, 'BLOCKYSIZE': 256})
+            if prep_src_raster is None:
+                prep_src_raster = src_raster
+            files_to_sum.append(prep_src_raster)
+    creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
+    ds = Calc(calc='sum(a,axis=0)', a=files_to_sum, outfile=dst_raster, projectionCheck=True, format='GTiff',
+         creation_options=creation_options.split(' '), quiet=True)
+    ds = None
+    return dst_raster
+
+def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops:Iterable[tuple[str, str]]=None,  target_proj='ESRI:54009') -> GeoDataFrame:
+    """
+    Compute zonal stats form a set of raster files
+
+    :param src_rasters: iterable of strings representing paths to the raster files
+    :param src_vector: str representing the path to vector polygons
+    :param vars_ops: a dict with same length as src_rasters where the first element represents the name of the column
+    that will be created by applying the second element representing the operation
+    :param target_proj: the projection represented as AUTHORITY:CODE, defaults to ESRI:54009 or Mollweide
+    :return: pandas GeoDataFrame
+    The function aligns the projections of all input data to the target_proj using in memory VRT's
+
+    """
     target_srs = osr.SpatialReference()
     target_srs.SetFromUserInput(target_proj)
-
-
 
     with gdal.OpenEx(src_vector) as src_vds:
         lyr = src_vds.GetLayer(0)
@@ -25,22 +106,25 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops=None
         assert src_vect_srs is not None, f'Could not fetch SRS for {src_vector}'
         srs_are_equal = proj_are_equal(src_srs=target_srs, dst_srs=src_vect_srs)
         if not srs_are_equal:
-            logger.info(f'Creating VRT for {src_vector}')
-            _, ext = os.path.splitext(src_vector)
-            prep_src_vector = src_vector.replace(ext, '.vrt')
-            with open(prep_src_vector, 'wt') as v_vrt:
-                vrt_content = f"""<OGRVRTDataSource>
-                    <OGRVRTWarpedLayer>
-                        <OGRVRTLayer name="{layer_name}">
-                            <SrcDataSource>{src_vector}</SrcDataSource>
-                            <SrcLayer>{layer_name}</SrcLayer>
-                        </OGRVRTLayer>
-                        <TargetSRS>{target_srs}</TargetSRS>
-                    </OGRVRTWarpedLayer>
-                </OGRVRTDataSource>"""
-                v_vrt.write(vrt_content)
 
-            assert os.path.exists(prep_src_vector)
+            _, ext = os.path.splitext(src_vector)
+            _, vector_fname = os.path.split(src_vector)
+            prep_src_vector = f'/vsimem/{vector_fname.replace(ext, ".vrt")}'
+            logger.info(f'Creating {prep_src_vector} VRT for {src_vector}')
+            vrt_content = f"""<OGRVRTDataSource>
+                <OGRVRTWarpedLayer>
+                    <OGRVRTLayer name="{layer_name}">
+                        <SrcDataSource>{src_vector}</SrcDataSource>
+                        <SrcLayer>{layer_name}</SrcLayer>
+                    </OGRVRTLayer>
+                    <TargetSRS>{target_srs}</TargetSRS>
+                </OGRVRTWarpedLayer>
+            </OGRVRTDataSource>"""
+            # geopandas can read from bytes buffer
+            bio = io.BytesIO(vrt_content.encode('utf-8'))
+            # exactextract can not, so we need a vsimem vrt
+            gdal.FileFromMemBuffer(prep_src_vector,vrt_content)
+
         else:
             prep_src_vector = src_vector
         combined_results = None
@@ -50,11 +134,13 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops=None
                 assert src_rast_srs is not None, f'Could not fetch SRS for {src_raster}'
                 srs_are_equal = proj_are_equal(src_srs=target_srs, dst_srs=src_rast_srs)
                 if not srs_are_equal:
-                    logger.info(f'Creating VRT for {src_raster}')
+
                     _, ext = os.path.splitext(src_raster)
-                    prep_src_raster = src_raster.replace(ext, '.vrt')
+                    _, raster_fname = os.path.split(src_raster)
+                    prep_src_raster = f'/vsimem/{raster_fname.replace(ext, ".vrt")}'
+                    logger.info(f'Creating {prep_src_raster} VRT for {src_raster}')
                     gdal.Warp(prep_src_raster, src_raster, format='VRT', dstSRS=target_srs,creationOptions={'BLOCKXSIZE':256, 'BLOCKYSIZE':256} )
-                    assert os.path.exists(prep_src_raster)
+                    # assert os.path.exists(prep_src_raster)
                 else:
                     prep_src_raster = src_raster
                 var_name, operation = vars_ops[n]
@@ -66,7 +152,10 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops=None
                     combined_results = df
                 else:
                     combined_results = combined_results.merge(df, on=['tempid'], how='inner')
-        combined_results = combined_results.merge(read_file(prep_src_vector, engine='pyogrio'), on='geometry',
+                gdal.Unlink(prep_src_raster)
+        combined_results = combined_results.merge(geopandas.read_file(bio), on='geometry',
                                                   how='inner')
+        gdal.Unlink (prep_src_vector)
+        bio.close()
         combined_results.drop(columns='tempid', inplace=True)
         return combined_results

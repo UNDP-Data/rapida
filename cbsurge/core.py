@@ -1,5 +1,6 @@
 import json
 import os.path
+import random
 import sys
 import asyncio
 from sympy.parsing.sympy_parser import parse_expr
@@ -224,14 +225,21 @@ class SurgeVariable(BaseModel):
 if __name__ == '__main__':
     logger = util.setup_logger(name='rapida', level=logging.INFO)
     admin_layer = '/data/adhoc/MDA/adm/adm3transn.fgb'
-    with Session() as ses:
-        for var_name, var_data in ses.config['variables']['population'].items():
+    from rich.progress import Progress
 
-            v = SurgeVariable(name=var_name, component='population', **var_data)
-            if not v.variables:
-                continue
-            print(var_name, var_data)
-            r = v(year=2020, country='MDA', force_compute=True, admin=admin_layer)
-            #print(v)
-            break
+    with Session() as ses:
+
+            popvars = ses.config['variables']['population']
+            with Progress() as progress:
+                total_task = progress.add_task(
+                    description=f'[red]Going to download {len(popvars)} blobs', total=len(popvars))
+                for var_name, var_data in popvars.items():
+                    v = SurgeVariable(name=var_name, component='population', **var_data)
+                    progress.update(task_id=total_task,advance=1)
+
+                    if not v.variables:
+                        continue
+                    r = v(year=2020, country='MDA', force_compute=True, admin=admin_layer)
+                    #print(v)
+                    break
 

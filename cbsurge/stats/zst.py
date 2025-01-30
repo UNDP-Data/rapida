@@ -9,10 +9,10 @@ from cbsurge.util import proj_are_equal
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
+def add(src_rasters:Iterable[str]=None, dst_raster=None) -> str:
+    pass
 
-
-
-def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops=None,  target_proj='ESRI:54034'):
+def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops=None,  target_proj='ESRI:54009') -> GeoDataFrame:
     target_srs = osr.SpatialReference()
     target_srs.SetFromUserInput(target_proj)
 

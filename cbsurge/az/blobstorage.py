@@ -33,34 +33,6 @@ async def download(blob_client:BlobClient = None, dst_path:str=None, progress=No
         return dst_path
 
 
-async def download_blob_with_session(session: Session  = None, src_path: str  = None, dst_path: str  = None) -> str:
-    """
-    Download a blob from Azure Blob Storage to a local storage.
-
-    Parameters
-    ----------
-    session: cbsurge.session.Session, instance of Session
-    src_path : str
-        Source path to download the blob from.
-    dst_path : str,
-        Destination path to save the blob to.
-    Returns
-    -------
-    path_dst : str
-        Destination path the blob was downloaded to.
-    """
-    assert isinstance(dst_path, str), f'dst_path must be a valid string, not {type(dst_path)}'
-
-    util.validate_azure_storage_path(a_path=src_path)
-    proto, account_name, src_blob_path = src_path.split(':')
-
-    container_name, *src_path_parts = src_blob_path.split(os.path.sep)
-    rel_src_blob_path = os.path.sep.join(src_path_parts)
-
-    logger.debug(f"Checking in the blob at {src_path} exists")
-    async with session.get_blob_container_client(account_name=account_name, container_name=container_name) as cc:
-        blob_client = cc.get_blob_client(blob=rel_src_blob_path)
-        return await download(blob_client=blob_client, dst_path=dst_path )
 
 async def download_blob(src_path: str = None, dst_path: str = None) -> str:
     """
@@ -140,25 +112,6 @@ async def upload_blob(src_path: str = None, dst_path: str = None):
             blob_client = cc.get_blob_client(blob=rel_dst_blob_path)
             return upload(src_path, dst_path, blob_client)
 
-async def upload_blob_with_session(session:Session=None, src_path:str=None, dst_path: str = None):
-    """
-    Upload a blob from a local file
-    :param src_path: str, path to the local file to be uploaded
-    :param session, instance of cbsurge.session.Session,
-    :param dst_path: str, the fully qualified path to a blob in az in format az:{account}:{container}/path.ext
-    :return: str, the fully qualified path to a blob in az in format az:{account}:{container}/path.ext
-
-    """
-    assert isinstance(src_path, str), f'src_path must be a valid string, not {type(src_path)}'
-    util.validate_azure_storage_path(a_path=dst_path)
-    proto, account_name, dst_blob_path = dst_path
-    container_name, *dst_path_parts = dst_blob_path.split(os.path.sep)
-    rel_dst_blob_path = os.path.sep.join(dst_path_parts)
-
-    logger.debug(f"Checking in the blob at {src_path} exists")
-    with session.get_blob_container_client(account_name=account_name,container_name=container_name) as cc:
-        blob_client = cc.get_blob_client(blob=rel_dst_blob_path)
-        return upload(src_path, dst_path, blob_client)
 
 async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, max_at_once=10, progress=None):
 

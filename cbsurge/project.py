@@ -23,22 +23,25 @@ class Project:
         self.geopackage_file = os.path.join(self.folder, self.data_folder, f'{self.name}.gpkg')
         self.config_file = os.path.join(self.folder, self.config_file_name)
         if not os.path.exists(self.folder):
-            logger.info(f'Going to create {self.folder}')
             os.makedirs(fldr)
-            logger.info(f'Going to create {self.config_file}')
+            logger.info(f'Creating project folder ...')
             self.config = dict(
                 name=self.name,
+                config_file=self.config_file,
                 folder=self.folder,
                 data_folder=self.data_folder
             )
+            logger.info(f'Creating project config file ...')
             self.serialize()
+
         else:
             if os.path.exists(self.config_file):
                 self.config = self.deserialize()
             else:
-                logger.info(f'Going to create {self.config_file}')
+                logger.info(f'Creating project config file ...')
                 self.config = dict(
                     name=self.name,
+                    config_file=self.config_file,
                     folder=self.folder,
                     data_folder=self.data_folder
                 )
@@ -47,12 +50,11 @@ class Project:
         logger.info(self)
 
     def __str__(self):
-        txt =   f'''Current Rapida project config 
-                            
-                name:            {self.name}
-                config file:     {self.config_file}
-                data folder:     {self.data_folder}
-                geopackage file: {self.geopackage_file}                                              
+        txt =   f'''Current Rapida project: 
+    name:            {self.name}
+    config file:     {self.config_file}
+    data folder:     {self.data_folder}
+    geopackage file: {self.geopackage_file}                                            
                 '''
         return txt
 
@@ -72,10 +74,11 @@ class Project:
         can_write = os.access(self.folder, os.W_OK)
         proj_cfg_file_exists = os.path.exists(self.config_file)
         proj_cfg_file_is_empty = os.path.getsize(self.config_file) == 0
-        geopackage_file_path_isdefined = self.geopackage_file not in (None, '')
-        return can_write and proj_cfg_file_exists and not proj_cfg_file_is_empty and geopackage_file_path_isdefined
+        geopackage_file_path_is_defined = self.geopackage_file not in (None, '')
+        return can_write and proj_cfg_file_exists and not proj_cfg_file_is_empty and geopackage_file_path_is_defined
 
-
+    def wipe(self):
+        click.confirm(f'')
 
 @click.command()
 @click.argument('folder', required=False, type=click.Path())
@@ -84,4 +87,5 @@ def project(folder):
     """Create/open a project """
     project_folder = folder or os.getcwd()
     project = Project(folder=project_folder)
+
 

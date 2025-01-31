@@ -14,14 +14,14 @@ def population():
 @population.command(no_args_is_help=True)
 @click.option('--force-reprocessing', help='Force reprocessing of data even if the data specified already exists', is_flag=True)
 @click.option('--country', help='The ISO3 code of the country to process the data for')
-@click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided az container that was set when initializing with `rapida init`', required=False)
+@click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
 @click.option('--all-data', help='Sync all datasets for all countries. It should not be used together with --country flag', is_flag=True, default=False)
 def sync(force_reprocessing, country, download_path, all_data):
     """
     Download population data (sex and age structures) from worldpop,
     then do additional processing to convert them to Cloud Optimised GeoTiff and aggregate them for our needs.
 
-    If `--download-path` is provided, it will save the data to a local folder. Otherwise, it will automatically save to the provided az container.
+    If `--download-path` is provided, it will save the data to a local folder. Otherwise, it will automatically save to the provided azure container.
 
     You can process for a specific country by using `--country` option or all countries with `--all-data` option.
 
@@ -50,7 +50,7 @@ def sync(force_reprocessing, country, download_path, all_data):
 @click.option('--country',
               help='The ISO3 code of the country to process the data for')
 @click.option('--download-path',
-              help='The local path to save the data to. If not provided, it will automatically save to the provided az container that was set when initializing with `rapida init`', required=True)
+              help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=True)
 @click.option('--age-group',
               help='The age group (child, active, elderly or total) to process the data for. total is not supported with non aggregate option',
               type=click.Choice(['child', 'active', 'elderly', 'total']))
@@ -98,13 +98,13 @@ def download(country, download_path, age_group, sex, non_aggregates):
 @click.option('--country', help='The ISO3 code of the country to process the data for')
 @click.option('--age-group', help='The age group (child, active or elderly) to process the data for', type=click.Choice(['child', 'active', 'elderly']))
 @click.option('--sex', help='The sex (male or female) to process the data for', type=click.Choice(['male', 'female']))
-@click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided az container that was set when initializing with `rapida init`', required=False)
+@click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
 @click.option('--force-reprocessing', help='Force reprocessing of data even if the data specified already exists', is_flag=True)
 def aggregate(country, age_group, sex, download_path, force_reprocessing):
     """
     Aggregate original worldpop data and aggregate them
 
-    If ` --download-path` is provided, it will save aggregated data to a local folder. Otherwise it will automatically save to the provided az container.
+    If ` --download-path` is provided, it will save aggregated data to a local folder. Otherwise it will automatically save to the provided azure container.
 
     Use `--country` to specify a country ISO3 code to process it.
 

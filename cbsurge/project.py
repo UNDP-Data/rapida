@@ -11,13 +11,16 @@ logger = logging.getLogger(__name__)
 
 class Project:
     config_file_name = 'rapida.json'
-    data_folder = 'data'
+    data_folder = None
+    geopackage_file:str = None
     name:str = None
     def __init__(self, folder:str=None, ):
         fldr = os.path.abspath(folder)
         *rest, name = fldr.split(os.path.sep)
         self.name = name
         self.folder = fldr
+        self.data_folder = os.path.join(self.folder, 'data')
+        self.geopackage_file = os.path.join(self.folder, self.data_folder, f'{self.name}.gpkg')
         self.config_file = os.path.join(self.folder, self.config_file_name)
         if not os.path.exists(self.folder):
             logger.info(f'Going to create {self.folder}')
@@ -41,9 +44,17 @@ class Project:
                 )
                 self.serialize()
         assert self.is_valid, f'{self} is not valid'
-        logger.info(f'Current Rapida project {self.name} is set to {self.folder}')
+        logger.info(self)
+
     def __str__(self):
-        return f'Rapida project {self.name}'
+        txt =   f'''Current Rapida project config 
+                            
+                name:            {self.name}
+                config file:     {self.config_file}
+                data folder:     {self.data_folder}
+                geopackage file: {self.geopackage_file}                                              
+                '''
+        return txt
 
     def deserialize(self):
         if os.path.exists(self.config_file):
@@ -61,7 +72,8 @@ class Project:
         can_write = os.access(self.folder, os.W_OK)
         proj_cfg_file_exists = os.path.exists(self.config_file)
         proj_cfg_file_is_empty = os.path.getsize(self.config_file) == 0
-        return can_write and proj_cfg_file_exists and not proj_cfg_file_is_empty
+        geopackage_file_path_isdefined = self.geopackage_file not in (None, '')
+        return can_write and proj_cfg_file_exists and not proj_cfg_file_is_empty and geopackage_file_path_isdefined
 
 
 

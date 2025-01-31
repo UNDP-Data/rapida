@@ -1,0 +1,130 @@
+[
+    {
+        "id": "maleactive",
+        "name": "Active male population",
+        "source": "stacdata/worldpop/{year}/{iso3_country_code}/male/active",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_male_active.tif"
+    },
+    {
+        "id": "malechildren",
+        "name": "Children male population",
+        "source": "stacdata/worldpop/{year}/{iso3_country_code}/male/child",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_male_child.tif"
+    },
+    {
+        "id": "malechild",
+        "name": "Male child population (6-10)",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/male/child/{iso3_country_code_lowcase}_m_10_{year}_constrained_UNadj_total.tif"
+    },
+    {
+        "id": "malepreschool",
+        "name": "Male preschoolers",
+        "source": "malechildren-malechild"
+    },
+    {
+        "id": "maleelderly",
+        "name": "Elderly male population",
+        "source": "stacdata/worldpop/{year}/{iso3_country_code}/male/elderly",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_male_elderly.tif"
+    },
+
+    {
+        "id": "femaleactive",
+        "name": "Active female population",
+        "source": "stacdata/worldpop/{year}/{iso3_country_code}/female/active",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_female_active.tif"
+    },
+    {
+        "id": "femaleachildren",
+        "name": "Children female population",
+        "source": "stacdata/worldpop/{year}/{iso3_country_code}/female/child",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_female_child.tif"
+    },
+        {
+        "id": "femalechild",
+        "name": "Female child population (6-10)",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/female/child/{iso3_country_code_lowcase}_f_10_{year}_constrained_UNadj_total.tif"
+    },
+    {
+        "id": "femalepreschool",
+        "name": "Female preschoolers",
+        "source": "femalechildren-femalechild"
+    },
+
+    {
+        "id": "femaleelderly",
+        "name": "Elderly female population",
+        "source": "stacdata/worldpop/{year}/{iso3_country_code}/female/elderly",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_female_elderly.tif"
+    },
+
+    {
+        "id": "female",
+        "name": "Female population",
+        "source": "femaleactive+femalechild+femaleelderly",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_female_total.tif"
+    },
+     {
+        "id": "male",
+        "name": "Male population",
+        "source": "maleactive+malechild+maleelderly",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_male_total.tif"
+    },
+     {
+        "id": "children",
+        "name": "Children population",
+        "source": "femalechildren+malechildren",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_child_total.tif"
+    },
+
+    {
+        "id": "elderly",
+        "name": "Elderly population",
+        "source": "femaleelderly+maleelderly",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_elderly_total.tif"
+    },
+    {
+        "id": "active",
+        "name": "Active population",
+        "source": "femaleactive+maleactive",
+        "file": "stacdata/worldpop/{year}/{iso3_country_code}/aggregate/{iso3_country_code}_active_total.tif"
+    },
+      {
+        "id": "total",
+        "name": "Total population",
+        "source": "female+male+children"
+    },
+
+    {
+        "id": "dependency",
+        "name": "Total dependency ratio",
+        "source": "(children+elderly)/active*100"
+    },
+    {
+        "id": "children_dependency",
+        "name": "Children dependency ratio",
+        "source": "children/active*100"
+    },
+    {
+        "id": "elderly_dependency",
+        "name": "Elderly dependency ratio",
+        "source": "elderly/active*100"
+    },
+    {
+        "id": "preschool",
+        "name": "Preschoolers",
+        "source": "femalepreschool+malepreschool"
+    },
+    {
+        "id": "preschool_rate",
+        "name": "Preschoolers rate",
+        "source": "preschool/total*100"
+    },
+     {
+        "id": "elderly_rate",
+        "name": "Elderly people rate",
+        "source": "elderly/total*100"
+    }
+
+
+]

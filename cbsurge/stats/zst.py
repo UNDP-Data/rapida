@@ -155,7 +155,7 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops:Iter
                 gdal.Unlink(prep_src_raster)
         combined_results = combined_results.merge(geopandas.read_file(bio), on='geometry',
                                                   how='inner')
-        gdal.Unlink (prep_src_vector)
+        gdal.Unlink(prep_src_vector)
         bio.close()
         combined_results.drop(columns='tempid', inplace=True)
         return combined_results

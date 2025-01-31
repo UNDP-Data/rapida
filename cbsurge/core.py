@@ -1,15 +1,11 @@
-import json
+
 import os.path
-import random
-import sys
 import asyncio
 from sympy.parsing.sympy_parser import parse_expr
-from osgeo_utils import gdal_calc
 from pydantic import BaseModel, FilePath
 from typing import Optional, List, Union
 import re
 from cbsurge.stats.zst import zonal_stats, sumup
-from cbsurge.az.blobstorage import download
 from cbsurge.session import Session
 from cbsurge import util
 import logging
@@ -20,98 +16,6 @@ from cbsurge.az import blobstorage
 logger = logging.getLogger(__name__)
 
 
-
-# class Variable(BaseModel):
-#     name: str
-#     title: str
-#     source: Optional[str] = None
-#     files: Optional[List[str]] = None
-#     #is_computable: Optional[bool] = None  # Optional field, default True
-#     is_raster: Optional[bool] = None  # Optional field, default False
-#
-#     _extractor_: str = r"\{([^}]+)\}"
-#     _default_operators_ = '+-/*%'
-#
-#     def __new__(cls, *args, **kwargs):
-#         """
-#         A __new__ method that uses 'type()' with 3 arguments to dynamically create
-#         a class with the given attributes.
-#         """
-#         ann = cls.__annotations__.copy()
-#         files = kwargs.get('files', None)
-#         module_name = sys.modules[__name__].__name__
-#         #source = kwargs.get('source', None)
-#         if files is not None:
-#             kwargs['is_raster'] = True
-#             class_name = f'{module_name}.RasterVariable'
-#         else:
-#             kwargs['is_raster'] = False
-#             class_name = f'{module_name}.VectorVariable'
-#             kwargs['files'] = None
-#
-#         # Creating a new class using 'type()' with 3 arguments
-#         new_class = type(
-#             class_name,               # Class name (using the current class name)
-#             (cls,),                      # Inherit from the current class
-#             {**kwargs, '__annotations__': ann}                  # Add attributes from kwargs to the class
-#         )
-#         return super().__new__(new_class)
-#
-#     def __init__(self, **kwargs):
-#         """
-#         Initialize the object with the provided arguments.
-#         """
-#         super().__init__(**kwargs)
-#         self.resolve(**kwargs)
-#
-#     def resolve_file(self, **kwargs):
-#         """
-#         Resolve file paths with the provided kwargs, ensuring that the necessary variables are included.
-#         """
-#         if 'iso3_country_code' in kwargs:
-#             kwargs['iso3_country_code_lower'] = kwargs['iso3_country_code_lower'].lower()
-#         variables = set(re.findall(self._extractor_, self.source))
-#         for varname in variables:
-#             assert varname in kwargs, f'"{varname}" kwarg is required to generate source files'
-#         return self.source.format(**kwargs)
-#
-#     def download(self, **kwargs):
-#         """
-#         Placeholder method for downloading logic.
-#         """
-#         pass
-#
-#     def compute(self):
-#         """
-#         Placeholder method for parsing and calculating expressions based on 'source'.
-#         """
-#         if self.source:
-#             parsed_expr = parse_expr(self.source)
-#             variables = parsed_expr.free_symbols
-#
-#     def __call__(self, *args, **kwargs):
-#         """
-#         NotImplemented error for call functionality, subclasses should implement this.
-#         """
-#         raise NotImplementedError(f'Only subclasses of {self.__class__.__name__} implement this method')
-#
-#     def resolve(self, **kwargs):
-#         """
-#         Resolving logic for optional fields like 'is_computable' based on the presence of operators.
-#         """
-#         if self.source is not None:
-#             operators = set(self._default_operators_).intersection(self.source)
-#             if operators:
-#                 pass
-#         else:
-#             self.is_computable = False
-#
-#     def __str__(self):
-#         """
-#         String representation of the class.
-#         """
-#         return f'{self.__class__.__name__} {self.model_dump_json(indent=2)}'
-#
 
 class SurgeVariable(BaseModel):
     name: str
@@ -248,16 +152,12 @@ if __name__ == '__main__':
 
             with Progress(disable=False) as progress:
                 total_task = progress.add_task(
-                    description=f'[red]Going to process {len(d)} variable', total=len(d))
+                    description=f'[red]Going to process {len(d)} variables', total=len(d))
                 for var_name, var_data in d.items():
-                    v = SurgeVariable(name=var_name, component='population', **var_data)
-
-
-                    # if not v.variables:
-                    #     continue
-                    r = v(year=2020, country='MDA', force_compute=True, admin=admin_layer, progress=progress)
                     progress.update(task_id=total_task, advance=1, description=f'Processing {var_name}')
-                    #print(v)
+                    v = SurgeVariable(name=var_name, component='population', **var_data)
+                    r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
+
 
                 progress.remove_task(total_task)
 

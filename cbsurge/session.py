@@ -1,7 +1,7 @@
 import logging
 import os
 import json
-
+import typing
 from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
@@ -12,13 +12,21 @@ logger = logging.getLogger(__name__)
 
 
 class Session(object):
+
+    _instance = None  # Stores the single instance
+
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
         """
         constructor
         """
         self.config = self.get_config()
         if self.config is not None:
-            logger.debug(f"config was loaded: {self.config}")
+            logger.debug(f"rapida config was loaded")
 
 
     def __enter__(self):
@@ -158,6 +166,7 @@ class Session(object):
             Azure TokenCredential is returned if authenticated.
         """
         credential = DefaultAzureCredential()
+
         return credential
 
 
@@ -317,7 +326,32 @@ class Session(object):
         sh_name = share_name if share_name is not None else self.get_file_share_name()
         return f"https://{ac_name}.file.core.windows.net/{sh_name}"
 
+    def get_components(self):
+        """
+        Gets the available components in the config file
+        :return: iterator[str]
+        """
+        variables = self.get_config_value_by_key(key='variables')
+        return set(variables.keys())
 
+    def get_component(self, component:str = None):
+        """
+        Get the config dict for a component
+        :param component: str, name of the component
+        :return: dict with its config extracted from the config  file
+        """
+        variables = self.get_config_value_by_key(key='variables')
+        return variables[component]
+
+    def get_variable(self, component:str= None, variable=None ):
+        """
+        Gets the config for a given variable from a component
+        :param component:
+        :param variable:
+        :return:
+        """
+        component = self.get_component(component=component)
+        return component[variable]
 # for testing
 # import asyncio
 # async def main():

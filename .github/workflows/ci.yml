@@ -70,7 +70,7 @@ jobs:
     name: Build and deploy to Azure Container Registry
     runs-on: ubuntu-latest
     environment:
-      name: az container registry
+      name: azure container registry
     env:
       IMAGE_NAME: ${{ github.repository}}
     permissions:

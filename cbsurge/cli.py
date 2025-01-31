@@ -1,6 +1,7 @@
 
 from cbsurge.util import setup_logger
 from cbsurge.admin import admin
+from cbsurge.project import project
 from cbsurge.initialize import init
 from cbsurge.exposure.builtenv import builtenv
 from cbsurge.exposure.population import population
@@ -18,6 +19,7 @@ cli.add_command(builtenv)
 cli.add_command(init)
 cli.add_command(population)
 cli.add_command(stats)
+cli.add_command(project)
 
 
 if __name__ == '__main__':

@@ -148,18 +148,19 @@ class Project:
                     os.makedirs(self.data_folder)
                 gdal.VectorTranslate(self.geopackage_file, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
                                  layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
-        if mask is not  None:
-            try:
-                vm_ds = gdal.OpenEx(mask, gdal.OF_VECTOR)
-            except RuntimeError as ioe:
-                if 'supported' in str(ioe):
-                    vm_ds = None
-                else:
-                    raise
-            if vm_ds is not None:
-                pass
+        # if mask is not  None:
+        #     try:
+        #         vm_ds = gdal.OpenEx(mask, gdal.OF_VECTOR)
+        #     except RuntimeError as ioe:
+        #         if 'supported' in str(ioe):
+        #             vm_ds = None
+        #         else:
+        #             raise
+        #     if vm_ds is not None:
+        #         pass
+        #
+        # assert self.is_valid, f'{self} is not valid'
 
-        assert self.is_valid, f'{self} is not valid'
 
 
 
@@ -180,7 +181,7 @@ class Project:
         proj_cfg_file_exists = os.path.exists(self.config_file)
         proj_cfg_file_is_empty = os.path.getsize(self.config_file) == 0
         geopackage_file_path_is_defined = self.geopackage_file not in (None, '')
-        return can_write and proj_cfg_file_exists and not proj_cfg_file_is_empty and geopackage_file_path_is_defined
+        return can_write and proj_cfg_file_exists and not proj_cfg_file_is_empty
 
     def delete(self):
         if click.confirm(f'Are you sure you want to delete {self.name} located in {self.folder} ?', abort=True):
@@ -203,8 +204,6 @@ def project():
 def create(folder=None, polygons=None, mask=None):
     """
     Create a Rapida project
-
-    FOLDER: the absolute or relative path to the new project
 
     """
     with Session() as session:

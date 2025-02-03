@@ -25,7 +25,7 @@ def download():
               help='Full path to the buildings dataset' )
 
 @click.option('-bs', '--batch-size', type=int, default=65535,
-              help='The max number of buildings to be dowloaded in one chunk or batch. '
+              help='The max number of buildings to be downloaded in one chunk or batch. '
                    )
 def fgbbbox(bbox=None, out_path=None, batch_size:[int,None]=1000):
     """

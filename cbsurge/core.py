@@ -1,4 +1,3 @@
-import json
 import os.path
 import asyncio
 from sympy.parsing.sympy_parser import parse_expr
@@ -65,6 +64,8 @@ class SurgeVariable(BaseModel):
         with Session() as s:
             root_folder = s.get_root_data_folder()
             self._source_folder_ = os.path.join(root_folder, self.component, self.name)
+            logger.info(self._source_folder_)
+
 
 
     def __str__(self):
@@ -163,37 +164,24 @@ if __name__ == '__main__':
     from rich.progress import Progress
 
 
-    # package_name = "cbsurge"  # Root package
-    #
-    # # Get the package spec
-    # package_spec = find_spec(package_name)
-    # for submodule_info in iter_modules(package_spec.submodule_search_locations):
-    #     print(submodule_info.)
-    # p = find_namespace_packages(where='.')
-    # for pa in p:
-    #     print(pa)
-    #     submodule_spec = find_spec(f"{pa}.variables")
-    #     if submodule_spec is not None:
-    #         print(f"Package '{pa}' has a submodule variables")
+    with Session() as ses:
 
-    # with Session() as ses:
-    #
-    #         popvars = ses.config['variables']['population']
-    #         fk = list(popvars.keys())[0]
-    #         fv = popvars[fk]
-    #         d = popvars
-    #
-    #
-    #
-    #         with Progress(disable=False) as progress:
-    #             total_task = progress.add_task(
-    #                 description=f'[red]Going to process {len(d)} variables', total=len(d))
-    #             for var_name, var_data in d.items():
-    #                 progress.update(task_id=total_task, advance=1, description=f'Processing {var_name}')
-    #                 v = SurgeVariable(name=var_name, component='population', **var_data)
-    #                 r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
-    #
-    #
-    #             progress.remove_task(total_task)
-    #
+            popvars = ses.config['variables']['population']
+            fk = list(popvars.keys())[0]
+            fv = popvars[fk]
+            d = popvars
+
+
+
+            with Progress(disable=False) as progress:
+                total_task = progress.add_task(
+                    description=f'[red]Going to process {len(d)} variables', total=len(d))
+                for var_name, var_data in d.items():
+                    progress.update(task_id=total_task, advance=1, description=f'Processing {var_name}')
+                    v = SurgeVariable(name=var_name, component='population', **var_data)
+                    r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
+
+
+                progress.remove_task(total_task)
+
 

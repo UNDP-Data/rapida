@@ -1,9 +1,18 @@
 import asyncio
-
+import os
+from typing import List
+import logging
+import pycountry
+from osgeo import gdal
+from cbsurge.components.component_base import ComponentBase
+from cbsurge.project import Project
+from cbsurge.util import get_geographic_bbox
 import click
 
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 
+COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
+logger = logging.getLogger(__name__)
 
 @click.group()
 def population():
@@ -111,3 +120,28 @@ def aggregate(country, age_group, sex, download_path, force_reprocessing):
     You can only aggregate for a specific age group or sex by using `--age-group` or `--sex` options.
     """
     asyncio.run(process_aggregates(country_code=country, age_group=age_group, sex=sex, download_path=download_path, force_reprocessing=force_reprocessing))
+
+
+
+
+class PopulationComponent(ComponentBase):
+
+    def __init__(self, year=2020, country:str = None):
+
+
+        self.year = year
+        self.country = country
+        if self.country is None:
+            project = Project(path=os.getcwd())
+            print(project.geopackage_file_path)
+            with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY|gdal.OF_VECTOR) as vds:
+                layer = vds.GetLayerByName('polygons')
+                geo_bbox = get_geographic_bbox(layer=layer)
+
+
+        super().__init__()
+
+    def assess(self, variables: List[str] = None, **kwargs) -> str:
+        logger.info(f'Assessing "{self.component_name}" component {variables}')
+
+        vrs = list(filter(lambda v: v in self.variable_names, variables or self.variable_names))

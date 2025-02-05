@@ -4,82 +4,90 @@ import click
 import logging
 import shutil
 from osgeo import gdal
-from collections import UserDict
+
 import json
 import sys
 
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
+import os
+import sys
+import json
+import datetime
+import shutil
+import click
+from osgeo import gdal
+
 
 class Project:
-
-
     config_file_name = 'rapida.json'
     data_folder_name = 'data'
-    path = None
-    config_file = None
-    name = None
-    geopackage_file_name = None
+    _instance = None
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
 
-    def __init__(self, path:str=None, polygons:str=None,
-                 mask:str=None, projection:str='ESRI:54009', comment:str=None, save=True,  **kwargs):
-        self.path = path
+    def __init__(self, path: str, polygons: str = None,
+                 mask: str = None, projection: str = 'ESRI:54009',
+                 comment: str = None, save=True, **kwargs):
 
-        *_, name = self.path.split(os.path.sep)
-        self.name = name
+        if path is None:
+            raise ValueError("Project path cannot be None")
 
-        self._cfg_ = dict(
-            file_path=self.config_file,
-            name=self.name,
-            path=self.path,
-            config_file=self.config_file,
-            create_command=' '.join(sys.argv),
-            created_on=datetime.datetime.now().isoformat(),
-            user=os.environ.get('USER', os.environ.get('USERNAME')),
-        )
-        if mask is not None:
-            self._cfg_['mask'] = mask
-        if comment is not None:
-            self._cfg_['comment'] = comment
+        self.path = os.path.abspath(path)
+        self.geopackage_file_name = f"{os.path.basename(self.path)}.gpkg"
+
+        if os.path.exists(self.config_file):
+            self.load_config()  # ✅ Call a function that loads config safely
+        else:
+            self.name = os.path.basename(self.path)
+            self._cfg_ = {
+                "name": self.name,
+                "path": self.path,
+                "config_file": self.config_file,
+                "create_command": ' '.join(sys.argv),
+                "created_on": datetime.datetime.now().isoformat(),
+                "user": os.environ.get('USER', os.environ.get('USERNAME')),
+            }
+            if mask:
+                self._cfg_['mask'] = mask
+            if comment:
+                self._cfg_['comment'] = comment
+
+            if polygons is not None:
+                with gdal.OpenEx(polygons) as poly_ds:
+                    lcount = poly_ds.GetLayerCount()
+                    if lcount > 1:
+                        lnames = list()
+                        for i in range(lcount):
+                            l = poly_ds.GetLayer(i)
+                            lnames.append(l.GetName())
+                        #click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
+                        layer_name = click.prompt(
+                            f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
+                            type=str, default=lnames[0])
+                    else:
+                        layer_name = poly_ds.GetLayer(0).GetName()
+                    if not os.path.exists(self.data_folder):
+                        os.makedirs(self.data_folder)
+                    gdal.VectorTranslate(self.geopackage_file_path, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
+                                     layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
 
 
-        # if polygons is not None:
-        #     with gdal.OpenEx(polygons) as poly_ds:
-        #         lcount = poly_ds.GetLayerCount()
-        #         if lcount > 1:
-        #             lnames = list()
-        #             for i in range(lcount):
-        #                 l = poly_ds.GetLayer(i)
-        #                 lnames.append(l.GetName())
-        #             #click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
-        #             layer_name = click.prompt(
-        #                 f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
-        #                 type=str, default=lnames[0])
-        #         else:
-        #             layer_name = poly_ds.GetLayer(0).GetName()
-        #         if not os.path.exists(self.data_folder):
-        #             os.makedirs(self.data_folder)
-        #         gdal.VectorTranslate(self.geopackage_file, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
-        #                          layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
-        # if mask is not  None:
-        #     try:
-        #         vm_ds = gdal.OpenEx(mask, gdal.OF_VECTOR)
-        #     except RuntimeError as ioe:
-        #         if 'supported' in str(ioe):
-        #             vm_ds = None
-        #         else:
-        #             raise
-        #     if vm_ds is not None:
-        #         pass
-        #
-        if save: self.save()
-    @classmethod
-    def from_config(cls, config_file=None):
-        assert  os.path.exists(config_file), f'{config_file} does not exist'
-        with open(config_file, mode="r", encoding="utf-8") as f:
-            config_data = json.load(f)
-            return cls(save=False,**config_data)
+
+            if save:
+                self.save()
+
+    def load_config(self):
+        """Load configuration safely to avoid recursion"""
+        try:
+            with open(self.config_file, mode="r", encoding="utf-8") as f:
+                config_data = json.load(f)
+            self.__dict__.update(config_data)  # ✅ Update instance variables safely
+        except (FileNotFoundError, json.JSONDecodeError) as e:
+            print(f"Warning: Could not load config file ({self.config_file}): {e}")
 
     @property
     def data_folder(self):
@@ -90,37 +98,48 @@ class Project:
         return os.path.join(self.path, self.config_file_name)
 
     @property
-    def geopackage_file(self):
+    def geopackage_file_path(self):
         return os.path.join(self.data_folder, self.geopackage_file_name)
-
 
     def __str__(self):
         return json.dumps(
-            dict(Name=self.name, Path=self.path, Valid=self.is_valid ), indent=4
+            {"Name": self.name, "Path": self.path, "Valid": self.is_valid}, indent=4
         )
 
     @property
     def is_valid(self):
         """Conditions for a valid project"""
-        assert os.path.exists(self.path), f'{self.path} does not exist'
-        assert os.access(self.path, os.W_OK), f'{self.path} is not writable'
-        assert os.path.exists(self.config_file), f'{self.config_file} does not exist'
-        assert os.path.getsize(self.config_file) > 0, f'{self.config_file} is empty'
+        if not os.path.exists(self.path):
+            raise FileNotFoundError(f"{self.path} does not exist")
+        if not os.access(self.path, os.W_OK):
+            raise PermissionError(f"{self.path} is not writable")
+        if not os.path.exists(self.config_file):
+            raise FileNotFoundError(f"{self.config_file} does not exist")
+        if os.path.getsize(self.config_file) == 0:
+            raise ValueError(f"{self.config_file} is empty")
         return True
 
+    def delete(self, force=False):
+        if not force and not click.confirm(f'Are you sure you want to delete {self.name} located in {self.path}?',
+                                           abort=True):
+            return
 
-
-    def delete(self):
-        if click.confirm(f'Are you sure you want to delete {self.name} located in {self.path} ?', abort=True):
-            shutil.rmtree(self.path)
-
+        shutil.rmtree(self.path)
 
     def save(self):
-        with open(self.config_file, mode='a+', encoding="utf-8") as cfgf:
-            content = cfgf.read()
-            data = json.loads(content) if content else {}
-            data.update(self._cfg_)
-            json.dump(data, fp=cfgf, indent=4)
+        os.makedirs(self.data_folder, exist_ok=True)
+
+        if os.path.exists(self.config_file):
+            with open(self.config_file, 'r', encoding="utf-8") as cfgf:
+                content = cfgf.read()
+                data = json.loads(content) if content else {}
+        else:
+            data = {}
+
+        data.update(self._cfg_)
+
+        with open(self.config_file, 'w', encoding="utf-8") as cfgf:
+            json.dump(data, cfgf, indent=4)
 
 
 @click.command(no_args_is_help=True)
@@ -140,7 +159,8 @@ def create(name=None, polygons=None, mask=None, comment=None):
     """
     abs_folder = os.path.abspath(name)
     if os.path.exists(abs_folder):
-        raise FileExistsError(f'Folder "{name}" already exists in {os.getcwd()}')
+        logger.error(f'Folder "{name}" already exists in {os.getcwd()}')
+        sys.exit(1)
     else:
         os.mkdir(abs_folder)
     project = Project(path=abs_folder, polygons=polygons, mask=mask, comment=comment)

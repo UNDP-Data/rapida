@@ -147,6 +147,26 @@ def proj_are_equal(src_srs: osr.SpatialReference = None, dst_srs: osr.SpatialRef
 
     return proj_are_equal
 
+
+def get_geographic_bbox(layer):
+    # Get the layer's spatial reference
+    source_srs = layer.GetSpatialRef()
+    min_x, max_x, min_y, max_y = layer.GetExtent()
+    # If the layer is already in geographic (WGS 84), no reprojection is needed
+    if source_srs is None or source_srs.IsGeographic():
+        return min_x, min_y, max_x, max_y
+    target_srs = osr.SpatialReference()
+    target_srs.ImportFromEPSG(4326)
+    # Otherwise, perform reprojection to WGS 84 (EPSG:4326)
+    transform = osr.CoordinateTransformation(
+        source_srs, target_srs
+    )
+
+
+    min_lon, min_lat, _ = transform.TransformPoint(min_x, min_y)
+    max_lon, max_lat, _ = transform.TransformPoint(max_x, max_y)
+
+    return min_lon, min_lat, max_lon, max_lat
 def generator_length(gen):
     """
     compute the no of elems inside a generator

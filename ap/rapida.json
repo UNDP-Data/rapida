@@ -1,0 +1,10 @@
+{
+    "file_path": "/home/work/py/geo-cb-surge/ap/rapida.json",
+    "name": "ap",
+    "path": "/home/work/py/geo-cb-surge/ap",
+    "config_file": "/home/work/py/geo-cb-surge/ap/rapida.json",
+    "create_command": "/home/work/py/geo-cb-surge/cbsurge/cli.py create -n ap -p /data/adhoc/MDA/adm/adm3transn.fgb -c ceva",
+    "created_on": "2025-02-04T23:11:29.525193",
+    "user": "janf",
+    "comment": "ceva"
+}

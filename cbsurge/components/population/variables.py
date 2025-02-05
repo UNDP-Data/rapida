@@ -1,9 +1,6 @@
 import json
 import os.path
-from azure.storage.blob import BlobServiceClient
-from cbsurge.exposure.population import worldpop
 from cbsurge import util
-from cbsurge.session import Session
 import logging
 logger = logging.getLogger(__name__)
 '''
@@ -30,12 +27,7 @@ AGGREGATE = 'total'
 UNDP_AZURE_WPOP_PATH = f'az:undpgeohub:stacdata/worldpop/{{year}}/{{country}}'
 
 
-
-class  Variable():
-    pass
-
-
-def generate_wpop_files(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
+def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
     """
     Generate population variables dict
     :param root:
@@ -92,7 +84,7 @@ def generate_wpop_files(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SE
 if __name__ == '__main__':
     logger = util.setup_logger(name='rapida', level=logging.INFO)
 
-    variables = generate_wpop_files()
+    variables = generate_variables()
     print(json.dumps(variables, indent=2))
 
     # with Session() as ses:

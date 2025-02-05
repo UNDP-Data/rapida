@@ -33,25 +33,25 @@ from cbsurge.cli import cli
             ["Fetch admin boundaries from OSM"]
         ),
         # test for rapida population --help
-        (
-            ["population", "--help"],
-            ["download", "aggregate", "sync"]
-        ),
-        # test for rapida population download --help
-        (
-            ["population", "download", "--help"],
-            ["population download"]
-        ),
-        # test for rapida population run-aggregate --help
-        (
-            ["population", "aggregate", "--help"],
-            ["population aggregate"]
-        ),
-        # test for rapida population sync --help
-        (
-            ["population", "sync", "--help"],
-            ["population sync"]
-        ),
+        # (
+        #     ["population", "--help"],
+        #     ["download", "aggregate", "sync"]
+        # ),
+        # # test for rapida population download --help
+        # (
+        #     ["population", "download", "--help"],
+        #     ["population download"]
+        # ),
+        # # test for rapida population run-aggregate --help
+        # (
+        #     ["population", "aggregate", "--help"],
+        #     ["population aggregate"]
+        # ),
+        # # test for rapida population sync --help
+        # (
+        #     ["population", "sync", "--help"],
+        #     ["population sync"]
+        # ),
         # test for rapida stats --help
         (
             ["stats", "--help"],

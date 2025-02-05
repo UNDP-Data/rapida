@@ -46,7 +46,7 @@ dependencies = [
     "folium",
     "jupyterlab_widgets",
     "ipywidgets",
-    "sumpy",
+    "sympy",
     "pydantic"
 ]
 

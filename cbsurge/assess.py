@@ -10,12 +10,12 @@ from cbsurge.session import Session
 from cbsurge.project import Project
 import inspect
 logger = logging.getLogger(__name__)
-s = Session()
-components = s.get_components()
-options = {}
-for c in components:
-    v = s.get_variables(component=c)
-    options[c] = v
+# s = Session()
+# components = s.get_components()
+# options = {}
+# for c in components:
+#     v = s.get_variables(component=c)
+#     options[c] = v
 
 def get_callable_args(callable_obj = None):
     skip = 'cls','self'
@@ -94,7 +94,8 @@ def convert_params_to_click_options(params: dict, func):
 
 @click.option(
     '--components', '-c', required=False, type=click.STRING,
-    help=f'One or more components to be assessed. Valid input example: --components "{", ".join(components)}". '
+    #help=f'One or more components to be assessed. Valid input example: --components "{", ".join(components)}". '
+    help=f'One or more components to be assessed. Valid input example: --components component1,component2". '
 
 )
 

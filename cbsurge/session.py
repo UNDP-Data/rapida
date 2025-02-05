@@ -338,7 +338,8 @@ class Session(object):
         share_client = ShareClient(
             account_url=account_url,
             credential=credential,
-            share_name=share_name
+            share_name=share_name,
+            token_intent="backup"
         )
         return share_client
 

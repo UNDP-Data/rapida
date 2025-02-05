@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import patch
-from cbsurge.exposure.population.pop_coefficient import get_pop_coefficient_world_bank
+from cbsurge.components.population.pop_coefficient import get_pop_coefficient_world_bank
 
 
 def mock_world_bank_api(*args, **kwargs):

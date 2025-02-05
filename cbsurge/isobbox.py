@@ -24,8 +24,6 @@ def bbox2iso31(lon_min=None, lat_min=None, lon_max=None, lat_max=None, overpass_
     return set(iso3_codes)
 
 
-def iso32bbox(iso3_country=None):
-    return get_admin0_bbox(iso3=iso3_country)
 
 
 if __name__ == '__main__':
@@ -37,5 +35,5 @@ if __name__ == '__main__':
 
     logger.info(countries)
     for country_code in countries:
-        bb = iso32bbox(iso3_country=country_code)
+        bb = get_admin0_bbox(iso3=country_code)
         logger.info(f'Country {country_code} has bbox {bb}')

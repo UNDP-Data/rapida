@@ -2,7 +2,7 @@ import asyncio
 
 import click
 
-from cbsurge.exposure.population.worldpop import population_sync, process_aggregates, run_download
+from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 
 
 @click.group()

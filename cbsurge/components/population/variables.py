@@ -1,9 +1,6 @@
 import json
 import os.path
-from azure.storage.blob import BlobServiceClient
-from cbsurge.exposure.population import worldpop
 from cbsurge import util
-from cbsurge.session import Session
 import logging
 logger = logging.getLogger(__name__)
 '''

@@ -3,8 +3,6 @@ from cbsurge.util import setup_logger
 from cbsurge.admin import admin
 from cbsurge.project import create
 from cbsurge.initialize import init
-from cbsurge.exposure.builtenv import builtenv
-from cbsurge.exposure.population import population
 from cbsurge.assess import assess
 from cbsurge.stats import stats
 import click

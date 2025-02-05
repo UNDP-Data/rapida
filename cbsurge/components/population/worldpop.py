@@ -16,7 +16,7 @@ from rasterio.windows import Window
 import numpy as np
 from tqdm.asyncio import tqdm_asyncio
 
-from cbsurge.exposure.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR, \
+from cbsurge.components.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR, \
     AGESEX_STRUCTURE_COMBINATIONS, SEX_MAPPING
 from cbsurge.session import Session
 

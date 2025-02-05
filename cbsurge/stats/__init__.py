@@ -5,7 +5,7 @@ from cbsurge.stats.ZonalStats import ZonalStats
 
 @click.group()
 def stats():
-    f"""Command line interface for {__package__} package"""
+    """Run zonal stats"""
     pass
 @stats.command(no_args_is_help=True)
 @click.argument('input_file', type=click.Path())

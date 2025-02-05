@@ -45,7 +45,9 @@ dependencies = [
     "matplotlib",
     "folium",
     "jupyterlab_widgets",
-    "ipywidgets"
+    "ipywidgets",
+    "sympy",
+    "pydantic"
 ]
 
 [project.scripts]

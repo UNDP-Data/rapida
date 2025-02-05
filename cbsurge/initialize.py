@@ -1,9 +1,11 @@
+import json
 import logging
 import click
 import os
 import shutil
 from cbsurge.session import Session
-from cbsurge.util import silence_httpx_az
+from cbsurge.core import dump_variables
+
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +59,10 @@ def setup_prompt(session: Session):
     session.set_file_share_name(share_name)
     click.echo(f"file share name: {share_name}")
 
+
+    session.save_config()
+    vars_dict = dump_variables()
+    session.config.update(vars_dict)
     session.save_config()
     click.echo('Setting up was successfully done!')
 
@@ -68,11 +74,7 @@ def setup_prompt(session: Session):
               help="Set log level to debug"
               )
 def init(debug=False):
-    """
-    This command setup rapida command environment by authenticating to Azure.
-    """
-    silence_httpx_az()
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO, force=True)
+    """ Initialize rapida tool"""
 
     click.echo("Welcome to rapida CLI tool!")
     with Session() as session:

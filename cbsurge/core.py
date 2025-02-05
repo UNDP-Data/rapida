@@ -1,4 +1,3 @@
-
 import os.path
 import asyncio
 from sympy.parsing.sympy_parser import parse_expr
@@ -10,12 +9,33 @@ from cbsurge.session import Session
 from cbsurge import util
 import logging
 from cbsurge.az import blobstorage
-
+import importlib
+from pkgutil import walk_packages
 
 
 logger = logging.getLogger(__name__)
 
+def dump_variables(root_package_name = 'cbsurge', variables_module='variables', function_name='generate_variables'):
+    """
+    Iterate over all modules in path  that start with root_package_name, end with variables_module and are
+    not packages. Consequently import the function_name function and run it.
 
+    :param root_package_name: str, cbsurge
+    :param variables_module: str, variables
+    :param function_name: 'generate_variables'
+    :return: dict['variables'] = {'component': component_vars}
+    """
+    vars_dict = {}
+    vars_dict[variables_module] = {}
+    for p in walk_packages():
+        if p.name.startswith(root_package_name) and p.name.endswith(variables_module) and not p.ispkg:
+            m = importlib.import_module(name=p.name)
+            if hasattr(m, function_name):
+                var_dict = getattr(m, 'generate_variables')()
+                component_name = p.name.split('.')[-2]
+
+                vars_dict[variables_module][component_name] = var_dict
+    return vars_dict
 
 class SurgeVariable(BaseModel):
     name: str
@@ -44,6 +64,8 @@ class SurgeVariable(BaseModel):
         with Session() as s:
             root_folder = s.get_root_data_folder()
             self._source_folder_ = os.path.join(root_folder, self.component, self.name)
+            logger.info(self._source_folder_)
+
 
 
     def __str__(self):
@@ -140,6 +162,7 @@ if __name__ == '__main__':
     logger = util.setup_logger(name='rapida', level=logging.INFO)
     admin_layer = '/data/adhoc/MDA/adm/adm3transn.fgb'
     from rich.progress import Progress
+
 
     with Session() as ses:
 

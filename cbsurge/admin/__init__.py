@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 @click.group()
 def admin():
-    f"""Command line interface for {__package__} package"""
+    """Fetch administrative boundaries at various levels from OSM or OCHA"""
     pass
 
 

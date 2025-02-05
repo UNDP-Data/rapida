@@ -1,8 +1,6 @@
-from email.policy import default
-
 import click
-from cbsurge.exposure.builtenv.buildings.fgb import download_bbox, download_admin
-from cbsurge.exposure.builtenv.buildings.pmt import download as download_pmt, GMOSM_BUILDINGS
+from cbsurge.components.builtenv.buildings.fgb import download_bbox, download_admin
+from cbsurge.components.builtenv.buildings.pmt import download as download_pmt, GMOSM_BUILDINGS
 from cbsurge.util import BboxParamType
 import asyncio
 

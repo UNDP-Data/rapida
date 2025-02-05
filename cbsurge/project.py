@@ -12,80 +12,9 @@ import sys
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
-class Config(UserDict):
-    def __init__(self, file_path, **kwargs):
-        """
-        Initialize the AutoSaveDict with a target JSON filename.
-        If the file exists, load its contents; otherwise, start with an empty dict
-        (or with any provided initial values).
-
-        :param file_path: Path to the JSON file where the dictionary will be saved.
-        :param args: Positional arguments passed to dict().
-        :param kwargs: Keyword arguments passed to dict().
-        """
-        self.file_path = file_path
-
-        # If the file exists, load its contents
-        if os.path.exists(self.file_path):
-            try:
-                with open(self.file_path, 'r') as f:
-                    loaded_data = json.load(f)
-            except (json.JSONDecodeError, IOError) as e:
-                print(f"Warning: Could not load JSON from {self.file_path}: {e}")
-                loaded_data = {}
-        else:
-            loaded_data = {}
-
-        # Merge with any additional data provided during instantiation.
-        # Values provided in args/kwargs will override those loaded from the file.
-        loaded_data.update(dict(**kwargs))
-
-        # Initialize the underlying dictionary with the merged data.
-        super().__init__(**loaded_data)
-        self._save()  # Write the initial state (in case the file didn't exist)
-
-    def __setitem__(self, key, value):
-        """Set the item and save the dictionary to the JSON file."""
-        super().__setitem__(key, value)
-        self._save()
-
-    def __delitem__(self, key):
-        """Delete the item and save the dictionary to the JSON file."""
-        super().__delitem__(key)
-        self._save()
-
-    def update(self, *args, **kwargs):
-        """Update the dictionary and save the changes."""
-        super().update( *args, **kwargs)
-        self._save()
-
-    def clear(self):
-        """Clear the dictionary and save the changes."""
-        super().clear()
-        self._save()
-
-    def pop(self, key, *args):
-        """Remove the specified key and save the dictionary."""
-        value = super().pop(key, *args)
-        self._save()
-        return value
-
-    def popitem(self):
-        """Remove and return an arbitrary (key, value) pair and save the dictionary."""
-        item = super().popitem()
-        self._save()
-        return item
-
-    def _save(self):
-        """Write the current state of the dictionary to the JSON file."""
-        try:
-            with open(self.file_path, 'w') as f:
-                json.dump(self.data, f, indent=4)
-        except Exception as e:
-            print(f"Error saving AutoSaveDict to {self.file_path}: {e}")
-
-
 class Project:
+
+
     config_file_name = 'rapida.json'
     data_folder_name = 'data'
     path = None
@@ -94,13 +23,13 @@ class Project:
     geopackage_file_name = None
 
     def __init__(self, path:str=None, polygons:str=None,
-                 mask:str=None, projection:str='ESRI:54009', comment:str=None, **kwargs):
-
+                 mask:str=None, projection:str='ESRI:54009', comment:str=None, save=True,  **kwargs):
         self.path = path
+
         *_, name = self.path.split(os.path.sep)
         self.name = name
 
-        config_vals = dict(
+        self._cfg_ = dict(
             file_path=self.config_file,
             name=self.name,
             path=self.path,
@@ -110,19 +39,9 @@ class Project:
             user=os.environ.get('USER', os.environ.get('USERNAME')),
         )
         if mask is not None:
-            config_vals['mask'] = mask
+            self._cfg_['mask'] = mask
         if comment is not None:
-            config_vals['comment'] = comment
-        self.config = Config(**config_vals)
-
-
-
-        # path = os.path.abspath(path)
-        # config_file = os.path.join(path, self.config_file_name)
-        # if os.path.exists(config_file):
-        #     self.config = Config(file_path=config_file)
-        #     for k, v in self.config.items():
-        #         self.__setattr__(k, v)
+            self._cfg_['comment'] = comment
 
 
         # if polygons is not None:
@@ -154,16 +73,14 @@ class Project:
         #     if vm_ds is not None:
         #         pass
         #
-        # assert self.is_valid, f'{self} is not valid'
-
-    def from_config(self, config_file=None):
+        if save: self.save()
+    @classmethod
+    def from_config(cls, config_file=None):
         assert  os.path.exists(config_file), f'{config_file} does not exist'
-        with open(config_file, "r") as f:
+        with open(config_file, mode="r", encoding="utf-8") as f:
             config_data = json.load(f)
+            return cls(save=False,**config_data)
 
-        # self.config = Config(file_path=config_file)
-        # for k, v in self.config.items():
-        #     self.__setattr__(k, v)
     @property
     def data_folder(self):
         return os.path.join(self.path, self.data_folder_name)
@@ -194,24 +111,25 @@ class Project:
 
 
     def delete(self):
-        if click.confirm(f'Are you sure you want to delete {self.name} located in {self.folder} ?', abort=True):
-            shutil.rmtree(self.folder)
+        if click.confirm(f'Are you sure you want to delete {self.name} located in {self.path} ?', abort=True):
+            shutil.rmtree(self.path)
 
 
+    def save(self):
+        with open(self.config_file, mode='a+', encoding="utf-8") as cfgf:
+            content = cfgf.read()
+            data = json.loads(content) if content else {}
+            data.update(self._cfg_)
+            json.dump(data, fp=cfgf, indent=4)
 
 
 @click.command(no_args_is_help=True)
-
-@click.argument('name', required=False)
 @click.option('-n', '--name', required=True, type=str,
               help='Name representing a new folder in the current directory' )
-@click.argument('polygons', required=False)
 @click.option('-p', '--polygons', required=True, type=str,
               help='Full path to the vector polygons dataset in any OGR supported format' )
-@click.argument('mask', required=False)
 @click.option('-m', '--mask', required=False, type=str,
               help='Full path to the mask dataset in any GDAL/OGR supported format. Can be vector or raster' )
-@click.argument('comment', required=False)
 @click.option('-c', '--comment', required=False, type=str,
               help='Any comment you might want to add into the project config' )
 
@@ -221,10 +139,6 @@ def create(name=None, polygons=None, mask=None, comment=None):
 
     """
     abs_folder = os.path.abspath(name)
-    try:
-        shutil.rmtree(abs_folder)
-    except FileNotFoundError:
-        pass
     if os.path.exists(abs_folder):
         raise FileExistsError(f'Folder "{name}" already exists in {os.getcwd()}')
     else:

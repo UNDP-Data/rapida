@@ -2,7 +2,10 @@ import asyncio
 import logging
 import os
 
+import aiofiles
 from azure.storage.fileshare.aio import ShareFileClient
+from azure.core.exceptions import ResourceNotFoundError
+from tqdm.asyncio import tqdm_asyncio
 
 from cbsurge import util
 from cbsurge.session import Session
@@ -41,74 +44,136 @@ async def download(file_client: ShareFileClient = None, dst_path: str = None, pr
         return dst_path
 
 
-async def download_file(src_path: str = None, dst_path: str = None) -> str:
+async def create_azure_directory(path):
+        """
+        Create a directory in the Azure File Share. If the directory already exists, it will not be created.
+
+        Args:
+            path: (str) The path to the directory to create.
+
+        Returns:
+            The fully created directory path.
+        """
+        directory_list = path.split("/")
+        current_path = ""
+        async with Session() as session:
+            async with session.get_share_client(account_name=session.get_account_name(), share_name=session.get_file_share_name()) as share_client:
+                for directory in directory_list:
+                    current_path = f"{current_path}/{directory}" if current_path else directory
+                    directory_client = share_client.get_directory_client(current_path)
+                    try:
+                        await directory_client.create_directory()
+                        logging.info(f"Created directory: {current_path}")
+                    except ResourceNotFoundError:
+                        logging.info(f"Directory {current_path} already exists")
+                    except Exception as e:
+                        logging.error(f"Error creating directory {current_path}: {e}")
+                        raise e
+                return current_path
+
+
+async def download_file(file_name, download_path):
     """
-    Download a file from Azure File Share to a local storage.
+    Download a file from the Azure File Share.
+    Args:
+        file_name: The name of the file to download. This should include the path relative to the share.
+        download_path: The local path to save the downloaded file.
 
-    Parameters
-    ----------
-    src_path : str
-        Source path to download the file from.
-    dst_path : str, optional
-        Destination path to save the file to.
-    Returns
-    -------
-    path_dst : str
-        Destination path the file was downloaded to.
+    Returns:
+
     """
-    assert isinstance(dst_path, str), f'dst_path must be a valid string, not {type(dst_path)}'
-
-    util.validate_azure_storage_path(a_path=src_path)
-
-    proto, account_name, src_file_path = src_path.split(':')
-    share_name, *src_path_parts = src_file_path.split(os.path.sep)
-    rel_src_file_path = os.path.sep.join(src_path_parts)
-
     async with Session() as session:
-        async with session.get_share_file_client(account_name=account_name, share_name=share_name, file_path=rel_src_file_path) as file_client:
-            return await download(file_client=file_client, dst_path=dst_path)
+        async with session.get_share_client(account_name=session.get_account_name(), share_name=session.get_file_share_name()) as share_client:
+            file_client = share_client.get_file_client(file_name)
+            file_properties = await file_client.get_file_properties()
+            file_size = file_properties['content_length']
+
+            progress_bar = tqdm_asyncio(total=file_size, unit="B", unit_scale=True, desc=f"Downloading {file_name}")
+
+            async with aiofiles.open(os.path.join(download_path, file_name), "wb") as file:
+                stream = await file_client.download_file()
+                async for chunk in stream.chunks():
+                    await file.write(chunk)
+                    progress_bar.update(len(chunk))
+
+            progress_bar.close()
+            return file_name
 
 
-async def upload_file(src_path, dst_path, file_client: ShareFileClient = None, overwrite=True):
+# async def upload_file(src_path, dst_path, file_client: ShareFileClient = None, overwrite=True):
+#     """
+#     Upload a file to Azure File Share asynchronously.
+#
+#     :param src_path: str, path to the local file to be uploaded
+#     :param dst_path: str, the fully qualified path to a file in Azure in format az:{account}:{share}/path.ext
+#     :param file_client: instance of Azure Storage ShareFileClient
+#     :param overwrite: bool, if the file will be overwritten
+#     :return: str, the fully qualified path to a file in Azure in format az:{account}:{share}/path.ext
+#     """
+#     if not os.path.exists(src_path):
+#         raise ValueError(f"File {src_path} does not exist")
+#     try:
+#         logger.debug(f"Uploading {src_path} to {dst_path}")
+#         with open(src_path, mode="rb") as data:
+#             await file_client.upload_file(data, overwrite=overwrite)
+#     except Exception as e:
+#         logger.error(f"Failed to upload {dst_path} from {src_path}: {e}")
+#         raise
+#     else:
+#         logger.debug(f"File {src_path} was successfully uploaded to {dst_path}")
+#         return dst_path
+
+
+async def upload_file(local_file_path, azure_file_path):
     """
-    Upload a file to Azure File Share asynchronously.
+    Upload a file to the Azure File Share.
 
-    :param src_path: str, path to the local file to be uploaded
-    :param dst_path: str, the fully qualified path to a file in Azure in format az:{account}:{share}/path.ext
-    :param file_client: instance of Azure Storage ShareFileClient
-    :param overwrite: bool, if the file will be overwritten
-    :return: str, the fully qualified path to a file in Azure in format az:{account}:{share}/path.ext
+    Args:
+        local_file_path: The path to the file on the local machine.
+        azure_file_path: The path to the file in the Azure File Share.
+
+    Returns:
+        The Azure File Path after upload.
     """
-    if not os.path.exists(src_path):
-        raise ValueError(f"File {src_path} does not exist")
-    try:
-        logger.debug(f"Uploading {src_path} to {dst_path}")
-        with open(src_path, mode="rb") as data:
-            await file_client.upload_file(data, overwrite=overwrite)
-    except Exception as e:
-        logger.error(f"Failed to upload {dst_path} from {src_path}: {e}")
-        raise
-    else:
-        logger.debug(f"File {src_path} was successfully uploaded to {dst_path}")
-        return dst_path
-
-
-async def upload_file_to_share(src_path: str = None, dst_path: str = None):
-    """
-    Upload a file to Azure File Share.
-    :param src_path: str, path to the local file to be uploaded
-    :param dst_path: str, the fully qualified path to a file in Azure in format az:{account}:{share}/path.ext
-    :return: str, the fully qualified path to a file in Azure in format az:{account}:{share}/path.ext
-    """
-    assert isinstance(src_path, str), f'src_path must be a valid string, not {type(src_path)}'
-    util.validate_azure_storage_path(a_path=dst_path)
-    proto, account_name, dst_file_path = dst_path.split(':')
-    share_name, *dst_path_parts = dst_file_path.split(os.path.sep)
-    rel_dst_file_path = os.path.sep.join(dst_path_parts)
-
     async with Session() as session:
-        async with session.get_share_file_client(account_name=account_name, share_name=share_name, file_path=rel_dst_file_path) as file_client:
-            return await upload_file(src_path, dst_path, file_client)
+        async with session.get_share_client(account_name=session.get_account_name(), share_name=session.get_file_share_name()) as share_client:
+            file_client = share_client.get_file_client(azure_file_path)
+
+            async def __progress__(current, total):
+                tqdm_asyncio(total=total, unit="B", unit_scale=True, desc=f"Uploading {azure_file_path}").update(current)
+
+            # Ensure parent directories exist
+            if "/" in azure_file_path:
+                directory_path = "/".join(azure_file_path.split("/")[:-1])
+                await create_azure_directory(directory_path)
+
+            # Upload the file
+            async with aiofiles.open(local_file_path, "rb") as file:
+                try:
+                    file_size = os.path.getsize(local_file_path)
+                    await file_client.upload_file(file, max_concurrency=4, length=file_size, progress_hook=__progress__)
+                    logging.info(f"Uploaded file: {azure_file_path}")
+                except Exception as e:
+                    logging.error(f"Error uploading file {azure_file_path}: {e}")
+                    raise e
+
+                return azure_file_path
+
+
+    async def upload_files(local_directory):
+        """
+        Upload all files in a local directory supplied to the Azure File Share.
+        Args:
+            local_directory: (str) The local directory to upload.
+
+        Returns:
+
+        """
+        for root, _, files in os.walk(local_directory):
+            for file in files:
+                await upload_file(os.path.join(root, file), file)
+        return local_directory
+
 
 
 async def download_files(src_files, dst_folder, max_at_once=10, progress=None):
@@ -165,4 +230,4 @@ async def download_files(src_files, dst_folder, max_at_once=10, progress=None):
     return downloaded_files
 
 if __name__ == "__main__":
-    asyncio.run(download_file('az:undpgeohub:cbrapida/rus_f_0_2020_constrained_UNadj_cog.tif', 'downloaded_files'))
+    asyncio.run(download_file('az:undpgeohub:cbrapida/Myanmar flood example/FL20240912MMR_SHP.zip', 'downloaded_files'))

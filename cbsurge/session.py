@@ -5,8 +5,7 @@ import typing
 from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
-from azure.storage.fileshare.aio import ShareServiceClient
-
+from azure.storage.fileshare.aio import ShareServiceClient, ShareClient, ShareFileClient
 
 logger = logging.getLogger(__name__)
 
@@ -308,9 +307,76 @@ class Session(object):
         account_url = self.get_file_share_account_url(account_name, share_name)
         share_service_client = ShareServiceClient(
             account_url=account_url,
-            credential=credential
+            credential=credential,
+            token_intent="backup"
         )
         return share_service_client
+
+    def get_share_client(self, account_name: str = None, share_name: str = None) -> ShareClient:
+        """
+        get ShareClient for account name and share name
+
+        If the parameter is not set, use default account name from config.
+
+        Usage example:
+        with Session() as session:
+            share_client = session.get_share_client()
+            # do something
+
+        Parameters:
+            account_name (str): name of storage account.
+            share_name (str): name of file share.
+
+            both parameters are equivalent to the below URL's bracket places.
+
+            https://{account_name}.file.core.windows.net/{share_name}
+        Returns:
+            ShareClient
+        """
+        credential = self.get_credential()
+        account_url = self.get_file_share_account_url(account_name, share_name)
+        share_client = ShareClient(
+            account_url=account_url,
+            credential=credential,
+            share_name=share_name
+        )
+        return share_client
+
+    def get_share_file_client(self, account_name: str = None, share_name: str = None, file_path: str = None):
+        """
+        get ShareFileClient for account name, share name and file path
+
+        If the parameter is not set, use default account name from config.
+
+        Usage example:
+        with Session() as session:
+            share_file_client = session.get_share_file_client(
+                account_name="undpgeohub",
+                share_name="cbrapida",
+                file_path="test.txt"
+            )
+
+        Parameters:
+            account_name (str): name of storage account.
+            share_name (str): name of file share.
+            file_path (str): file path in file share.
+
+            all parameters are equivalent to the below URL's bracket places.
+
+            https://{account_name}.file.core.windows.net/{share_name}/{file_path}
+        Returns:
+            ShareFileClient
+        """
+        credential = self.get_credential()
+        account_url = self.get_file_share_account_url(account_name, share_name)
+        share_file_client = ShareFileClient(
+            account_url=account_url,
+            credential=credential,
+            share_name=share_name,
+            file_path=file_path,
+            token_intent="backup"
+        )
+        return share_file_client
 
     def get_file_share_account_url(self, account_name: str = None, share_name: str = None) -> str:
         """

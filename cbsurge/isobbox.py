@@ -1,29 +1,31 @@
-from geopandas import read_file
+
+import httpx
 import logging
-
-from pycountry import countries
-
+from cbsurge.admin.osm import get_admin0_bbox, OVERPASS_API_URL
 logger = logging.getLogger(__name__)
-ADMIN0_SOURCE='https://undpgeohub.blob.core.windows.net/rapida/admin/adm0_polygons.fgb'
 
 
 
+def bbox2iso31(lon_min=None, lat_min=None, lon_max=None, lat_max=None, overpass_url=OVERPASS_API_URL):
 
-def bbox2iso3(lon_min=None, lat_min=None, lon_max=None, lat_max=None, admin0_src=ADMIN0_SOURCE):
+
+    query = f"""
+    [out:json];
+    (
+      way({lat_min},{lon_min},{lat_max},{lon_max})["ISO3166-1:alpha3"];
+      relation({lat_min},{lon_min},{lat_max},{lon_max})["ISO3166-1:alpha3"];
+    );
+    out tags;
     """
-    Compute the countries intersecting  a geographic bounding box in
-    https://undpgeohub.blob.core.windows.net/rapida/admin/adm0_polygons.fgb dataset
-    :param lon_min: number, left  bound
-    :param lat_min: number, bottom bound
-    :param lon_max: number, right_bound
-    :param lat_max: number, top bound
-    :param admin0_src, str, default: https://undpgeohub.blob.core.windows.net/rapida/admin/adm0_polygons.fgb
-    :return: iterable of iso3 country codes
-    """
-    a0_src = f'/vsicurl/{admin0_src}'
-    df = read_file(filename=a0_src, bbox=(lon_min, lat_min, lon_max, lat_max),columns=['iso_3'], ignore_geometry=True, engine='pyogrio')
-    return set(df['iso_3'].tolist())
+    timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
+    data = util.http_post_json(url=overpass_url,data=query,timeout=timeout)
+    iso3_codes = {element['tags'].get('ISO3166-1:alpha3') for element in data.get('elements', []) if
+                  'tags' in element}
+    return set(iso3_codes)
 
+
+def iso32bbox(iso3_country=None):
+    return get_admin0_bbox(iso3=iso3_country)
 
 
 if __name__ == '__main__':
@@ -31,5 +33,9 @@ if __name__ == '__main__':
     logger = util.setup_logger(name='rapida', level=logging.INFO)
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA
     lonmin, latmin, lonmax, latmax=bbox
-    countries = bbox2iso3(lon_min=lonmin, lat_min=latmin, lon_max=lonmax, lat_max=latmax)
+    countries = bbox2iso31(lon_min=lonmin, lat_min=latmin, lon_max=lonmax, lat_max=latmax)
+
     logger.info(countries)
+    for country_code in countries:
+        bb = iso32bbox(iso3_country=country_code)
+        logger.info(f'Country {country_code} has bbox {bb}')

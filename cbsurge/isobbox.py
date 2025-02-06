@@ -6,8 +6,17 @@ from cbsurge  import util
 
 logger = logging.getLogger(__name__)
 
-
-
+def ll2iso3(lat=None, lon=None,overpass_url=OVERPASS_API_URL ):
+    query = f"""
+        [out:json];
+        is_in({lat},{lon})->.a;
+        area.a["ISO3166-1:alpha3"];
+        out body;
+    """
+    timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
+    data = util.http_post_json(url=overpass_url, data=query, timeout=timeout)
+    if "elements" in data and data["elements"]:
+        return data["elements"][0]["tags"].get("ISO3166-1:alpha3", None)
 def bbox2iso31(lon_min=None, lat_min=None, lon_max=None, lat_max=None, overpass_url=OVERPASS_API_URL):
 
 

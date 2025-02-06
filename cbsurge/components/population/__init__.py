@@ -7,6 +7,7 @@ from osgeo import gdal
 from cbsurge.components.component_base import ComponentBase
 from cbsurge.project import Project
 from cbsurge.util import get_geographic_bbox
+import geopandas
 import click
 from cbsurge import isobbox
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
@@ -124,6 +125,7 @@ def aggregate(country, age_group, sex, download_path, force_reprocessing):
 
 
 
+from shapely.geometry import box, mapping
 class PopulationComponent(ComponentBase):
 
     def __init__(self, year=2020, country:str = None):
@@ -134,16 +136,30 @@ class PopulationComponent(ComponentBase):
         # if self.country is None:
         project = Project(path=os.getcwd())
         print(project.geopackage_file_path)
-        with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY|gdal.OF_VECTOR) as vds:
-            layer = vds.GetLayerByName('polygons')
-            geo_bbox = get_geographic_bbox(layer=layer)
-            self.countries = isobbox.bbox2iso31(*geo_bbox)
 
-        print(self.countries)
+        gdf = geopandas.read_file(project.geopackage_file_path)
+
+        # xmin, ymin, xmax, ymax = gdf.total_bounds
+        # bbox_polygon = geopandas.GeoSeries([box(xmin, ymin, xmax, ymax)], crs=gdf.crs)
+        # bbox_polygon = bbox_polygon.to_crs(epsg=4326)
+        # bbox_polygon.to_file(project.geopackage_file_path,driver='GPKG',index=False,mode='a',engine='pyogrio',layer='bbox')
+        #
+
+        # with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY|gdal.OF_VECTOR) as vds:
+        #     layer = vds.GetLayerByName('polygons')
+        #     print(layer.GetExtent())
+        #     geo_bbox = get_geographic_bbox(layer=layer)
+        #     self.countries = isobbox.bbox2iso31(*geo_bbox)
+        #
+        # print(self.countries)
 
         super().__init__()
 
     def assess(self, variables: List[str] = None, **kwargs) -> str:
         logger.info(f'Assessing "{self.component_name}" component {variables}')
-
+        for var_name in variables:
+            if not var_name in self.variable_names:
+                logger.error(f'variable "{var_name}" is invalid. Valid options are "{"\n".join(self.variable_names)}"')
+                return
         vrs = list(filter(lambda v: v in self.variable_names, variables or self.variable_names))
+        logger.info(vrs)

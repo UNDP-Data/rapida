@@ -93,17 +93,17 @@ def convert_params_to_click_options(params: dict, func):
 @click.command()
 
 @click.option(
-    '--components', '-c', required=False, type=click.STRING,
+    '--components', '-c', required=False, multiple=True,
     #help=f'One or more components to be assessed. Valid input example: --components "{", ".join(components)}". '
-    help=f'One or more components to be assessed. Valid input example: --components component1,component2". '
+    help=f'One or more components to be assessed. Valid input example: --components component1 component2 '
 
 )
 
-@click.option('-v', '--variables', required=False, type=click.STRING,
-               help=f'The variable/s to be assessed. Valid input example: --variables' )
+@click.option('--variables', '-v', required=False, type=click.STRING, multiple=True,
+               help=f'The variable/s to be assessed. Valid input example: --variables variable 1 variable 2' )
 
 def assess( components=None,  variables=None):
-
+    print(components, variables)
     """ Asses/evaluate a specific geospatial exposure components/variables"""
     os.chdir('ap') #TODO delete me
     current_folder = os.getcwd()
@@ -113,21 +113,21 @@ def assess( components=None,  variables=None):
         with Progress(disable=False) as progress:
             with Session() as session:
                 all_components = session.get_components()
-                component_list = components.split(",") if components else []
+
                 components_task = progress.add_task(
-                    description=f'[green]Assessing {"".join(component_list)} components', total=len(component_list))
-                for comp_name in component_list:
-                    if not comp_name in all_components:
-                        msg = f'Component {comp_name} is invalid. Valid options  are: "{",".join(all_components)}"'
+                    description=f'[green]Assessing {"".join(components)} components', total=len(components))
+                for component_name in components:
+                    if not component_name in all_components:
+                        msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
                         logger.error(msg)
                         #click.echo(assess.get_help(ctx))
                         progress.remove_task(components_task)
                         sys.exit(1)
-                    fqcn = f'{__package__}.components.{comp_name}.{comp_name.capitalize()}Component'
+                    fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
                     cls = import_class(fqcn=fqcn)
                     component = cls()
                     component(progress=progress, variables=variables)
-
+                progress.remove_task(components_task)
 
             #         all_variables = session.get_variables(component=component_to_assess)
             #         variables_to_assess = all_variables.intersection(variable) or all_variables

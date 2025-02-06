@@ -4,20 +4,13 @@ import click
 import logging
 import shutil
 from osgeo import gdal
-
+import geopandas
 import json
 import sys
-
-
+from pyproj import CRS
+from cbsurge.isobbox import ll2iso3
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-import os
-import sys
-import json
-import datetime
-import shutil
-import click
-from osgeo import gdal
 
 
 class Project:
@@ -57,24 +50,48 @@ class Project:
                 self._cfg_['comment'] = comment
 
             if polygons is not None:
-                with gdal.OpenEx(polygons) as poly_ds:
-                    lcount = poly_ds.GetLayerCount()
-                    if lcount > 1:
-                        lnames = list()
-                        for i in range(lcount):
-                            l = poly_ds.GetLayer(i)
-                            lnames.append(l.GetName())
-                        #click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
-                        layer_name = click.prompt(
-                            f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
-                            type=str, default=lnames[0])
-                    else:
-                        layer_name = poly_ds.GetLayer(0).GetName()
-                    if not os.path.exists(self.data_folder):
-                        os.makedirs(self.data_folder)
-                    gdal.VectorTranslate(self.geopackage_file_path, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
-                                     layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
 
+                # with gdal.OpenEx(polygons) as poly_ds:
+                #     lcount = poly_ds.GetLayerCount()
+                #     if lcount > 1:
+                #         lnames = list()
+                #         for i in range(lcount):
+                #             l = poly_ds.GetLayer(i)
+                #             lnames.append(l.GetName())
+                #         #click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
+                #         layer_name = click.prompt(
+                #             f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
+                #             type=str, default=lnames[0])
+                #     else:
+                #         layer_name = poly_ds.GetLayer(0).GetName()
+                #     if not os.path.exists(self.data_folder):
+                #         os.makedirs(self.data_folder)
+                #     gdal.VectorTranslate(self.geopackage_file_path, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
+                #                      layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
+                #
+                l = geopandas.list_layers(polygons)
+                lnames = l.name.tolist()
+                lcount = len(lnames)
+                if lcount > 1:
+                    click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
+                    layer_name = click.prompt(
+                        f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
+                        type=str, default=lnames[0])
+                else:
+                    layer_name = lnames[0]
+                if not os.path.exists(self.data_folder):
+                    os.makedirs(self.data_folder)
+                gdf = geopandas.read_file(polygons, layer=layer_name, )
+                rgdf = gdf.to_crs(crs=CRS.from_user_input(projection))
+                cols = rgdf.columns.tolist()
+                if not ('h3id' in cols and 'undp_admin_level' in cols):
+                    logger.info(f'going to add ISO3 country code')
+                    c = gdf.to_crs(epsg=4326).centroid
+                    rgdf["iso3"] = c.apply(lambda point: ll2iso3(point.y, point.x))
+
+
+                rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                             promote_to_multi=True)
 
 
             if save:

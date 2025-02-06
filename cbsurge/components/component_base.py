@@ -51,8 +51,8 @@ class ComponentBase():
         """
         pass
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, **kwargs):
 
-        self.assess()
+        self.assess(**kwargs)
 
 

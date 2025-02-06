@@ -152,7 +152,6 @@ def get_geographic_bbox(layer):
     # Get the layer's spatial reference
     source_srs = layer.GetSpatialRef()
     min_x, max_x, min_y, max_y = layer.GetExtent(True)
-    print(min_x, max_x)
     # If the layer is already in geographic (WGS 84), no reprojection is needed
     if source_srs is None or source_srs.IsGeographic():
         return min_x, min_y, max_x, max_y

@@ -353,6 +353,7 @@ class Session(object):
         """
         component = self.get_component(component=component)
         return set(component.keys())
+
     def get_variable(self, component:str= None, variable=None ):
         """
         Gets the config for a given variable from a component

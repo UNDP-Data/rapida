@@ -8,7 +8,7 @@ from cbsurge.components.component_base import ComponentBase
 from cbsurge.project import Project
 from cbsurge.util import get_geographic_bbox
 import click
-
+from cbsurge import isobbox
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
@@ -130,14 +130,16 @@ class PopulationComponent(ComponentBase):
 
 
         self.year = year
-        self.country = country
-        if self.country is None:
-            project = Project(path=os.getcwd())
-            print(project.geopackage_file_path)
-            with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY|gdal.OF_VECTOR) as vds:
-                layer = vds.GetLayerByName('polygons')
-                geo_bbox = get_geographic_bbox(layer=layer)
+        # self.country = country
+        # if self.country is None:
+        project = Project(path=os.getcwd())
+        print(project.geopackage_file_path)
+        with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY|gdal.OF_VECTOR) as vds:
+            layer = vds.GetLayerByName('polygons')
+            geo_bbox = get_geographic_bbox(layer=layer)
+            self.countries = isobbox.bbox2iso31(*geo_bbox)
 
+        print(self.countries)
 
         super().__init__()
 

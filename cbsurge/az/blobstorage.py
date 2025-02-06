@@ -1,14 +1,17 @@
 import asyncio
 import logging
 import os
+
 from csv import excel
 from rich.progress import Progress, FileSizeColumn, BarColumn, TimeRemainingColumn
+
 from cbsurge.session import Session
 from cbsurge import util
 from azure.storage.blob import BlobType
 from azure.storage.blob.aio import BlobClient
 from typing import Iterable
 from rich.progress import Progress
+
 logger = logging.getLogger(__name__)
 
 

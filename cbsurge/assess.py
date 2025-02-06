@@ -123,7 +123,7 @@ def assess( components=None,  variables=None):
                         #click.echo(assess.get_help(ctx))
                         progress.remove_task(components_task)
                         sys.exit(1)
-                    fqcn = f'{__package__}.components.{c}.{comp_name.capitalize()}Component'
+                    fqcn = f'{__package__}.components.{comp_name}.{comp_name.capitalize()}Component'
                     cls = import_class(fqcn=fqcn)
                     component = cls()
                     component(progress=progress, variables=variables)

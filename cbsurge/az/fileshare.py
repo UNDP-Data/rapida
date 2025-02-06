@@ -1,9 +1,10 @@
 import asyncio
 import logging
 import os
+from asyncio import timeout
 
 import aiofiles
-from azure.storage.fileshare.aio import ShareFileClient
+from azure.storage.fileshare import ShareFileClient
 from azure.core.exceptions import ResourceNotFoundError
 from tqdm.asyncio import tqdm_asyncio
 
@@ -11,6 +12,7 @@ from cbsurge import util
 from cbsurge.session import Session
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 async def download(file_client: ShareFileClient = None, dst_path: str = None, progress=None, task=None):
@@ -22,18 +24,14 @@ async def download(file_client: ShareFileClient = None, dst_path: str = None, pr
     :param progress: Optional progress handler.
     :param task: Optional progress task.
     """
+    if not await file_client.exists():
+        raise ValueError(f"File {file_client.file_path} does not exist")
     try:
-        properties = await file_client.get_file_properties()
-        if properties is None:
-            raise ValueError(f"File {file_client.file_path} does not exist")
-
         logger.debug(f"Going to download {file_client.file_path}")
         file_stream = await file_client.download_file()
-
         with open(dst_path, "wb") as f:
             async for chunk in file_stream.chunks():
                 f.write(chunk)
-
         if progress and task is not None:
             progress.update(task, advance=1)
     except Exception as e:
@@ -42,6 +40,7 @@ async def download(file_client: ShareFileClient = None, dst_path: str = None, pr
     else:
         logger.debug(f"Downloaded file {file_client.file_path} to {dst_path}")
         return dst_path
+
 
 
 async def create_azure_directory(path):
@@ -58,16 +57,17 @@ async def create_azure_directory(path):
         current_path = ""
         async with Session() as session:
             async with session.get_share_client(account_name=session.get_account_name(), share_name=session.get_file_share_name()) as share_client:
+
                 for directory in directory_list:
                     current_path = f"{current_path}/{directory}" if current_path else directory
                     directory_client = share_client.get_directory_client(current_path)
                     try:
                         await directory_client.create_directory()
-                        logging.info(f"Created directory: {current_path}")
+                        logger.info(f"Created directory: {current_path}")
                     except ResourceNotFoundError:
-                        logging.info(f"Directory {current_path} already exists")
+                        logger.info(f"Directory {current_path} already exists")
                     except Exception as e:
-                        logging.error(f"Error creating directory {current_path}: {e}")
+                        logger.error(f"Error creating directory {current_path}: {e}")
                         raise e
                 return current_path
 
@@ -87,14 +87,15 @@ async def download_file(src_path, download_path):
     proto, account_name, src_blob_path = src_path.split(':')
     container_name, *src_path_parts = src_blob_path.split(os.path.sep)
     rel_src_blob_path = os.path.sep.join(src_path_parts)
+
     async with Session() as session:
-        async with session.get_share_client(account_name=session.get_account_name(), share_name=session.get_file_share_name()) as share_client:
-            file_client = share_client.get_file_client(rel_src_blob_path)
-            file_properties = await file_client.get_file_properties()
+        async with session.get_share_file_client(account_name=session.get_account_name(), share_name=session.get_file_share_name(), file_path=rel_src_blob_path) as file_client:
+            if not await file_client.exists():
+                raise ValueError(f"File `{rel_src_blob_path}` in fileshare `{file_client.share_name}` does not exist")
+            file_properties = await file_client.get_file_properties(timeout=200)
+
             file_size = file_properties['content_length']
-
             progress_bar = tqdm_asyncio(total=file_size, unit="B", unit_scale=True, desc=f"Downloading {rel_src_blob_path}")
-
             async with aiofiles.open(os.path.join(download_path, rel_src_blob_path), "wb") as file:
                 stream = await file_client.download_file()
                 async for chunk in stream.chunks():
@@ -119,7 +120,7 @@ async def upload_file(local_file_path, azure_file_path):
     """
     async with Session() as session:
         async with session.get_share_client(account_name=session.get_account_name(), share_name=session.get_file_share_name()) as share_client:
-            file_client = share_client.get_file_client(azure_file_path)
+            file_client = share_client.get_file_client(file_path=azure_file_path)
 
             async def __progress__(current, total):
                 tqdm_asyncio(total=total, unit="B", unit_scale=True, desc=f"Uploading {azure_file_path}").update(current)
@@ -128,15 +129,14 @@ async def upload_file(local_file_path, azure_file_path):
             if "/" in azure_file_path:
                 directory_path = "/".join(azure_file_path.split("/")[:-1])
                 await create_azure_directory(directory_path)
-
             # Upload the file
             async with aiofiles.open(local_file_path, "rb") as data:
                 try:
                     file_size = os.path.getsize(local_file_path)
                     await file_client.upload_file(data, max_concurrency=4, length=file_size, progress_hook=__progress__)
-                    logging.info(f"Uploaded file: {azure_file_path}")
+                    logger.info(f"Uploaded file: {azure_file_path}")
                 except Exception as e:
-                    logging.error(f"Error uploading file {azure_file_path}: {e}")
+                    logger.error(f"Error uploading file {azure_file_path}: {e}")
                     raise e
 
                 return azure_file_path
@@ -212,5 +212,8 @@ async def download_files(src_files, dst_folder, max_at_once=10, progress=None):
     return downloaded_files
 
 if __name__ == "__main__":
-    # asyncio.run(download_file('az:undpgeohub:cbrapida/rus_f_0_2020_constrained_UNadj_cog.tif', 'downloaded_files'))
+    logger = util.setup_logger(name='rapida', level=logging.DEBUG)
+    os.makedirs('downloads', exist_ok=True)
+    # asyncio.run(download_file('az:undpgeohub:cbrapida/Myanmar flood example/FL20240912MMR_SHP.zip', 'downloads/rus_f_0_2020_constrained_UNadj_cog.tif'))
+    # asyncio.run(download_file('az:undpgeohub:cbrapida/rus_f_0_2020_constrained_UNadj_cog.tif', 'rus_f_0_2020_constrained_UNadj_cog.tif'))
     asyncio.run(upload_file('/media/thuha/Data/electricity_dashboard/adm0_polygons.fgb', 'test_upload/inner_dir/adm0_polygons.fgb'))

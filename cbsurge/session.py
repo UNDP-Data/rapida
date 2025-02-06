@@ -308,7 +308,6 @@ class Session(object):
         share_service_client = ShareServiceClient(
             account_url=account_url,
             credential=credential,
-            token_intent="backup"
         )
         return share_service_client
 
@@ -373,7 +372,7 @@ class Session(object):
         share_file_client = ShareFileClient(
             account_url=account_url,
             credential=credential,
-            share_name=share_name,
+            share_name=self.get_file_share_name(),
             file_path=file_path,
             token_intent="backup"
         )

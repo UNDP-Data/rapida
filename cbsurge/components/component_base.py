@@ -1,6 +1,5 @@
-from typing import List
+from typing import List, Dict
 from cbsurge.session import Session
-from cbsurge.core import SurgeVariable
 import logging
 from abc import abstractmethod
 
@@ -20,25 +19,21 @@ class ComponentBase():
         super().__init__(**kwargs)
 
     @property
-    def variable_names(self) -> List[str]:
+    def variables(self) -> List[str]:
         with Session() as ses:
             return ses.get_variables(component=self.component_name)
 
 
-    @property
-    def variables(self) -> List[str]:
-        with Session() as ses:
-            vrs = ses.get_component(self.component_name)
-            variables = list()
-            for var_name, var_data in vrs.items():
-                v = SurgeVariable(name=var_name, component=self.component_name, **var_data)
-                variables.append(v)
-            return v
+    # @property
+    # def variables(self) -> Dict[str, SurgeVariable]:
+    #     with Session() as ses:
+    #         vrs = ses.get_component(self.component_name)
+    #         variables = dict()
+    #         for var_name, var_data in vrs.items():
+    #             v = SurgeVariable(name=var_name, component=self.component_name, **var_data)
+    #             variables[var_name] = v
+    #         return variables
 
-
-    @abstractmethod
-    def assess(self, variables: List[str] = None, **kwargs) -> str:
-        pass
 
 
 
@@ -51,8 +46,9 @@ class ComponentBase():
         """
         pass
 
+    @abstractmethod
     def __call__(self, **kwargs):
 
-        self.assess(**kwargs)
+        pass
 
 

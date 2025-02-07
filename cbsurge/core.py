@@ -4,6 +4,8 @@ from sympy.parsing.sympy_parser import parse_expr
 from pydantic import BaseModel, FilePath
 from typing import Optional, List, Union
 import re
+
+from cbsurge.project import Project
 from cbsurge.stats.zst import zonal_stats, sumup
 from cbsurge.session import Session
 from cbsurge import util
@@ -53,7 +55,9 @@ class SurgeVariable(BaseModel):
         """
         Initialize the object with the provided arguments.
         """
+
         super().__init__(**kwargs)
+        self.__dict__.update(kwargs)
 
         try:
             parsed_expr = parse_expr(self.sources)
@@ -61,13 +65,13 @@ class SurgeVariable(BaseModel):
 
         except (SyntaxError, AttributeError):
             pass
-        with Session() as s:
-            root_folder = s.get_root_data_folder()
-            self._source_folder_ = os.path.join(root_folder, self.component, self.name)
-            logger.info(self._source_folder_)
+        project = Project(path=os.getcwd())
+        self._source_folder_ = os.path.join(project.data_folder, self.component, self.name)
 
-
-
+    def _update_(self, **kwargs):
+        args = self.__dict__.copy()
+        args.update(kwargs)
+        return args
     def __str__(self):
         """
         String representation of the class.
@@ -75,26 +79,22 @@ class SurgeVariable(BaseModel):
         return f'{self.__class__.__name__} {self.model_dump_json(indent=2)}'
 
     def download(self, **kwargs):
+        src_path = self.interpolate_source(template=self.source, **self._update_(**kwargs))
+        if os.path.exists(self.local_path): return self.local_path
+        downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path)                             )
+        assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
+        return downloaded_file
 
 
-            src_path = self.interpolate(template=self.source, **kwargs)
-            if os.path.exists(self.local_path): return self.local_path
-            downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path)                             )
-            assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
-            return downloaded_file
-
-    def compute(self, **kwargs):
-        pass
-
-    def resolve(self, **kwargs):
-
+    def assess(self, **kwargs):
+        args = self._update_(**kwargs)
         with Session() as s:
             src_rasters = list()
             vars_ops = list()
             for var in self.variables:
                 var_dict = s.get_variable(component=self.component, variable=var)
-                v = self.__class__(name=var, component=self.component, **var_dict)
-                p = v(**kwargs) # resolve
+                v = self.__class__(name=var, component=self.component, **var_dict.updatre(**args))
+                p = v(**args) # call & resolve
                 logger.info(f'{var} was resolved to {p}')
                 src_rasters.append(p)
                 vars_ops.append((var, 'sum'))
@@ -105,33 +105,34 @@ class SurgeVariable(BaseModel):
             gdf.to_file(f'/tmp/popstats.fgb', driver='FlatGeobuf',index=False,engine='pyogrio')
 
     def __call__(self, force_compute=False, **kwargs):
-
+            args = self._update_(**kwargs)
             if self.source:
+
                 if not os.path.exists(self._source_folder_):
                     os.makedirs(self._source_folder_)
-                src_path = self.interpolate(template=self.source, **kwargs)
+                src_path = self.interpolate_source(template=self.source, **args)
                 _, file_name = os.path.split(src_path)
                 self.local_path = os.path.join(self._source_folder_, file_name)
                 if os.path.exists(self.local_path):
                     #os.remove(self.local_path)
                     return self.local_path
 
-            # first try to download from source
+
             if self.source and not force_compute:
-                return self.download(**kwargs)
+                return self.download(**args)
             # use sources to compute
             if self.sources:
                 if self.variables:
                     logger.info(f'Going to compute {self.name} from {self.sources}')
                     assert 'admin' in kwargs, f'Admin layer is required to compute zonal stats'
-                    return self.resolve(**kwargs)
+                    return self.assess(**args)
 
                 else:
                     logger.info(f'Going to sum up {self.name} from source files')\
                     # interpolate templates
                     source_blobs = list()
                     for source_template in self.sources:
-                        source_file_path = self.interpolate(template=source_template, **kwargs)
+                        source_file_path = self.interpolate_source(template=source_template, **kwargs)
                         source_blobs.append(source_file_path)
                     downloaded_files = asyncio.run(
                         blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
@@ -144,15 +145,17 @@ class SurgeVariable(BaseModel):
 
 
 
-    def interpolate(self, template=None, **kwargs):
+    def interpolate_source(self, template=None, **kwargs):
         """
         Resolve file paths with the provided kwargs, ensuring that the necessary variables are included.
         """
-        if 'country' in kwargs:
-            kwargs['country_lower'] = kwargs['country'].lower()
+
+        kwargs['country_lower'] = self.country.lower()
         template_vars = set(re.findall(self._extractor_, template))
         for template_var in template_vars:
-            assert template_var in kwargs, f'"{template_var}"  is required to generate source files'
+            if not template_var in kwargs:
+                assert hasattr(self,template_var), f'"{template_var}"  is required to generate source files'
+
         return template.format(**kwargs)
 
 
@@ -174,14 +177,15 @@ if __name__ == '__main__':
 
 
             with Progress(disable=False) as progress:
-                total_task = progress.add_task(
+                assess_task = progress.add_task(
                     description=f'[red]Going to process {len(d)} variables', total=len(d))
                 for var_name, var_data in d.items():
-                    progress.update(task_id=total_task, advance=1, description=f'Processing {var_name}')
+                    progress.update(task_id=assess_task, advance=1, description=f'Processing {var_name}')
                     v = SurgeVariable(name=var_name, component='population', **var_data)
                     r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
 
 
-                progress.remove_task(total_task)
+
+                #progress.remove_task(assess_task)
 
 

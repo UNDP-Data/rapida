@@ -9,6 +9,8 @@ import json
 import sys
 from pyproj import CRS
 from cbsurge.isobbox import ll2iso3
+
+
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -50,25 +52,6 @@ class Project:
                 self._cfg_['comment'] = comment
 
             if polygons is not None:
-
-                # with gdal.OpenEx(polygons) as poly_ds:
-                #     lcount = poly_ds.GetLayerCount()
-                #     if lcount > 1:
-                #         lnames = list()
-                #         for i in range(lcount):
-                #             l = poly_ds.GetLayer(i)
-                #             lnames.append(l.GetName())
-                #         #click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
-                #         layer_name = click.prompt(
-                #             f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
-                #             type=str, default=lnames[0])
-                #     else:
-                #         layer_name = poly_ds.GetLayer(0).GetName()
-                #     if not os.path.exists(self.data_folder):
-                #         os.makedirs(self.data_folder)
-                #     gdal.VectorTranslate(self.geopackage_file_path, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
-                #                      layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
-                #
                 l = geopandas.list_layers(polygons)
                 lnames = l.name.tolist()
                 lcount = len(lnames)
@@ -88,7 +71,7 @@ class Project:
                     logger.info(f'going to add ISO3 country code')
                     c = gdf.to_crs(epsg=4326).centroid
                     rgdf["iso3"] = c.apply(lambda point: ll2iso3(point.y, point.x))
-
+                    self._cfg_['countries'] = list(set(rgdf['iso3']))
 
                 rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                              promote_to_multi=True)

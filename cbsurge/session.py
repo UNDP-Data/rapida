@@ -309,7 +309,8 @@ class Session(object):
         account_url = self.get_file_share_account_url(account_name, share_name)
         share_service_client = ShareServiceClient(
             account_url=account_url,
-            credential=credential
+            credential=credential,
+            token_intent='backup'
         )
         return share_service_client
 

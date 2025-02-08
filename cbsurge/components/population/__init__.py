@@ -3,12 +3,14 @@ import os
 from typing import List
 import logging
 import pycountry
-from cbsurge.components.component_base import ComponentBase
+from cbsurge.core import Component
 from cbsurge.project import Project
 from cbsurge.session import Session
-from cbsurge.core import SurgeVariable
+from cbsurge.core import Variable
+from cbsurge.az import blobstorage
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
+from cbsurge.stats.zst import zonal_stats, sumup
 
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger(__name__)
@@ -122,7 +124,7 @@ def aggregate(country, age_group, sex, download_path, force_reprocessing):
 
 
 
-class PopulationComponent(ComponentBase):
+class PopulationComponent(Component):
 
     def __init__(self, year=2020):
 
@@ -131,7 +133,7 @@ class PopulationComponent(ComponentBase):
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
-        logger.info(f'Assessing "{self.component_name}" component {" ".join(variables)}')
+        logger.info(f'Assessing component "{self.component_name}" ')
         if not variables:
             variables = self.variables
         else:
@@ -149,8 +151,48 @@ class PopulationComponent(ComponentBase):
             for country in project.countries:
                 for var_name in variables:
                     var_data = variables_content[var_name]
-                    v = SurgeVariable(name=var_name, component=self.component_name, country=country, year=self.year, **var_data)
+                    v = PopulationVariable(name=var_name, component=self.component_name, country=country, year=self.year, **var_data)
                     v(progress=progress)
                     logger.info(f'Variable {var_name} was assessed')
 
 
+
+
+class PopulationVariable(Variable):
+
+    def compute(self, **kwargs):
+        logger.info(f'Going to sum up {self.name} from source files')
+        # interpolate templates
+        source_blobs = list()
+        for source_template in self.sources:
+            source_file_path = self.interpolate_source(template=source_template, **kwargs)
+            source_blobs.append(source_file_path)
+        downloaded_files = asyncio.run(
+            blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
+                                       progress=kwargs['progress'])
+        )
+        assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
+        computed_file = sumup(src_rasters=downloaded_files,dst_raster=self.local_path)
+        assert computed_file == self.local_path, f'The local_path differs from {computed_file}'
+
+    def assess(self, **kwargs):
+
+        logger.info(f'Assessing variable {self.name} ')
+        with Session() as s:
+            project = Project(path=os.getcwd())
+            src_rasters = [self.local_path]
+            vars_ops = [(self.name, 'sum')]
+            if self.variables:
+                #resolve all child variables
+                for var in self.variables:
+                    var_dict = s.get_variable(component=self.component, variable=var)
+                    v = self.__class__(name=var, component=self.component, **var_dict.updatre(**kwargs))
+                    p = v(**kwargs) # assess
+                    src_rasters.append(p)
+                    vars_ops.append((var, 'sum'))
+            print(os.path.exists(project.geopackage_file_path))
+            #gdf = zonal_stats(src_rasters=src_rasters, polygon_ds=project.geopackage_file_path, polygon_layer='polygons', vars_ops=vars_ops)
+            # expr = f'{self.name}={self.sources}'
+            # gdf.eval(expr, inplace=True)
+            # out_layer_name = f'stats.{self.component}'
+            # gdf.to_file(filename=project.geopackage_file_path, mode='a', driver='FlatGeobuf',index=False,engine='pyogrio', layer=out_layer_name)

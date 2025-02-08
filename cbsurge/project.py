@@ -1,14 +1,18 @@
 import datetime
+import io
 import os
 import click
 import logging
 import shutil
+from rasterio.crs import CRS as rCRS
+from pyproj import CRS as pCRS
+import rasterio.warp
 from osgeo import gdal
 import geopandas
 import json
 import sys
-from pyproj import CRS
-from cbsurge.isobbox import ll2iso3
+from cbsurge.admin.osm import fetch_admin
+
 
 
 logger = logging.getLogger(__name__)
@@ -65,13 +69,33 @@ class Project:
                 if not os.path.exists(self.data_folder):
                     os.makedirs(self.data_folder)
                 gdf = geopandas.read_file(polygons, layer=layer_name, )
-                rgdf = gdf.to_crs(crs=CRS.from_user_input(projection))
+                target_crs = pCRS.from_user_input(projection)
+                src_crs = gdf.crs
+
+                if not src_crs.is_exact_same(target_crs):
+                    rgdf = gdf.to_crs(crs=target_crs)
+
                 cols = rgdf.columns.tolist()
                 if not ('h3id' in cols and 'undp_admin_level' in cols):
-                    logger.info(f'going to add ISO3 country code')
-                    c = gdf.to_crs(epsg=4326).centroid
-                    rgdf["iso3"] = c.apply(lambda point: ll2iso3(point.y, point.x))
-                    self._cfg_['countries'] = list(set(rgdf['iso3']))
+                    logger.info(f'going to add rapida specific attributes country code')
+                    bbox = tuple(gdf.total_bounds)
+                    if not src_crs.is_geographic:
+                        left, bottom, right, top = bbox
+                        bbox = rasterio.warp.transform_bounds(src_crs=rCRS.from_epsg(src_crs.to_epsg()),
+                                                              dst_crs=rCRS.from_epsg(4326),
+                                                              left=left, bottom=bottom,
+                                                              right=right, top=top,
+
+                                                                   )
+                    a0_polygons = fetch_admin(bbox=bbox,admin_level=0)
+                    a0_gdf = None
+                    with io.BytesIO(json.dumps(a0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
+                        a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
+                    rgdf_centroids = rgdf.copy()
+                    rgdf_centroids["geometry"] = rgdf.centroid
+                    jgdf = geopandas.sjoin(rgdf_centroids, a0_gdf, how="left", predicate="within", )
+                    jgdf['geometry'] = rgdf['geometry']
+                    rgdf = jgdf
 
                 rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                              promote_to_multi=True)

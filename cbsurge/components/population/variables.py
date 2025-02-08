@@ -1,6 +1,7 @@
 import json
 import os.path
 from cbsurge import util
+from cbsurge.core import Variable
 import logging
 logger = logging.getLogger(__name__)
 '''
@@ -77,6 +78,7 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
     variables['child_dependency'] = dict(title='Child dependency ratio', sources='(child_total/active_total)*100')
     variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100')
     return variables
+
 
 
 

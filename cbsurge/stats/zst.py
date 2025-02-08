@@ -83,12 +83,13 @@ def sumup(src_rasters:Iterable[str]=None, dst_raster=None) -> str:
     ds = None
     return dst_raster
 
-def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops:Iterable[tuple[str, str]]=None,  target_proj='ESRI:54009') -> GeoDataFrame:
+def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None, vars_ops:Iterable[tuple[str, str]]=None, target_proj='ESRI:54009') -> GeoDataFrame:
     """
     Compute zonal stats form a set of raster files
 
     :param src_rasters: iterable of strings representing paths to the raster files
-    :param src_vector: str representing the path to vector polygons
+    :param polygon_ds: str representing the path to vector polygons
+    :param polygon_layer, str, the name of the layert in polygon_ds used to zomute zonal stats
     :param vars_ops: a dict with same length as src_rasters where the first element represents the name of the column
     that will be created by applying the second element representing the operation
     :param target_proj: the projection represented as AUTHORITY:CODE, defaults to ESRI:54009 or Mollweide
@@ -99,23 +100,22 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops:Iter
     target_srs = osr.SpatialReference()
     target_srs.SetFromUserInput(target_proj)
 
-    with gdal.OpenEx(src_vector) as src_vds:
-        lyr = src_vds.GetLayer(0)
-        layer_name = lyr.GetName()
+    with gdal.OpenEx(polygon_ds) as src_vds:
+        lyr = src_vds.GetLayerByName(polygon_layer)
         src_vect_srs = lyr.GetSpatialRef()
-        assert src_vect_srs is not None, f'Could not fetch SRS for {src_vector}'
+        assert src_vect_srs is not None, f'Could not fetch SRS for {polygon_ds}'
         srs_are_equal = proj_are_equal(src_srs=target_srs, dst_srs=src_vect_srs)
         if not srs_are_equal:
 
-            _, ext = os.path.splitext(src_vector)
-            _, vector_fname = os.path.split(src_vector)
+            _, ext = os.path.splitext(polygon_ds)
+            _, vector_fname = os.path.split(polygon_ds)
             prep_src_vector = f'/vsimem/{vector_fname.replace(ext, ".vrt")}'
-            logger.info(f'Creating {prep_src_vector} VRT for {src_vector}')
+            logger.info(f'Creating {prep_src_vector} VRT for {polygon_ds}')
             vrt_content = f"""<OGRVRTDataSource>
                 <OGRVRTWarpedLayer>
-                    <OGRVRTLayer name="{layer_name}">
-                        <SrcDataSource>{src_vector}</SrcDataSource>
-                        <SrcLayer>{layer_name}</SrcLayer>
+                    <OGRVRTLayer name="{polygon_layer}">
+                        <SrcDataSource>{polygon_ds}</SrcDataSource>
+                        <SrcLayer>{polygon_layer}</SrcLayer>
                     </OGRVRTLayer>
                     <TargetSRS>{target_srs}</TargetSRS>
                 </OGRVRTWarpedLayer>
@@ -126,8 +126,11 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops:Iter
             gdal.FileFromMemBuffer(prep_src_vector,vrt_content)
 
         else:
-            prep_src_vector = src_vector
+
+            prep_src_vector = bio = polygon_ds
+            
         combined_results = None
+        print(src_rasters)
         for n, src_raster in enumerate(src_rasters):
             with gdal.OpenEx(src_raster) as src_rds:
                 src_rast_srs = src_rds.GetSpatialRef()
@@ -153,9 +156,9 @@ def zonal_stats(src_rasters:Iterable[str] = None, src_vector=None, vars_ops:Iter
                 else:
                     combined_results = combined_results.merge(df, on=['tempid'], how='inner')
                 gdal.Unlink(prep_src_raster)
-        combined_results = combined_results.merge(geopandas.read_file(bio), on='geometry',
+        combined_results = combined_results.merge(geopandas.read_file(bio, layer=polygon_layer), on='geometry',
                                                   how='inner')
         gdal.Unlink(prep_src_vector)
-        bio.close()
+        if isinstance(bio, io.BytesIO):bio.close()
         combined_results.drop(columns='tempid', inplace=True)
         return combined_results

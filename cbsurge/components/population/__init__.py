@@ -11,7 +11,7 @@ from cbsurge.az import blobstorage
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 from cbsurge.stats.zst import zonal_stats, sumup
-
+import geopandas
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger(__name__)
 
@@ -147,12 +147,15 @@ class PopulationComponent(Component):
 
         project = Project(path=os.getcwd())
         with Session() as ses:
-            variables_content = ses.get_component(self.component_name)
+            variables_data = ses.get_component(self.component_name)
             for country in project.countries:
                 for var_name in variables:
-                    var_data = variables_content[var_name]
-                    v = PopulationVariable(name=var_name, component=self.component_name, country=country, year=self.year, **var_data)
-                    v(progress=progress)
+                    var_data = variables_data[var_name]
+                    v = PopulationVariable(name=var_name,
+                                           component=self.component_name,
+
+                                           **var_data)
+                    v(progress=progress, force_compute=True, year=self.year, country=country)
                     logger.info(f'Variable {var_name} was assessed')
 
 
@@ -162,37 +165,61 @@ class PopulationVariable(Variable):
 
     def compute(self, **kwargs):
         logger.info(f'Going to sum up {self.name} from source files')
+
         # interpolate templates
         source_blobs = list()
         for source_template in self.sources:
-            source_file_path = self.interpolate_source(template=source_template, **kwargs)
+            source_file_path = self.interpolate_template(template=source_template, **kwargs)
             source_blobs.append(source_file_path)
+        if not os.path.exists(self._source_folder_):
+            os.makedirs(self._source_folder_)
         downloaded_files = asyncio.run(
             blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
-                                       progress=kwargs['progress'])
+                                       progress=kwargs.get('progress', None))
         )
         assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
-        computed_file = sumup(src_rasters=downloaded_files,dst_raster=self.local_path)
+        src_path = self.interpolate_template(template=self.source, **kwargs)
+        _, file_name = os.path.split(src_path)
+        self.local_path = os.path.join(self._source_folder_, file_name)
+        overwrite = kwargs.get('force_compute', None)
+        computed_file = sumup(src_rasters=downloaded_files,dst_raster=self.local_path, overwrite=overwrite)
         assert computed_file == self.local_path, f'The local_path differs from {computed_file}'
 
     def assess(self, **kwargs):
 
-        logger.info(f'Assessing variable {self.name} ')
+        logger.info(f'Assessing variable {self.name, self.dep_vars} ')
+        out_layer_name = f'stats.{self.component}'
         with Session() as s:
             project = Project(path=os.getcwd())
-            src_rasters = [self.local_path]
-            vars_ops = [(self.name, 'sum')]
-            if self.variables:
-                #resolve all child variables
-                for var in self.variables:
-                    var_dict = s.get_variable(component=self.component, variable=var)
-                    v = self.__class__(name=var, component=self.component, **var_dict.updatre(**kwargs))
-                    p = v(**kwargs) # assess
-                    src_rasters.append(p)
-                    vars_ops.append((var, 'sum'))
-            print(os.path.exists(project.geopackage_file_path))
-            #gdf = zonal_stats(src_rasters=src_rasters, polygon_ds=project.geopackage_file_path, polygon_layer='polygons', vars_ops=vars_ops)
-            # expr = f'{self.name}={self.sources}'
-            # gdf.eval(expr, inplace=True)
-            # out_layer_name = f'stats.{self.component}'
-            # gdf.to_file(filename=project.geopackage_file_path, mode='a', driver='FlatGeobuf',index=False,engine='pyogrio', layer=out_layer_name)
+
+            if os.path.exists(self.local_path) and self.operator is not None
+
+                src_rasters = [self.local_path]
+                vars_ops = list()
+
+                if self.dep_vars:
+                    logger.info(f'{self.name} features dep vars {self.dep_vars}')
+                    #resolve all child variables
+                    for var in self.dep_vars:
+                        var_dict = s.get_variable(component=self.component, variable=var)
+                        op = var_dict.get('operator')
+                        v = self.__class__(name=var, component=self.component, **var_dict )
+                        p = v(**kwargs) # assess
+                        src_rasters.append(p)
+                        vars_ops.append((var, op))
+                else:
+
+                    vars_ops.append((self.name, self.operator))
+                logger.info(f'Running zstats on {self.name} with {src_rasters} {vars_ops}')
+                gdf = zonal_stats(src_rasters=src_rasters,
+                                  polygon_ds=project.geopackage_file_path,
+                                  polygon_layer='polygons', stats_layer=out_layer_name, vars_ops=vars_ops
+                                  )
+            else:
+                gdf = geopandas.read_file(filename=project.geopackage_file_path,)
+                expr = f'{self.name}={self.sources}'
+                gdf.eval(expr, inplace=True)
+
+            out_layer_name = f'stats.{self.component}'
+
+            gdf.to_file(filename=project.geopackage_file_path, mode='a', driver='FlatGeobuf',index=False,engine='pyogrio', layer=out_layer_name)

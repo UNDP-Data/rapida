@@ -1,7 +1,7 @@
 import json
 import os.path
 from cbsurge import util
-from cbsurge.core import Variable
+from collections import OrderedDict
 import logging
 logger = logging.getLogger(__name__)
 '''
@@ -39,7 +39,7 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
     """
     aggregate_root = os.path.join(root, 'aggregate')
 
-    variables = dict()
+    variables = OrderedDict()
     for sex in sexes:
         for age_item in age_groups:
             age_group, age_seq = age_item
@@ -52,31 +52,31 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
                 path_template = os.path.join(root, sex, age_group, fname_template)
                 sources.append(path_template)
 
-            variables[name] = dict(title=title, source=source, sources=sources)
+            variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
 
             #age group aggregates
             name = f'{age_group}_{aggregate}'
             title = f'{age_group.capitalize()} population'
             source = os.path.join(aggregate_root, f'{{country}}_{age_group}_{aggregate}.tif')
             sources = '+'.join([f'{e}_{age_group}' for e in sexes])
-            variables[name] = dict(title=title, source=source, sources=sources)
+            variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
         # sex group aggregates
         name = f'{sex}_{aggregate}'
         title = f'{sex.capitalize()} population'
         source = os.path.join(aggregate_root, f'{{country}}_{sex}_{aggregate}.tif')
         sources = '+'.join([f'{sex}_{e[0]}' for e in age_groups])
-        variables[name] = dict(title=title, source=source, sources=sources)
+        variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
     #total aggregate
     name = aggregate
     title = f'{aggregate.capitalize()} population'
     source = os.path.join(aggregate_root, f'{{country}}_{aggregate}.tif')
     sources = '+'.join([f'{e}_{aggregate}' for e in SEXES])
-    variables[name] = dict(title=title, source=source, sources=sources)
+    variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
 
     #dependencies
     variables['dependency'] = dict(title='Total dependency ratio', sources='((child_total+elderly_total)/active_total)*100')
     variables['child_dependency'] = dict(title='Child dependency ratio', sources='(child_total/active_total)*100')
-    variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100')
+    variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100' )
     return variables
 
 

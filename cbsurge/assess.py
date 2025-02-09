@@ -95,16 +95,17 @@ def convert_params_to_click_options(params: dict, func):
 @click.option(
     '--components', '-c', required=False, multiple=True,
     #help=f'One or more components to be assessed. Valid input example: --components "{", ".join(components)}". '
-    help=f'One or more components to be assessed. Valid input example: --components component1 component2 '
+    help=f'One or more components to be assessed. Valid input example: -c component1 -c component2 '
 
 )
 
 @click.option('--variables', '-v', required=False, type=click.STRING, multiple=True,
-               help=f'The variable/s to be assessed. Valid input example: --variables variable 1 variable 2' )
+               help=f'The variable/s to be assessed. Valid input example: -v variable1 -v variable2' )
 
 def assess( components=None,  variables=None):
-    print(components, variables)
+    """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
+
     os.chdir('ap') #TODO delete me
     current_folder = os.getcwd()
     project = Project(path=current_folder)

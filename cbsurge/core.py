@@ -84,9 +84,10 @@ class Variable(BaseModel):
     title: str
     source: Optional[str] = None
     sources: Optional[Union[List[str], str]] = None
-    variables: Optional[List[str]] = None
+    dep_vars: Optional[List[str]] = None
     local_path: FilePath = None
     component: str = None
+    operator: str = None
     _extractor_: str = r"\{([^}]+)\}"
     _default_operators_ = '+-/*%'
     _source_folder_: str = None
@@ -101,17 +102,19 @@ class Variable(BaseModel):
 
         try:
             parsed_expr = parse_expr(self.sources)
-            self.variables = [s.name for s in parsed_expr.free_symbols]
+            self.dep_vars = [s.name for s in parsed_expr.free_symbols]
 
         except (SyntaxError, AttributeError):
             pass
         project = Project(path=os.getcwd())
         self._source_folder_ = os.path.join(project.data_folder, self.component, self.name)
 
+
     def _update_(self, **kwargs):
         args = self.__dict__.copy()
         args.update(kwargs)
         return args
+
     def __str__(self):
         """
         String representation of the class.
@@ -121,24 +124,28 @@ class Variable(BaseModel):
     @abstractmethod
     def compute(self, **kwargs):
         pass
+    @abstractmethod
+    def assess(self, **kwargs):
+        pass
 
 
 
     def download(self, **kwargs):
-        src_path = self.interpolate_source(template=self.source, **self._update_(**kwargs))
+        """Download variable"""
+        src_path = self.interpolate_template(template=self.source, **kwargs)
         _, file_name = os.path.split(src_path)
-
         self.local_path = os.path.join(self._source_folder_, file_name)
         if os.path.exists(self.local_path):
             return self.local_path
         if not os.path.exists(self._source_folder_):
             os.makedirs(self._source_folder_)
+        logger.info(f'Going to download {self.name} from {src_path}')
         downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path)                             )
         assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
 
 
 
-    def __call__(self, force_compute=False, **kwargs):
+    def __call__(self,  **kwargs):
             """
             Assess a variable. Essentially this means a series of steps in a specific order:
                 - download
@@ -146,32 +153,45 @@ class Variable(BaseModel):
                 - analysis/zonal stats
 
 
-            :param force_compute:
+
             :param kwargs:
             :return:
             """
-            patched_args = self._update_(**kwargs)
+            logger.info(f'Resolving variable {self.name}')
+
+            force_compute = kwargs.get('force_compute', False)
+
 
             if force_compute:
-                self.compute()
+                if self.sources is None:
+                    if self.dep_vars is None:
+                        msg = f'Can not compute {self.name} because it lacks sources'
+                        logger.error(msg)
+                        raise RuntimeError(msg)
+                else:
+                    if self.dep_vars is None:
+
+                        self.compute(**kwargs)
             else:
                 if self.source is not None :
-                    self.download(**patched_args)
+                    self.download(**kwargs)
                 else:
-                    self.compute(**patched_args)
+                    if self.sources is not None:
+                        self.compute(**kwargs)
+
 
             #the variable file has been downloaded or computed from sources.. so it is time to assess
-            return self.assess(**patched_args)
+            return self.assess(**kwargs)
 
 
 
-    def interpolate_source(self, template=None, **kwargs):
+    def interpolate_template(self, template=None, **kwargs):
         """
-        Resolve file paths with the provided kwargs, ensuring that the necessary variables are included.
+        Interpolate values from kwargs into template
         """
-
-        kwargs['country_lower'] = self.country.lower()
+        kwargs['country_lower'] = kwargs['country'].lower()
         template_vars = set(re.findall(self._extractor_, template))
+
         if template_vars:
             for template_var in template_vars:
                 if not template_var in kwargs:

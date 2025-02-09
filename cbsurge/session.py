@@ -342,8 +342,8 @@ class Session(object):
         :param component: str, name of the component
         :return: dict with its config extracted from the config  file
         """
-        variables = self.get_config_value_by_key(key='variables')
-        return variables[component]
+        variables_elem = self.get_config_value_by_key(key='variables')
+        return variables_elem[component]
 
     def get_variables(self, component: str = None):
         """
@@ -363,8 +363,8 @@ class Session(object):
         :return:
         """
         component = self.get_component(component=component)
-        variables = component[variable]
-        return variables[variable]
+        return component[variable]
+
 # for testing
 # import asyncio
 # async def main():

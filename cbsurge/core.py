@@ -178,7 +178,7 @@ class Variable(BaseModel):
                         # logger.debug(f'Computing {self.name}={self.sources} using GDAL')
                         self.compute(**kwargs)
                 else:
-                    logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
+                    #logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
                     sources = self.resolve(evaluate=True, **kwargs)
 
 

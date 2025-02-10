@@ -198,15 +198,17 @@ class PopulationVariable(Variable):
             src_path = self.interpolate_template(template=self.source, **kwargs)
             _, file_name = os.path.split(src_path)
             local_path = os.path.join(self._source_folder_, file_name)
-            logger.debug(f'Going to compute {self.name} from {len(downloaded_files)} source files')
+            logger.info(f'Going to compute {self.name} from {len(downloaded_files)} source files')
             computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=overwrite)
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
         else:
-            logger.debug(f'Going to compute {self.name}={self.sources}')
+            logger.info(f'Going to compute {self.name}={self.sources}')
             src_path = self.interpolate_template(template=self.source, **kwargs)
             _, file_name = os.path.split(src_path)
             computed_file = os.path.join(self._source_folder_, file_name)
+            if not os.path.exists(self._source_folder_):
+                os.makedirs(self._source_folder_)
             sources = self.resolve(**kwargs)
             creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
 
@@ -216,7 +218,7 @@ class PopulationVariable(Variable):
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
 
-    def resolve(self, evaluate=False, **kwargs):
+    def resolve(self,  **kwargs):
         with Session() as s:
             # project = Project(path=os.getcwd())
             sources = dict()
@@ -224,8 +226,6 @@ class PopulationVariable(Variable):
                 var_dict = s.get_variable(component=self.component, variable=var_name)
                 var = self.__class__(name=var_name, component=self.component, **var_dict)
                 var_local_path = var(**kwargs) # assess
-                if evaluate:
-                    var.evaluate(**kwargs)
                 sources[var_name] = var_local_path or var.local_path
             return sources
 

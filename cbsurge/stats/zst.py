@@ -183,7 +183,7 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
                     _, ext = os.path.splitext(src_raster)
                     _, raster_fname = os.path.split(src_raster)
                     prep_src_raster = f'/vsimem/{raster_fname.replace(ext, ".vrt")}'
-                    logger.info(f'Creating {prep_src_raster} VRT for {src_raster}')
+                    logger.debug(f'Creating {prep_src_raster} VRT for {src_raster}')
                     gdal.Warp(prep_src_raster, src_raster, format='VRT', dstSRS=target_srs,creationOptions={'BLOCKXSIZE':256, 'BLOCKYSIZE':256} )
                     # assert os.path.exists(prep_src_raster)
                 else:
@@ -205,14 +205,6 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
             if vname in egdf.columns.tolist():
                 egdf.drop(columns=[vname], inplace=True)
         combined_results = egdf.merge(df, on='geometry',how='inner')
-
-        # # Step 1: Perform the merge first, without suffixes
-        # combined_results = combined_results.merge(df, on='tempid', how='inner', suffixes=('', '_df'))
-        #
-        # # Step 2: Replace columns from df (with '_df' suffix) in combined_results
-        # for col in df.columns:
-        #     if col != 'tempid' and col + '_df' in combined_results.columns:
-        #         combined_results[col] = combined_results.pop(col + '_df')
 
         if should_reproject_v:
             gdal.Unlink(prep_src_vector)

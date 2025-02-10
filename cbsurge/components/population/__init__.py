@@ -268,5 +268,5 @@ class PopulationVariable(Variable):
                 df=gdf,path=project.geopackage_file_path, layer=dst_layer, overwrite=True,
             )
 
-            print(read_info(project.geopackage_file_path,layer=dst_layer)['fields'].tolist())
+            # print(read_info(project.geopackage_file_path,layer=dst_layer)['fields'].tolist())
 

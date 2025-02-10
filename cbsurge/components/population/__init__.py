@@ -217,7 +217,7 @@ class PopulationVariable(Variable):
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
 
-    def resolve(self, **kwargs):
+    def resolve(self, evaluate=False, **kwargs):
         with Session() as s:
             # project = Project(path=os.getcwd())
             sources = dict()
@@ -225,25 +225,27 @@ class PopulationVariable(Variable):
                 var_dict = s.get_variable(component=self.component, variable=var_name)
                 var = self.__class__(name=var_name, component=self.component, **var_dict)
                 var_local_path = var(**kwargs) # assess
+                if evaluate:
+                    var.evaluate(**kwargs)
                 sources[var_name] = var_local_path or var.local_path
             return sources
 
 
     def evaluate(self, **kwargs):
 
-        assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
+
 
         dst_layer = f'stats.{self.component}'
         with Session() as s:
             project = Project(path=os.getcwd())
             layers = geopandas.list_layers(project.geopackage_file_path)
             lnames = layers.name.tolist()
-            logger.debug(f'{lnames}')
             if dst_layer in lnames:
                 polygons_layer = dst_layer
             else:
                 polygons_layer='polygons'
             if self.operator:
+                assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
                 logger.debug(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
                 gdf = zonal_stats(src_rasters=[self.local_path],
@@ -253,8 +255,9 @@ class PopulationVariable(Variable):
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
-                gdf = geopandas.read_file(filename=project.geopackage_file_path,)
+                gdf = geopandas.read_file(filename=project.geopackage_file_path,layer=dst_layer)
                 expr = f'{self.name}={self.sources}'
+                logger.debug(expr)
                 gdf.eval(expr, inplace=True)
 
             # merge into stats layer for component
@@ -265,5 +268,5 @@ class PopulationVariable(Variable):
                 df=gdf,path=project.geopackage_file_path, layer=dst_layer, overwrite=True,
             )
 
-
+            print(read_info(project.geopackage_file_path,layer=dst_layer)['fields'].tolist())
 

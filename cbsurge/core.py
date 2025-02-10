@@ -179,6 +179,7 @@ class Variable(BaseModel):
                         self.compute(**kwargs)
                 else:
                     logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
+                    sources = self.resolve(**kwargs)
 
 
 

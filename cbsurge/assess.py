@@ -102,9 +102,16 @@ def convert_params_to_click_options(params: dict, func):
 @click.option('--variables', '-v', required=False, type=click.STRING, multiple=True,
                help=f'The variable/s to be assessed. Valid input example: -v variable1 -v variable2' )
 
-def assess( components=None,  variables=None):
+@click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
+              help=f'Force recomputation from sources that are files')
+@click.option('--debug', '-d', default=False, show_default=True, is_flag=True,
+              help=f'Turn On')
+def assess( components=None,  variables=None, force_compute=False, debug=False):
     """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
+    logger = logging.getLogger('rapida')
+    if debug:
+        logger.setLevel(logging.DEBUG)
 
     os.chdir('ap') #TODO delete me
     current_folder = os.getcwd()
@@ -114,9 +121,8 @@ def assess( components=None,  variables=None):
         with Progress(disable=False) as progress:
             with Session() as session:
                 all_components = session.get_components()
-
                 components_task = progress.add_task(
-                    description=f'[green]Assessing {"".join(components)} components', total=len(components))
+                    description=f'[green]Assessing {"".join(components)} ', total=len(components))
                 for component_name in components:
                     if not component_name in all_components:
                         msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
@@ -127,18 +133,10 @@ def assess( components=None,  variables=None):
                     fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
                     cls = import_class(fqcn=fqcn)
                     component = cls()
-                    component(progress=progress, variables=variables)
+                    component(progress=progress, variables=variables, force_compute=force_compute)
                 progress.remove_task(components_task)
 
-            #         all_variables = session.get_variables(component=component_to_assess)
-            #         variables_to_assess = all_variables.intersection(variable) or all_variables
-            #         progress.update(components_task, advance=1, description=f'Assessing component {component_to_assess}')
-            #         variables_task = progress.add_task(description=f'[red] Going to assess {len(variables_to_assess)} variables', total=len(variables_to_assess))
-            #         for variable_to_assess in variables_to_assess:
-            #             logger.debug(f'Assessing {variables_to_assess} for {component_to_assess}')
-            #             progress.update(variables_task, advance=1, description=f'Assessing {variable_to_assess}')
-            #
-            #             time.sleep(random.randint(1,3))
+
 
 
 

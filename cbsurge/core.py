@@ -1,3 +1,4 @@
+import abc
 import os.path
 import asyncio
 from sympy.parsing.sympy_parser import parse_expr
@@ -61,7 +62,7 @@ class Component():
 
 
 
-
+    @abstractmethod
     def download(self, variables: List[str] = None, **kwargs) -> List[str]:
         """
         Iterate over variables and download one by one
@@ -75,8 +76,6 @@ class Component():
     def __call__(self, **kwargs):
 
         pass
-
-
 
 
 class Variable(BaseModel):
@@ -124,14 +123,17 @@ class Variable(BaseModel):
     @abstractmethod
     def compute(self, **kwargs):
         pass
+
     @abstractmethod
-    def assess(self, **kwargs):
+    def evaluate(self, **kwargs):
         pass
 
 
 
     def download(self, **kwargs):
+
         """Download variable"""
+        logger.debug(f'Downloading {self.name}')
         src_path = self.interpolate_template(template=self.source, **kwargs)
         _, file_name = os.path.split(src_path)
         self.local_path = os.path.join(self._source_folder_, file_name)
@@ -157,31 +159,32 @@ class Variable(BaseModel):
             :param kwargs:
             :return:
             """
-            logger.info(f'Resolving variable {self.name}')
+            logger.info(f'Assessing variable {self.name}')
 
             force_compute = kwargs.get('force_compute', False)
-
-
-            if force_compute:
-                if self.sources is None:
-                    if self.dep_vars is None:
-                        msg = f'Can not compute {self.name} because it lacks sources'
-                        logger.error(msg)
-                        raise RuntimeError(msg)
-                else:
-                    if self.dep_vars is None:
-
-                        self.compute(**kwargs)
-            else:
-                if self.source is not None :
+            if not self.dep_vars: #simple variable,
+                if not force_compute:
+                    # logger.debug(f'Downloading {self.name} source')
                     self.download(**kwargs)
                 else:
-                    if self.sources is not None:
+                    # logger.debug(f'Computing {self.name} using gdal_calc from sources')
+                    self.compute(**kwargs)
+            else:
+                if self.operator:
+                    if not force_compute:
+                        # logger.debug(f'Downloading {self.name} from  source')
+                        self.download(**kwargs)
+                    else:
+                        # logger.debug(f'Computing {self.name}={self.sources} using GDAL')
                         self.compute(**kwargs)
+                else:
+                    logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
 
 
-            #the variable file has been downloaded or computed from sources.. so it is time to assess
-            return self.assess(**kwargs)
+
+            return self.evaluate(**kwargs)
+
+
 
 
 
@@ -220,8 +223,7 @@ if __name__ == '__main__':
 
 
             with Progress(disable=False) as progress:
-                assess_task = progress.add_task(
-                    description=f'[red]Going to process {len(d)} variables', total=len(d))
+
                 for var_name, var_data in d.items():
                     progress.update(task_id=assess_task, advance=1, description=f'Processing {var_name}')
                     v = Variable(name=var_name, component='population', **var_data)

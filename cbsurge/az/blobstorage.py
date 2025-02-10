@@ -141,10 +141,10 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, 
                             src_blob_name = src_blob_path_parts[-1]
                             blob_client = cc.get_blob_client(blob=rel_src_blob_path)
                             dst_path = os.path.join(dst_folder, src_blob_name)
-                            if os.path.exists(dst_path):
-                                downloaded_files.append(dst_path)
-                                progress.update(download_task, advance=1)
-                                continue
+                            # if os.path.exists(dst_path):
+                            #     downloaded_files.append(dst_path)
+                            #     progress.update(download_task, advance=1)
+                            #     continue
 
                             task = asyncio.create_task(
                                 download(blob_client=blob_client, dst_path=dst_path),

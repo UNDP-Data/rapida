@@ -41,6 +41,46 @@ def geoarrow_schema_adapter(schema: pa.Schema, geom_field_name=None) -> pa.Schem
 
     return geoarrow_schema
 
+def calc(src_rasters:Iterable[str]=None, dst_raster=None, overwrite=False):
+    assert dst_raster not in ('', None), f'Invalid dst_raster={dst_raster}'
+    assert os.path.isabs(dst_raster), f'{dst_raster} is not an absolute path'
+    target_srs = None
+    files_to_sum = list()
+    for n, src_raster in enumerate(src_rasters):
+        prep_src_raster = None
+        with gdal.OpenEx(src_raster) as src_rds:
+            src_rast_srs = src_rds.GetSpatialRef()
+            assert src_rast_srs is not None, f'Could not fetch SRS for {src_raster}'
+            target_srs = src_rast_srs
+            srs_are_equal = proj_are_equal(src_srs=target_srs, dst_srs=src_rast_srs)
+            if not srs_are_equal:
+                _, ext = os.path.splitext(src_raster)
+                _, raster_fname = os.path.split(src_raster)
+                prep_src_raster = f'/vsimem/{raster_fname.replace(ext, ".vrt")}'
+                logger.info(f'Creating {prep_src_raster} VRT for {src_raster}')
+                gdal.Warp(prep_src_raster, src_raster, format='VRT', dstSRS=target_srs,
+                          creationOptions={'BLOCKXSIZE': 256, 'BLOCKYSIZE': 256})
+            band = src_rds.GetRasterBand(1)
+            block_size_x, block_size_y = band.GetBlockSize()
+            # Get raster size
+            width = src_rds.RasterXSize  # Number of columns
+            height = src_rds.RasterYSize  # Number of rows
+
+            intrs = set((height, width)).intersection((block_size_y, block_size_x))
+            if intrs:
+                _, ext = os.path.splitext(src_raster)
+                _, raster_fname = os.path.split(src_raster)
+                prep_src_raster = f'/vsimem/{raster_fname.replace(ext, ".vrt")}'
+                logger.info(f'Creating {prep_src_raster} VRT for {src_raster}')
+                gdal.Warp(prep_src_raster, src_raster, format='VRT',
+                          creationOptions={'BLOCKXSIZE': 256, 'BLOCKYSIZE': 256})
+            if prep_src_raster is None:
+                prep_src_raster = src_raster
+            files_to_sum.append(prep_src_raster)
+
+    creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
+    ds = Calc(calc='sum(a,axis=0)', a=files_to_sum, outfile=dst_raster, projectionCheck=True, format='GTiff',
+              creation_options=creation_options.split(' '), quiet=True, overwrite=overwrite)
 
 
 def sumup(src_rasters:Iterable[str]=None, dst_raster=None, overwrite=False) -> str:
@@ -85,7 +125,7 @@ def sumup(src_rasters:Iterable[str]=None, dst_raster=None, overwrite=False) -> s
     ds = None
     return dst_raster
 
-def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None, stats_layer=None,
+def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
                 vars_ops:Iterable[tuple[str, str]]=None, target_proj='ESRI:54009') -> GeoDataFrame:
     """
     Compute zonal stats form a set of raster files
@@ -149,7 +189,7 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
                 else:
                     prep_src_raster = src_raster
                 var_name, operation = vars_ops[n]
-                df = exact_extract(prep_src_raster, prep_src_vector, ops=[operation], include_geom=not n, output='pandas')
+                df = exact_extract(prep_src_raster, lyr, ops=[operation], include_geom=not n, output='pandas')
                 df.rename(columns={operation: var_name}, inplace=True)
 
                 df['tempid'] = range(1, len(df) + 1)
@@ -159,13 +199,26 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
                     combined_results = combined_results.merge(df, on=['tempid'], how='inner')
 
                 if should_reproject_r:gdal.Unlink(prep_src_raster)
-        combined_results = combined_results.merge(geopandas.read_file(bio, layer=polygon_layer), on='geometry',
-                                                  how='inner')
+        egdf = geopandas.read_file(bio, layer=polygon_layer)
+        for e in vars_ops:
+            vname = e[0]
+            if vname in egdf.columns.tolist():
+                egdf.drop(columns=[vname], inplace=True)
+        combined_results = egdf.merge(df, on='geometry',how='inner')
+
+        # # Step 1: Perform the merge first, without suffixes
+        # combined_results = combined_results.merge(df, on='tempid', how='inner', suffixes=('', '_df'))
+        #
+        # # Step 2: Replace columns from df (with '_df' suffix) in combined_results
+        # for col in df.columns:
+        #     if col != 'tempid' and col + '_df' in combined_results.columns:
+        #         combined_results[col] = combined_results.pop(col + '_df')
+
         if should_reproject_v:
-            print(prep_src_vector.startswith('/vsimem'))
             gdal.Unlink(prep_src_vector)
 
             assert os.path.exists(prep_src_vector)
         if isinstance(bio, io.BytesIO):bio.close()
         combined_results.drop(columns='tempid', inplace=True)
+
         return combined_results

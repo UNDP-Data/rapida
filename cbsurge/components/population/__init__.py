@@ -11,13 +11,14 @@ from cbsurge.session import Session
 from cbsurge.core import Variable
 from cbsurge.az import blobstorage
 from osgeo_utils.gdal_calc import Calc
+from osgeo import gdal
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 from cbsurge.stats.zst import zonal_stats, sumup
 import geopandas
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger(__name__)
-
+gdal.UseExceptions()
 @click.group()
 def population():
     f"""Command line interface for {__package__} package"""
@@ -160,7 +161,6 @@ class PopulationComponent(Component):
                     var_data = variables_data[var_name]
                     v = PopulationVariable(name=var_name,
                                            component=self.component_name,
-
                                            **var_data)
                     v(year=self.year, country=country, **kwargs)
                     if variable_task and progress:
@@ -264,9 +264,18 @@ class PopulationVariable(Variable):
             # Here we rely on OGR append flag. With GPKG format and because zonal_stats
 
 
-            write_dataframe(
-                df=gdf,path=project.geopackage_file_path, layer=dst_layer, overwrite=True,
-            )
+            with io.BytesIO() as bio:
 
-            # print(read_info(project.geopackage_file_path,layer=dst_layer)['fields'].tolist())
+                fpath = f'/vsimem/{dst_layer}.fgb'
+                write_dataframe(df=gdf,path=bio, layer=dst_layer, driver='FlatGeobuf')
+                gdal.FileFromMemBuffer(fpath, bio.getbuffer())
+                bio.seek(0)
+                with gdal.OpenEx(fpath) as src:
+                    options = gdal.VectorTranslateOptions(format='GPKG', layerName=dst_layer,
+                                                           makeValid=True)
+                    ds = gdal.VectorTranslate(destNameOrDestDS=project.geopackage_file_path,
+                                              srcDS=src,options=options)
+
+                gdal.Unlink(fpath)
+
 

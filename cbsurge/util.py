@@ -202,6 +202,22 @@ def validate_path(src_path=None):
     if os.path.exists(src_path):
         assert os.access(src_path, os.W_OK), f'Can not write to {src_path}'
 
+
+class FQFunctionNameFormatter(logging.Formatter):
+    """Custom formatter to display the fully qualified function name in logs."""
+
+    def format(self, record):
+        # Extract the full module path (e.g., 'my_project.module.submodule')
+        full_module_path = record.name
+
+        # Extract the top-level package name
+        package = full_module_path.split(".")[0] if "." in full_module_path else full_module_path
+
+        # Construct fully qualified function name with package
+        record.fqfunc = f"{package}.{full_module_path}.{record.funcName}"
+
+        return super().format(record)
+
 class CustomStreamHandler(logging.StreamHandler):
   """Handler that controls the writing of the newline character"""
 
@@ -239,12 +255,18 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
 
     else:
         logger = logging.getLogger(name)
-    formatter = logging.Formatter(
-        "%(filename)s:%(funcName)s:%(lineno)d:%(levelname)s:%(message)s",
-        "%Y-%m-%d %H:%M:%S",
-    )
+
+    # formatter = logging.Formatter(
+    #     "%(module)s.%(filename)s.%(funcName)s:%(lineno)d:%(levelname)s:%(message)s",
+    #     "%Y-%m-%d %H:%M:%S",
+    # )
+    formatter = FQFunctionNameFormatter(
+    "%(fqfunc)s: %(message)s",
+    "%Y-%m-%d %H:%M:%S"
+)
     logging_stream_handler = RichHandler(rich_tracebacks=True)
-    #logging_stream_handler.setFormatter(formatter)
+
+    logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

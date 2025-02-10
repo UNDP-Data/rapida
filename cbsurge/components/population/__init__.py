@@ -209,7 +209,6 @@ class PopulationVariable(Variable):
             computed_file = os.path.join(self._source_folder_, file_name)
             sources = self.resolve(**kwargs)
             creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
-            print(sources)
 
             ds = Calc(calc=self.sources, outfile=computed_file, projectionCheck=True, format='GTiff',
                       creation_options=creation_options.split(' '), quiet=False, overwrite=overwrite, **sources)
@@ -262,7 +261,7 @@ class PopulationVariable(Variable):
 
             # merge into stats layer for component
             # Here we rely on OGR append flag. With GPKG format and because zonal_stats
-
+            logger.debug(gdf.columns.tolist())
 
             with io.BytesIO() as bio:
 
@@ -271,7 +270,7 @@ class PopulationVariable(Variable):
                 gdal.FileFromMemBuffer(fpath, bio.getbuffer())
                 bio.seek(0)
                 with gdal.OpenEx(fpath) as src:
-                    options = gdal.VectorTranslateOptions(format='GPKG', layerName=dst_layer,
+                    options = gdal.VectorTranslateOptions(format='GPKG', accessMode='overwrite', layerName=dst_layer,
                                                            makeValid=True)
                     ds = gdal.VectorTranslate(destNameOrDestDS=project.geopackage_file_path,
                                               srcDS=src,options=options)

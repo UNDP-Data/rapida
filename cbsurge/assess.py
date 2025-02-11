@@ -6,18 +6,12 @@ import sys
 import typing
 from collections import OrderedDict
 import click
-from pygments.lexer import default
 from rich.progress import Progress
 from cbsurge.session import Session
 from cbsurge.project import Project
 import inspect
 logger = logging.getLogger(__name__)
-# s = Session()
-# components = s.get_components()
-# options = {}
-# for c in components:
-#     v = s.get_variables(component=c)
-#     options[c] = v
+
 
 def get_callable_args(callable_obj = None):
     skip = 'cls','self'

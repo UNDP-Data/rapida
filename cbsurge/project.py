@@ -11,9 +11,9 @@ from osgeo import gdal
 import geopandas
 import json
 import sys
+
+
 from cbsurge.admin.osm import fetch_admin
-
-
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -30,13 +30,13 @@ class Project:
 
     def __init__(self, path: str, polygons: str = None,
                  mask: str = None, projection: str = 'ESRI:54009',
-                 comment: str = None, save=True, **kwargs):
-
+                 comment: str = None, save=True, driver=None, **kwargs):
         if path is None:
             raise ValueError("Project path cannot be None")
 
         self.path = os.path.abspath(path)
-        self.geopackage_file_name = f"{os.path.basename(self.path)}.gpkg"
+        self.driver = driver
+        self.file_name = f"{os.path.basename(self.path)}.gpkg"
 
         if os.path.exists(self.config_file):
             self.load_config()  # ✅ Call a function that loads config safely
@@ -98,8 +98,16 @@ class Project:
                     rgdf = jgdf
                 self._cfg_['countries'] = tuple(set(rgdf['iso3']))
 
-                rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
-                             promote_to_multi=True)
+                # print(get_driver_from_extension(path=self.file_path))
+                # exit()
+                rgdf.to_file(filename=self.file_path,
+                             engine='pyogrio',
+                             mode='w',
+                             layer='polygons',
+                             promote_to_multi=True,
+                             driver=self.driver)
+                # rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                #              promote_to_multi=True)
 
 
             if save:
@@ -123,8 +131,9 @@ class Project:
         return os.path.join(self.path, self.config_file_name)
 
     @property
-    def geopackage_file_path(self):
-        return os.path.join(self.data_folder, self.geopackage_file_name)
+    def file_path(self):
+        return os.path.join(self.data_folder, self.file_name)
+
 
     def __str__(self):
         return json.dumps(
@@ -176,8 +185,9 @@ class Project:
               help='Full path to the mask dataset in any GDAL/OGR supported format. Can be vector or raster' )
 @click.option('-c', '--comment', required=False, type=str,
               help='Any comment you might want to add into the project config' )
+@click.option('-d', '--driver', required=False, type=str, help='The OGR driver to use' )
 
-def create(name=None, polygons=None, mask=None, comment=None):
+def create(name=None, polygons=None, mask=None, comment=None, driver=None):
     """
     Create a Rapida project in a new folder
 
@@ -188,7 +198,8 @@ def create(name=None, polygons=None, mask=None, comment=None):
         sys.exit(1)
     else:
         os.mkdir(abs_folder)
-    project = Project(path=abs_folder, polygons=polygons, mask=mask, comment=comment)
+
+    project = Project(path=abs_folder, polygons=polygons, mask=mask, comment=comment, driver=driver)
     assert project.is_valid
     logger.info(f'Project "{project.name}" was created successfully.')
 

@@ -1,5 +1,6 @@
 import httpx
 import logging
+
 from osgeo import gdal, osr
 import itertools
 import click
@@ -83,6 +84,8 @@ def fetch_drivers():
         drv = gdal.GetDriver(i)
         d[drv.ShortName] = drv.GetMetadataItem(gdal.DMD_EXTENSIONS)
     return d
+
+
 
 def http_get_json(url=None, timeout=None):
     """

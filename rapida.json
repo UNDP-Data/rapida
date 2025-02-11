@@ -1,0 +1,8 @@
+{
+    "name": "geo-cb-surge",
+    "path": "/home/work/py/geo-cb-surge",
+    "config_file": "/home/work/py/geo-cb-surge/rapida.json",
+    "create_command": "/home/work/py/geo-cb-surge/cbsurge/cli.py assess -c population -v dependency -f",
+    "created_on": "2025-02-11T09:37:47.932448",
+    "user": "janf"
+}

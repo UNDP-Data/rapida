@@ -104,8 +104,12 @@ def convert_params_to_click_options(params: dict, func):
 
 @click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
               help=f'Force recomputation from sources that are files')
-@click.option('--debug', default=False, show_default=True, is_flag=True,
+
+@click.option('--debug', '-d', default=False, show_default=True, is_flag=True,
               help=f'Turn on debug mode')
+
+
+
 def assess( components=None,  variables=None, force_compute=False, debug=False):
     """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
@@ -113,7 +117,7 @@ def assess( components=None,  variables=None, force_compute=False, debug=False):
     if debug:
         logger.setLevel(logging.DEBUG)
 
-    os.chdir('ap') #TODO delete me
+
     current_folder = os.getcwd()
     project = Project(path=current_folder)
     if project.is_valid:

@@ -212,8 +212,8 @@ class PopulationVariable(Variable):
             sources = self.resolve(**kwargs)
             creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
 
-            ds = Calc(calc=self.sources, outfile=computed_file, projectionCheck=True, format='GTiff',
-                      creation_options=creation_options.split(' '), quiet=False, overwrite=overwrite, **sources)
+            ds = Calc(calc=self.sources, outfile=computed_file,  projectionCheck=True, format='GTiff',
+                      creation_options=creation_options.split(' '), quiet=False, overwrite=overwrite,  **sources)
 
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
@@ -245,7 +245,7 @@ class PopulationVariable(Variable):
                 polygons_layer='polygons'
             if self.operator:
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.debug(f'Evaluating variable {self.name} using zonal stats')
+                logger.info(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
                 gdf = zonal_stats(src_rasters=[self.local_path],
                                       polygon_ds=project.geopackage_file_path,

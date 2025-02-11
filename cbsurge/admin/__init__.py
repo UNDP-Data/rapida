@@ -5,8 +5,29 @@ from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
 from cbsurge.util import BboxParamType
 import click
 import json
+from osgeo import gdal, ogr, osr
 
+gdal.UseExceptions()
 logger = logging.getLogger(__name__)
+
+def save_geojson(geojson_dict=None, dst_path=None, layer_name=None):
+    """
+    Save a geojson dict object to OGR
+    :param geojson_dict: dict
+    :param dst_path: str, path to the dataset name
+    :param layer_name: str, the layer name
+    :return:
+    """
+    if dst_path is not None:
+        with gdal.OpenEx(json.dumps(geojson_dict, indent=2)) as src:
+            src_layer_name = src.GetLayer(0).GetName()
+            options = gdal.VectorTranslateOptions(accessMode='overwrite', layerName=layer_name,
+                                                 makeValid=True,layers=[src_layer_name], skipFailures=True,
+                                                  geometryType='PROMOTE_TO_MULTI')
+            ds = gdal.VectorTranslate(destNameOrDestDS=dst_path,
+                                      srcDS=src, options=options)
+            ds = None
+
 
 @click.group()
 def admin():
@@ -40,6 +61,22 @@ def admin():
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
+
+@click.option(
+    '--dst_path',
+    type=click.Path(),
+    default=None,
+    required=True,
+    help="The absolute path to an OGR dataset."
+)
+@click.option(
+    '--layer-name',
+    type=str,
+    default=None,
+    required=True,
+    help="The name of the layer."
+)
+
 @click.option('--debug',
 
     is_flag=True,
@@ -48,7 +85,7 @@ def admin():
 )
 
 
-def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, debug=False):
+def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7,dst_path=None, layer_name=None, debug=False,):
     """
     Fetch admin boundaries from OSM
 
@@ -71,10 +108,12 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
     rapida admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
     """
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    logger = logging.getLogger('rapida')
+    if debug:
+        logger.setLevel(logging.DEBUG)
+
     geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
-    if geojson:
-        click.echo(json.dumps(geojson))
+    save_geojson(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
 
 
 
@@ -100,6 +139,22 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
+
+@click.option(
+    '--dst_path',
+    type=click.Path(),
+    default=None,
+    required=True,
+    help="The absolute path to an OGR dataset."
+)
+@click.option(
+    '--layer-name',
+    type=str,
+    default=None,
+    required=True,
+    help="The name of the layer."
+)
+
 @click.option('--debug',
 
     is_flag=True,
@@ -107,7 +162,8 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     help="Set log level to debug"
 )
 
-def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False):
+
+def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, dst_path=None, layer_name=None, debug=False ):
     """
     Fetch admin boundaries from OCHA COD
 
@@ -124,10 +180,14 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, debug=False)
 
     To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
 
-    rapida admin ocha -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > ocha.geojson
+
+    rapida admin ocha -b 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip --dst_path /data/admocha.fgb --layer-name abc
     """
-    #logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
-    logger.info('HERE')
+
+    logger = logging.getLogger('rapida')
+    if debug:
+        logger.setLevel(logging.DEBUG)
+
     geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
-    if geojson:
-        click.echo(json.dumps(geojson))
+    save_geojson(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
+

@@ -151,7 +151,7 @@ def proj_are_equal(src_srs: osr.SpatialReference = None, dst_srs: osr.SpatialRef
 def get_geographic_bbox(layer):
     # Get the layer's spatial reference
     source_srs = layer.GetSpatialRef()
-    min_x, max_x, min_y, max_y = layer.GetExtent()
+    min_x, max_x, min_y, max_y = layer.GetExtent(True)
     # If the layer is already in geographic (WGS 84), no reprojection is needed
     if source_srs is None or source_srs.IsGeographic():
         return min_x, min_y, max_x, max_y
@@ -163,10 +163,10 @@ def get_geographic_bbox(layer):
     )
 
 
-    min_lon, min_lat, _ = transform.TransformPoint(min_x, min_y)
-    max_lon, max_lat, _ = transform.TransformPoint(max_x, max_y)
+    lat_min, lon_min, lat_max, lon_max = transform.TransformBounds(min_x, min_y, max_x, max_y, 21)
 
-    return min_lon, min_lat, max_lon, max_lat
+    return lon_min, lat_min, lon_max, lat_max
+
 def generator_length(gen):
     """
     compute the no of elems inside a generator
@@ -201,6 +201,22 @@ def validate_path(src_path=None):
 
     if os.path.exists(src_path):
         assert os.access(src_path, os.W_OK), f'Can not write to {src_path}'
+
+
+class FQFunctionNameFormatter(logging.Formatter):
+    """Custom formatter to display the fully qualified function name in logs."""
+
+    def format(self, record):
+        # Extract the full module path (e.g., 'my_project.module.submodule')
+        full_module_path = record.name
+
+        # Extract the top-level package name
+        package = full_module_path.split(".")[0] if "." in full_module_path else full_module_path
+
+        # Construct fully qualified function name with package
+        record.fqfunc = f"{package}.{full_module_path}.{record.funcName}"
+
+        return super().format(record)
 
 class CustomStreamHandler(logging.StreamHandler):
   """Handler that controls the writing of the newline character"""
@@ -239,11 +255,17 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
 
     else:
         logger = logging.getLogger(name)
-    formatter = logging.Formatter(
-        "%(filename)s:%(funcName)s:%(lineno)d:%(levelname)s:%(message)s",
-        "%Y-%m-%d %H:%M:%S",
-    )
+
+    # formatter = logging.Formatter(
+    #     "%(module)s.%(filename)s.%(funcName)s:%(lineno)d:%(levelname)s:%(message)s",
+    #     "%Y-%m-%d %H:%M:%S",
+    # )
+    formatter = FQFunctionNameFormatter(
+    "%(fqfunc)s: %(message)s",
+    "%Y-%m-%d %H:%M:%S"
+)
     logging_stream_handler = RichHandler(rich_tracebacks=True)
+
     #logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()

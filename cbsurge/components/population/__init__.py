@@ -1,19 +1,24 @@
 import asyncio
+import io
 import os
 from typing import List
 import logging
 import pycountry
-from osgeo import gdal
-from cbsurge.components.component_base import ComponentBase
+from pyogrio import write_dataframe, read_info
+from cbsurge.core import Component
 from cbsurge.project import Project
-from cbsurge.util import get_geographic_bbox
+from cbsurge.session import Session
+from cbsurge.core import Variable
+from cbsurge.az import blobstorage
+from osgeo_utils.gdal_calc import Calc
+from osgeo import gdal
 import click
-
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
-
+from cbsurge.stats.zst import zonal_stats, sumup
+import geopandas
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger(__name__)
-
+gdal.UseExceptions()
 @click.group()
 def population():
     f"""Command line interface for {__package__} package"""
@@ -123,25 +128,153 @@ def aggregate(country, age_group, sex, download_path, force_reprocessing):
 
 
 
+class PopulationComponent(Component):
 
-class PopulationComponent(ComponentBase):
-
-    def __init__(self, year=2020, country:str = None):
-
+    def __init__(self, year=2020):
 
         self.year = year
-        self.country = country
-        if self.country is None:
-            project = Project(path=os.getcwd())
-            print(project.geopackage_file_path)
-            with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY|gdal.OF_VECTOR) as vds:
-                layer = vds.GetLayerByName('polygons')
-                geo_bbox = get_geographic_bbox(layer=layer)
-
-
         super().__init__()
 
-    def assess(self, variables: List[str] = None, **kwargs) -> str:
-        logger.info(f'Assessing "{self.component_name}" component {variables}')
+    def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
-        vrs = list(filter(lambda v: v in self.variable_names, variables or self.variable_names))
+        logger.info(f'Assessing component "{self.component_name}" ')
+        if not variables:
+            variables = self.variables
+        else:
+            for var_name in variables:
+                if not var_name in self.variables:
+                    logger.error(f'variable "{var_name}" is invalid. Valid options are "{", ".join(self.variables)}"')
+                    return
+
+
+        progress = kwargs.get('progress', None)
+        project = Project(path=os.getcwd())
+
+        with Session() as ses:
+            variables_data = ses.get_component(self.component_name)
+            nvars = len(variables)
+            for country in project.countries:
+                if progress:
+                    variable_task = progress.add_task(
+                        description=f'[red]Going to process {nvars} variables', total=nvars)
+                for var_name in variables:
+                    var_data = variables_data[var_name]
+                    v = PopulationVariable(name=var_name,
+                                           component=self.component_name,
+                                           **var_data)
+                    v(year=self.year, country=country, **kwargs)
+                    if variable_task and progress:
+                        progress.update(variable_task, advance=1, description=f'Assessing {var_name} in {country}')
+
+                if progress and variable_task:progress.remove_task(variable_task)
+
+
+
+
+
+
+class PopulationVariable(Variable):
+
+    def compute(self, **kwargs):
+
+        logger.debug(f'Computing {self.name}')
+        overwrite = kwargs.get('force_compute', None)
+
+        if not self.dep_vars:
+            logger.debug(f'Going to download {self.name} from source files')
+
+            # interpolate templates
+            source_blobs = list()
+            for source_template in self.sources:
+                source_file_path = self.interpolate_template(template=source_template, **kwargs)
+                source_blobs.append(source_file_path)
+            if not os.path.exists(self._source_folder_):
+                os.makedirs(self._source_folder_)
+            downloaded_files = asyncio.run(
+                blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
+                                           progress=kwargs.get('progress', None))
+            )
+            assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
+            src_path = self.interpolate_template(template=self.source, **kwargs)
+            _, file_name = os.path.split(src_path)
+            local_path = os.path.join(self._source_folder_, file_name)
+            logger.info(f'Going to compute {self.name} from {len(downloaded_files)} source files')
+            computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=overwrite)
+            assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
+            self.local_path = computed_file
+        else:
+            logger.info(f'Going to compute {self.name}={self.sources}')
+            src_path = self.interpolate_template(template=self.source, **kwargs)
+            _, file_name = os.path.split(src_path)
+            computed_file = os.path.join(self._source_folder_, file_name)
+            if not os.path.exists(self._source_folder_):
+                os.makedirs(self._source_folder_)
+            sources = self.resolve(**kwargs)
+            creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
+
+            ds = Calc(calc=self.sources, outfile=computed_file,  projectionCheck=True, format='GTiff',
+                      creation_options=creation_options.split(' '), quiet=False, overwrite=overwrite,  **sources)
+
+            assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
+            self.local_path = computed_file
+
+    def resolve(self,  **kwargs):
+        with Session() as s:
+            # project = Project(path=os.getcwd())
+            sources = dict()
+            for var_name in self.dep_vars:
+                var_dict = s.get_variable(component=self.component, variable=var_name)
+                var = self.__class__(name=var_name, component=self.component, **var_dict)
+                var_local_path = var(**kwargs) # assess
+                sources[var_name] = var_local_path or var.local_path
+            return sources
+
+
+    def evaluate(self, **kwargs):
+
+
+
+        dst_layer = f'stats.{self.component}'
+        with Session() as s:
+            project = Project(path=os.getcwd())
+            layers = geopandas.list_layers(project.geopackage_file_path)
+            lnames = layers.name.tolist()
+            if dst_layer in lnames:
+                polygons_layer = dst_layer
+            else:
+                polygons_layer='polygons'
+            if self.operator:
+                assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
+                logger.info(f'Evaluating variable {self.name} using zonal stats')
+                # raster variable, run zonal stats
+                gdf = zonal_stats(src_rasters=[self.local_path],
+                                      polygon_ds=project.geopackage_file_path,
+                                      polygon_layer=polygons_layer, vars_ops=[(self.name, self.operator)]
+                                      )
+            else:
+                # we eval inside GeoDataFrame
+                logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
+                gdf = geopandas.read_file(filename=project.geopackage_file_path,layer=dst_layer)
+                expr = f'{self.name}={self.sources}'
+                logger.debug(expr)
+                gdf.eval(expr, inplace=True)
+
+            # merge into stats layer for component
+            # Here we rely on OGR append flag. With GPKG format and because zonal_stats
+            logger.debug(gdf.columns.tolist())
+
+            with io.BytesIO() as bio:
+
+                fpath = f'/vsimem/{dst_layer}.fgb'
+                write_dataframe(df=gdf,path=bio, layer=dst_layer, driver='FlatGeobuf')
+                gdal.FileFromMemBuffer(fpath, bio.getbuffer())
+                bio.seek(0)
+                with gdal.OpenEx(fpath) as src:
+                    options = gdal.VectorTranslateOptions(format='GPKG', accessMode='overwrite', layerName=dst_layer,
+                                                           makeValid=True)
+                    ds = gdal.VectorTranslate(destNameOrDestDS=project.geopackage_file_path,
+                                              srcDS=src,options=options)
+
+                gdal.Unlink(fpath)
+
+

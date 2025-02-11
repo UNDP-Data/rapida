@@ -172,7 +172,6 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
 
 
     ocha_countries = fetch_ocha_countries()
-    print(len(ocha_countries))
 
 
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
@@ -197,6 +196,8 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
             geojson_data = http_get_json(url=country_geojson_url, timeout=timeout)
             for i, f in enumerate(geojson_data['features']):
                 props = f['properties']
+
+
                 feature_geom = f['geometry']
                 geom = shape(feature_geom)
                 out_props = {}
@@ -216,6 +217,7 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
                 out_props['undp_admin_level'] = adm_level
                 out_props['name_en'] = out_props['name']
                 out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
+                out_props['iso3'] = pycountry.countries.get(alpha_2=props['ADM0_PCODE']).alpha_3
                 f['properties'] = out_props
             if geojson is None:
                 geojson = geojson_data

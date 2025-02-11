@@ -116,29 +116,34 @@ def assess( components=None,  variables=None, force_compute=False, debug=False):
     logger = logging.getLogger('rapida')
     if debug:
         logger.setLevel(logging.DEBUG)
+    try:
+        current_folder = os.getcwd()
+        project = Project(path=current_folder)
+        if project.is_valid:
+            logger.info(f'Current project/folder: {project.path}')
+            with Progress(disable=False) as progress:
+                with Session() as session:
+                    all_components = session.get_components()
+                    components = components or all_components
+                    components_task = progress.add_task(
+                        description=f'[green]Assessing {"".join(components)} ', total=len(components))
+                    for component_name in components:
+                        if not component_name in all_components:
+                            msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
+                            logger.error(msg)
+                            #click.echo(assess.get_help(ctx))
+                            progress.remove_task(components_task)
+                            sys.exit(1)
+                        fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
+                        cls = import_class(fqcn=fqcn)
+                        component = cls()
+                        component(progress=progress, variables=variables, force_compute=force_compute)
+                    progress.remove_task(components_task)
+        else:
+            logger.info(f'"{current_folder}" is not a valid rapida project folder')
+    except Exception as e:
+        logger.error(f'"{current_folder}" is not a valid rapida project folder. {e}')
 
-
-    current_folder = os.getcwd()
-    project = Project(path=current_folder)
-    if project.is_valid:
-        logger.info(f'Current project/folder: {project.path}')
-        with Progress(disable=False) as progress:
-            with Session() as session:
-                all_components = session.get_components()
-                components_task = progress.add_task(
-                    description=f'[green]Assessing {"".join(components)} ', total=len(components))
-                for component_name in components:
-                    if not component_name in all_components:
-                        msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
-                        logger.error(msg)
-                        #click.echo(assess.get_help(ctx))
-                        progress.remove_task(components_task)
-                        sys.exit(1)
-                    fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
-                    cls = import_class(fqcn=fqcn)
-                    component = cls()
-                    component(progress=progress, variables=variables, force_compute=force_compute)
-                progress.remove_task(components_task)
 
 
 

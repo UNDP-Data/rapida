@@ -1,30 +1,34 @@
 import asyncio
 import logging
 import os
+import aiofiles
 from csv import excel
 from rich.progress import Progress, FileSizeColumn, BarColumn, TimeRemainingColumn
+
 from cbsurge.session import Session
 from cbsurge import util
 from azure.storage.blob import BlobType
 from azure.storage.blob.aio import BlobClient
 from typing import Iterable
-from rich.progress import Progress
+
+
 logger = logging.getLogger(__name__)
 
 
 
-async def download(blob_client:BlobClient = None, dst_path:str=None, progress=None, task=None):
+async def download(blob_client:BlobClient = None, dst_path:str=None):
 
     if not await blob_client.exists():
         raise ValueError(f"Blob {blob_client.blob_name} does not exist")
     try:
-        logger.debug(f"Going to download {blob_client.blob_name}")
+        logger.debug(f"Going to download {blob_client.blob_name} to {dst_path}")
+        blob_props = await blob_client.get_blob_properties()
+        total_size = blob_props.size  # Total bytes to download
         blob = await blob_client.download_blob()
-        with open(dst_path, "wb") as f:
+        async with aiofiles.open(dst_path, "wb") as f:
             async for chunk in blob.chunks():
-                f.write(chunk)
-        if progress and task is not None:
-            progress.update(task,advance=1)
+                await f.write(chunk)
+
     except Exception as e:
         logger.error(f"Failed to download the blob from {blob_client.blob_name}: {e}")
         raise
@@ -115,6 +119,8 @@ async def upload_blob(src_path: str = None, dst_path: str = None):
 
 async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, max_at_once=10, progress=None):
 
+
+
     proto, account_name, src_blob_path = src_blobs[0].split(':')
     container_name, *src_blob_path_parts = src_blob_path.split(os.path.sep)
     downloaded_files = list()
@@ -130,19 +136,15 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, 
                     try:
 
                         for src_blob in blobs:
+
                             *_, src_blob_path = src_blob.split(':')
                             _, *src_blob_path_parts = src_blob_path.split(os.path.sep)
                             rel_src_blob_path = os.path.sep.join(src_blob_path_parts)
                             src_blob_name = src_blob_path_parts[-1]
                             blob_client = cc.get_blob_client(blob=rel_src_blob_path)
                             dst_path = os.path.join(dst_folder, src_blob_name)
-                            if os.path.exists(dst_path):
-                                downloaded_files.append(dst_path)
-                                progress.update(download_task, advance=1)
-                                continue
-
                             task = asyncio.create_task(
-                                download(blob_client=blob_client, dst_path=dst_path, progress=progress, task=download_task),
+                                download(blob_client=blob_client, dst_path=dst_path),
                                 name=src_blob_name
                             )
                             download_tasks[src_blob_name] = task
@@ -158,6 +160,8 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, 
                                 downloaded_file_path = await done_task
                                 assert os.path.exists(downloaded_file_path), f'{downloaded_file_path} does not exist'
                                 downloaded_files.append(downloaded_file_path)
+
+                                progress.update(download_task, advance=1)
 
                             except Exception as e:
                                 logger.error(f'Failed to download  {downloaded_file_name}. {e}')

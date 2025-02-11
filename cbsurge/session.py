@@ -309,7 +309,8 @@ class Session(object):
         account_url = self.get_file_share_account_url(account_name, share_name)
         share_service_client = ShareServiceClient(
             account_url=account_url,
-            credential=credential
+            credential=credential,
+            token_intent='backup'
         )
         return share_service_client
 
@@ -341,8 +342,8 @@ class Session(object):
         :param component: str, name of the component
         :return: dict with its config extracted from the config  file
         """
-        variables = self.get_config_value_by_key(key='variables')
-        return variables[component]
+        variables_elem = self.get_config_value_by_key(key='variables')
+        return variables_elem[component]
 
     def get_variables(self, component: str = None):
         """
@@ -353,6 +354,7 @@ class Session(object):
         """
         component = self.get_component(component=component)
         return set(component.keys())
+
     def get_variable(self, component:str= None, variable=None ):
         """
         Gets the config for a given variable from a component
@@ -361,8 +363,8 @@ class Session(object):
         :return:
         """
         component = self.get_component(component=component)
-        variables = component[variable]
-        return variables[variable]
+        return component[variable]
+
 # for testing
 # import asyncio
 # async def main():

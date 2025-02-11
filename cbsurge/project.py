@@ -1,23 +1,22 @@
 import datetime
+import io
 import os
 import click
 import logging
 import shutil
+from rasterio.crs import CRS as rCRS
+from pyproj import CRS as pCRS
+import rasterio.warp
 from osgeo import gdal
-
+import geopandas
 import json
 import sys
+from cbsurge.admin.osm import fetch_admin
+
 
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-import os
-import sys
-import json
-import datetime
-import shutil
-import click
-from osgeo import gdal
 
 
 class Project:
@@ -57,24 +56,50 @@ class Project:
                 self._cfg_['comment'] = comment
 
             if polygons is not None:
-                with gdal.OpenEx(polygons) as poly_ds:
-                    lcount = poly_ds.GetLayerCount()
-                    if lcount > 1:
-                        lnames = list()
-                        for i in range(lcount):
-                            l = poly_ds.GetLayer(i)
-                            lnames.append(l.GetName())
-                        #click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
-                        layer_name = click.prompt(
-                            f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
-                            type=str, default=lnames[0])
-                    else:
-                        layer_name = poly_ds.GetLayer(0).GetName()
-                    if not os.path.exists(self.data_folder):
-                        os.makedirs(self.data_folder)
-                    gdal.VectorTranslate(self.geopackage_file_path, poly_ds, format='GPKG',reproject=True, dstSRS=projection,
-                                     layers=[layer_name], layerName='polygons', geometryType='PROMOTE_TO_MULTI', makeValid=True)
+                l = geopandas.list_layers(polygons)
+                lnames = l.name.tolist()
+                lcount = len(lnames)
+                if lcount > 1:
+                    click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
+                    layer_name = click.prompt(
+                        f'{polygons} contains {lcount} layers: {",".join(lnames)} Please type/select  one or pres enter to skip if you wish to use default value',
+                        type=str, default=lnames[0])
+                else:
+                    layer_name = lnames[0]
+                if not os.path.exists(self.data_folder):
+                    os.makedirs(self.data_folder)
+                gdf = geopandas.read_file(polygons, layer=layer_name, )
+                target_crs = pCRS.from_user_input(projection)
+                src_crs = gdf.crs
 
+                if not src_crs.is_exact_same(target_crs):
+                    rgdf = gdf.to_crs(crs=target_crs)
+
+                cols = rgdf.columns.tolist()
+                if not ('h3id' in cols and 'undp_admin_level' in cols):
+                    logger.info(f'going to add rapida specific attributes country code')
+                    bbox = tuple(gdf.total_bounds)
+                    if not src_crs.is_geographic:
+                        left, bottom, right, top = bbox
+                        bbox = rasterio.warp.transform_bounds(src_crs=rCRS.from_epsg(src_crs.to_epsg()),
+                                                              dst_crs=rCRS.from_epsg(4326),
+                                                              left=left, bottom=bottom,
+                                                              right=right, top=top,
+
+                                                                   )
+                    a0_polygons = fetch_admin(bbox=bbox,admin_level=0)
+                    a0_gdf = None
+                    with io.BytesIO(json.dumps(a0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
+                        a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
+                    rgdf_centroids = rgdf.copy()
+                    rgdf_centroids["geometry"] = rgdf.centroid
+                    jgdf = geopandas.sjoin(rgdf_centroids, a0_gdf, how="left", predicate="within", )
+                    jgdf['geometry'] = rgdf['geometry']
+                    rgdf = jgdf
+                    self._cfg_['countries'] = tuple(set(rgdf['iso3']))
+
+                rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                             promote_to_multi=True)
 
 
             if save:

@@ -31,7 +31,8 @@ def dump_variables(root_package_name = 'cbsurge', variables_module='variables', 
     """
     vars_dict = {}
     vars_dict[variables_module] = {}
-    dir_path = os.path.dirname(os.path.realpath(__file__))
+    # dir_path should be a parent folder of cbsurge package
+    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
     for p in walk_packages(path=[dir_path]):
         if p.name.startswith(root_package_name) and p.name.endswith(variables_module) and not p.ispkg:
             m = importlib.import_module(name=p.name)

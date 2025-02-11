@@ -96,7 +96,7 @@ class Project:
                     jgdf = geopandas.sjoin(rgdf_centroids, a0_gdf, how="left", predicate="within", )
                     jgdf['geometry'] = rgdf['geometry']
                     rgdf = jgdf
-                    self._cfg_['countries'] = tuple(set(rgdf['iso3']))
+                self._cfg_['countries'] = tuple(set(rgdf['iso3']))
 
                 rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                              promote_to_multi=True)

@@ -47,7 +47,8 @@ dependencies = [
     "jupyterlab_widgets",
     "ipywidgets",
     "sympy",
-    "pydantic"
+    "pydantic",
+    "leafmap"
 ]
 
 [project.scripts]

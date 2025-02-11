@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import importlib
@@ -5,6 +6,7 @@ import sys
 import typing
 from collections import OrderedDict
 import click
+from pygments.lexer import default
 from rich.progress import Progress
 from cbsurge.session import Session
 from cbsurge.project import Project
@@ -101,6 +103,8 @@ def convert_params_to_click_options(params: dict, func):
 
 @click.option('--variables', '-v', required=False, type=click.STRING, multiple=True,
                help=f'The variable/s to be assessed. Valid input example: -v variable1 -v variable2' )
+@click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
+              show_default=True,help=f'The year for which to compute population' )
 
 @click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
               help=f'Force recomputation from sources that are files')
@@ -110,15 +114,19 @@ def convert_params_to_click_options(params: dict, func):
 
 
 
-def assess( components=None,  variables=None, force_compute=False, debug=False):
+def assess( components=None,  variables=None, year=None, force_compute=False, debug=False):
     """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
     logger = logging.getLogger('rapida')
     if debug:
         logger.setLevel(logging.DEBUG)
+
     try:
         current_folder = os.getcwd()
         project = Project(path=current_folder)
+    except Exception as e:
+        logger.error(f'"{current_folder}" is not a valid rapida project folder. {e}')
+    else:
         if project.is_valid:
             logger.info(f'Current project/folder: {project.path}')
             with Progress(disable=False) as progress:
@@ -137,12 +145,11 @@ def assess( components=None,  variables=None, force_compute=False, debug=False):
                         fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
                         cls = import_class(fqcn=fqcn)
                         component = cls()
-                        component(progress=progress, variables=variables, force_compute=force_compute)
+                        component(progress=progress, variables=variables, year=year, force_compute=force_compute)
                     progress.remove_task(components_task)
         else:
             logger.info(f'"{current_folder}" is not a valid rapida project folder')
-    except Exception as e:
-        logger.error(f'"{current_folder}" is not a valid rapida project folder. {e}')
+
 
 
 

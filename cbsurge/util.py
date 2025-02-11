@@ -21,6 +21,8 @@ def silence_httpx_az():
     azlogger.setLevel(logging.WARNING)
     httpx_logger = logging.getLogger('httpx')
     httpx_logger.setLevel(logging.WARNING)
+    requests_logger = logging.getLogger('requests')
+    requests_logger.setLevel(logging.WARNING)
 
 
 def chunker(iterable, size):

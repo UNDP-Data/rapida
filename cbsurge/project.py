@@ -41,7 +41,6 @@ class Project:
         if not polygons:
             self.load_config()  # ✅ Call a function that loads config safely
 
-
         else:
             self.name = os.path.basename(self.path)
             self._cfg_ = {

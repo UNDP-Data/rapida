@@ -10,7 +10,7 @@ from osgeo import gdal, ogr, osr
 gdal.UseExceptions()
 logger = logging.getLogger(__name__)
 
-def save_geojson(geojson_dict=None, dst_path=None, layer_name=None):
+def save(geojson_dict=None, dst_path=None, layer_name=None):
     """
     Save a geojson dict object to OGR
     :param geojson_dict: dict
@@ -116,7 +116,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     if not geojson:
         logger.error('Could not extract admin boundaries from OSM for the provided bbox')
         return
-    save_geojson(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
+    save(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
 
 
 
@@ -194,5 +194,5 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, dst_path=Non
     if not geojson:
         logger.error('Could not extract admin boundaries from OCHA for the provided bbox')
         return
-    save_geojson(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
+    save(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
 

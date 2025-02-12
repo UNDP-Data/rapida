@@ -204,6 +204,17 @@ def validate_path(src_path=None):
     if os.path.exists(src_path):
         assert os.access(src_path, os.W_OK), f'Can not write to {src_path}'
 
+def in_notebook():
+    """check if code is being executed in a jupyter notebook"""
+    try:
+        from IPython import get_ipython
+        if 'IPKernelApp' not in get_ipython().config:  # pragma: no cover
+            return False
+    except ImportError:
+        return False
+    except AttributeError:
+        return False
+    return True
 
 class FQFunctionNameFormatter(logging.Formatter):
     """Custom formatter to display the fully qualified function name in logs."""
@@ -268,7 +279,7 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
 )
     logging_stream_handler = RichHandler(rich_tracebacks=True)
 
-    logging_stream_handler.setFormatter(formatter)
+    #logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

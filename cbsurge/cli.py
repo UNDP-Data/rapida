@@ -1,3 +1,4 @@
+import logging
 
 from cbsurge.util import setup_logger
 from cbsurge.admin import admin
@@ -27,5 +28,5 @@ cli.add_command(create)
 
 if __name__ == '__main__':
 
-    logger = setup_logger('rapida', make_root=True)
+    logger = setup_logger('rapida')
     cli()

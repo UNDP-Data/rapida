@@ -1,7 +1,7 @@
 import json
-import h3.api.basic_int as h3
 import httpx
-import asyncio
+import h3.api.basic_int as h3
+from cbsurge.util import http_post_json
 from osm2geojson import json2geojson
 import shapely
 from shapely.geometry import shape, box
@@ -31,18 +31,13 @@ def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
         out bb;
 
     """
-    with httpx.Client(timeout=100) as client:
-        response = client.post(overpass_url, data=overpass_query)
-        if response.status_code == 200:
-
-            data = response.json()
-            for e in data['elements']:
-                bounds = e['bounds']
-                return bounds['minlon'], bounds['minlat'], bounds['maxlon'], bounds['maxlat']
-            else:
-                raise Exception(f'No results for found for iso3 country code  {iso3}')
-        else:
-            return f"Error: {response.status}"
+    timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
+    data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
+    for e in data['elements']:
+        bounds = e['bounds']
+        return bounds['minlon'], bounds['minlat'], bounds['maxlon'], bounds['maxlat']
+    else:
+        raise Exception(f'No results for found for iso3 country code  {iso3}')
 
 
 def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, overpass_url=OVERPASS_API_URL):
@@ -51,6 +46,8 @@ def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, overpas
     iso3 country code
     :param iso3: ISO3 country code
     :param overpass_url:  the overpass URL
+    :param admin_name
+    :param osm_admin_level
     :return: tuple of numbers representing lat/lon coordinates of the centroid
     """
 
@@ -67,17 +64,14 @@ def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, overpas
     """
 
     timeout = httpx.Timeout(connect=10, read=1800, write=1800,pool=1000)
-    with httpx.Client(timeout=timeout) as client:
-        response = client.post(overpass_url, data=overpass_query)
-        if response.status_code == 200:
-            data = response.json()
-            if 'elements' in data and len(data['elements']) > 0:
-                for element in data['elements']:
-                    if 'center' in element:
-                        return element['center']['lon'], element['center']['lat']
-            return "Centroid not found"
-        else:
-            return f"Error: {response.status}"
+    try:
+        data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
+        for element in data['elements']:
+            return element['center']['lon'], element['center']['lat']
+    except Exception as e:
+        raise Exception(f'Could not fetch centroid for {iso3}:{admin_name}. {e}')
+
+
 
 
 
@@ -108,30 +102,28 @@ def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url=OVERP
 
     """
 
+
     timeout = httpx.Timeout(connect=10, read=1800, write=1800,pool=1000)
-    with httpx.Client(timeout=timeout) as client:
-        response = client.post(overpass_url, data={"data": overpass_query})
-        if response.status_code == 200:
-            data = response.json()
-            result = dict()
-            if len(data['elements']) > 0:
-                undp_admid_levels = dict()
-                for element in data['elements']:
-                    if element['type'] == 'area' and 'tags' in element and 'name' in element['tags'] and 'admin_level' in element['tags']:
-                        tags= element['tags']
-                        adm_level = int(tags['admin_level'])
-                        if adm_level > admin_level: continue
-                        undp_adm_level = osmadml2undpadml(osm_level=adm_level)
-
-                        if not result:
-                            result['iso3'] = tags['ISO3166-1:alpha3']
-
-                        if undp_adm_level in undp_admid_levels:continue
-                        result[f'admin{undp_adm_level}_name'] = tags['name']
-            return result
-
-        else:
-            return f"Error: {response.status_code}"
+    try:
+        data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
+        result = dict()
+        if len(data['elements']) > 0:
+            undp_admid_levels = dict()
+            for element in data['elements']:
+                if element['type'] == 'area' and 'tags' in element and 'name' in element['tags'] and 'admin_level' in \
+                        element['tags']:
+                    tags = element['tags']
+                    adm_level = int(tags['admin_level'])
+                    if adm_level > admin_level: continue
+                    undp_adm_level = osmadml2undpadml(osm_level=adm_level)
+                    if not result:
+                        result['iso3'] = tags['ISO3166-1:alpha3']
+                    if undp_adm_level in undp_admid_levels: continue
+                    result[f'admin{undp_adm_level}_name'] = tags['name']
+        return result
+    except Exception as e:
+        logger.error(f'Failed to fetch admin hierarchy for {lat}:{lon} with query {overpass_query}')
+        raise e
 
 
 def osmadml2undpadml(osm_level=None):
@@ -227,62 +219,62 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
 
     for i, level_value in enumerate(VALID_SUBLEVELS):
         if osm_level is not None and level_value != osm_level:continue
-
         overpass_query = f"""
-                               [out:json][timeout:1800];
-                                // Define the bounding box (replace {{bbox}} with "south,west,north,east").
-                                (
-                                  relation
-                                    ["admin_level"="{level_value}"]  // Match admin levels 0-10
-                                    ["boundary"="administrative"] // Ensure it's an administrative boundary
-                                    ["type"="boundary"]
-                                    ({south}, {west}, {north}, {east});
-                                );
-                                
-                                // Output only polygons
-                                out geom;
-        """
+                            [out:json][timeout:1800];
+                            (
+                              relation
+                                ["admin_level"="{level_value}"]  // Match admin levels 0-10
+                                ["boundary"="administrative"] // Ensure it's an administrative boundary
+                                ["type"="boundary"]
+                                ({south}, {west}, {north}, {east});
+                            );
+                            out geom;"""
 
         logger.debug(overpass_query)
         timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-        with httpx.Client(timeout=timeout) as client:
-            response = client.post(overpass_url, data={"data": overpass_query})
-            if response.status_code == 200:
-                data = response.json()
-                nelems = len(data['elements'])
-                if nelems>0:
-                    logger.info(f'Going to fetch  admin level {admin_level} boundaries from OSM level {level_value}')
-                    with tqdm(total=nelems, desc=f'Downloading ...') as pbar:
-                        geojson = json2geojson(data=data)
-                        bbox_polygon = box(west, south, east, north)
-                        for i,f in enumerate(geojson['features']):
-                            props = f['properties']
-                            tags = props.pop('tags')
-                            pbar.set_postfix_str(f'{tags["name"]} ', refresh=True)
-                            feature_geom = f['geometry']
-                            geom = shape(feature_geom)
-                            if clip:
-                                geom = geom.intersection(bbox_polygon)
-                                f['geometry'] = geom.__geo_interface__
-                            centroid = shapely.centroid(geom)
-                            out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
-                            out_props['name'] = tags['name']
-                            out_props['osm_admin_level'] = level_value
-                            out_props['undp_admin_level'] = admin_level
-                            out_props['name_en'] = tags.get('name:en', None)
-                            out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
-                            f['properties'] = out_props
-                            pbar.update(1)
-                        pbar.set_postfix_str(f'finished', refresh=True)
-                        return geojson
-                else:
-                    logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
-                    logger.info(f'Try changing OSM level or omitting it so eventually an OSM level is found!')
-                    if osm_level is None:
-                        logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
-                    continue
+        try:
+            data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
+            nelems = len(data['elements'])
+            if nelems>0:
+                logger.info(f'Going to fetch  admin level {admin_level} boundaries from OSM level {level_value}')
+                with tqdm(total=nelems, desc=f'Downloading ...') as pbar:
+                    geojson = json2geojson(data=data)
+                    bbox_polygon = box(west, south, east, north)
+                    for i,f in enumerate(geojson['features']):
+                        props = f['properties']
+                        tags = props.pop('tags')
+                        pbar.set_postfix_str(f'{tags["name"]} ', refresh=True)
+                        feature_geom = f['geometry']
+                        geom = shape(feature_geom)
+                        if clip:
+                            geom = geom.intersection(bbox_polygon)
+                            f['geometry'] = geom.__geo_interface__
+                        centroid = shapely.centroid(geom)
+                        out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
+                        out_props['name'] = tags['name']
+                        out_props['osm_admin_level'] = level_value
+                        out_props['undp_admin_level'] = admin_level
+                        out_props['name_en'] = tags.get('name:en', None)
+                        out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
+                        f['properties'] = out_props
+                        pbar.update(1)
+                    pbar.set_postfix_str(f'finished', refresh=True)
+                    return geojson
             else:
-                return f"Error: {response.status_code}"
+                logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                logger.info(f'Try changing OSM level or omitting it so eventually an OSM level is found!')
+                if osm_level is None:
+                    logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
+                continue
+        except Exception as e:
+            logger.error(f'Can not fetch admin data from {overpass_url} at this time. {e}')
+            logger.error(overpass_query)
+
+
+
+
+
+
 
 
 if __name__ == '__main__':

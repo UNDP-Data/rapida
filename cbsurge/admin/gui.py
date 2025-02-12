@@ -12,10 +12,34 @@ from cbsurge.admin.ocha import fetch_admin
 fc = FileChooser(os.getcwd())
 
 def mount_directory(directory):
+    """
+    Initialize a FileChooser instance for selecting a directory.
+    parameters:
+        directory - The path to the directory where the FileChooser should be mounted.
+    his function sets the global variable `fc` to an instance of `FileChooser`,
+    allowing users to navigate and select files within the specified directory.
+    """
     global fc
     fc = FileChooser(directory)
 
+
+
 def load_ui():
+    """
+    Initializes and displays the UI elements for selecting, loading and saving the administrative boundaries.
+    Raises:
+        ValueError:
+            If `fc` is None, indicating that the FileChooser has not been initialized.
+    This function:
+    - Creates an interactive map using leafmap.
+    - Allows users to draw a bounding box for data selection.
+    - Provides dropdowns for selecting administrative levels.
+    - Enables loading and saving of administrative boundary data.
+
+    Ideally this function should be used within a Jupyter Notebook.
+    """
+    if fc is None:
+        raise ValueError("FileChooser (fc) is not initialized. Call mount_directory(directory) first.")
     parameters = {
         'admin_level': 0,
         'bbox': None,

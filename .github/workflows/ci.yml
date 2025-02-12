@@ -58,7 +58,7 @@ jobs:
       - name: Install dependencies in container
         run: |
           docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "
-            export LANG=C.UTF-8 && pipenv install -e .
+            export LANG=C.UTF-8 && pipenv install -e . && pipenv run pip install -e .[dev]
           "
       - name: Run tests in container
         run: |

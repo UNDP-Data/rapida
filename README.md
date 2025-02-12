@@ -9,6 +9,12 @@ Install the project with dependencies to virtual environment as below.
 pipenv run pip install -e .
 ```
 
+If you want to install optional dependencies for testing and jupyter, execute the following command.
+
+```shell
+pipenv run pip install .[dev,jupyter]
+```
+
 To uninstall the project from Python environment, execute the following command.
 
 ```shell

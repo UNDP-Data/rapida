@@ -33,21 +33,30 @@ dependencies = [
     "rasterio",
     "geopandas",
     "azure-identity",
-    "jupyterhub",
-    "jupyterlab",
-    "notebook",
-    "dockerspawner",
-    "pytest",
     "rich",
     "morecantile",
     "mapbox_vector_tile",
     "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
+    "sympy",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+# dependencies required for development
+dev = [
+    "pytest"
+]
+
+# dependencies required for Jupyter server
+jupyter = [
+    "jupyterhub",
+    "jupyterlab",
+    "notebook",
+    "dockerspawner",
     "matplotlib",
     "jupyterlab_widgets",
     "ipywidgets",
-    "sympy",
-    "pydantic",
-    "leafmap"
+    "leafmap",
 ]
 
 [project.scripts]

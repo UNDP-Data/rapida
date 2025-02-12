@@ -113,6 +113,9 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
         logger.setLevel(logging.DEBUG)
 
     geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
+    if not geojson:
+        logger.error('Could not extract admin boundaries from OSM for the provided bbox')
+        return
     save_geojson(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
 
 
@@ -187,7 +190,9 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, dst_path=Non
     logger = logging.getLogger('rapida')
     if debug:
         logger.setLevel(logging.DEBUG)
-
     geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
+    if not geojson:
+        logger.error('Could not extract admin boundaries from OCHA for the provided bbox')
+        return
     save_geojson(geojson_dict=geojson, dst_path=dst_path, layer_name=layer_name)
 

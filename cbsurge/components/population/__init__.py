@@ -160,7 +160,7 @@ class PopulationComponent(Component):
                     v = PopulationVariable(name=var_name,
                                            component=self.component_name,
                                            **var_data)
-                    v(base_year=self.base_year, country=country, **kwargs)
+                    v(year=self.base_year, country=country, **kwargs)
                     if variable_task and progress:
                         progress.update(variable_task, advance=1, description=f'Assessing {var_name} in {country}')
 
@@ -247,12 +247,12 @@ class PopulationVariable(Variable):
                                       polygon_layer=polygons_layer, vars_ops=[(self.name, self.operator)]
                                       )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
-                assert 'base_year' in kwargs, f'Need base_year kword to compute pop coeff'
+                assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
                 assert 'country' in kwargs, f'Need country kword to compute pop coeff'
                 year = kwargs.get('year')
-                base_year = kwargs.get('base_year')
+                target_year = kwargs.get('target_year')
                 country = kwargs.get('country')
-                coeff = get_pop_coeff(base_year=base_year, target_year=year, country_code=country)
+                coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                 gdf[self.name] *= coeff
             else:
                 # we eval inside GeoDataFrame

@@ -111,10 +111,10 @@ class Variable(BaseModel):
         self._source_folder_ = os.path.join(project.data_folder, self.component, self.name)
 
 
-    def _update_(self, **kwargs):
-        args = self.__dict__.copy()
-        args.update(kwargs)
-        return args
+    # def _update_(self, **kwargs):
+    #     args = self.__dict__.copy()
+    #     args.update(kwargs)
+    #     return args
 
     def __str__(self):
         """
@@ -161,7 +161,7 @@ class Variable(BaseModel):
             :param kwargs:
             :return:
             """
-            logger.info(f'Assessing variable {self.name}')
+            logger.info(f'Assessing variable {self.name} in {kwargs["country"]}')
 
             force_compute = kwargs.get('force_compute', False)
             if not self.dep_vars: #simple variable,
@@ -209,31 +209,31 @@ class Variable(BaseModel):
 
 
 
-
-if __name__ == '__main__':
-    logger = util.setup_logger(name='rapida', level=logging.INFO)
-    admin_layer = '/data/adhoc/MDA/adm/adm3transn.fgb'
-    from rich.progress import Progress
-
-
-    with Session() as ses:
-
-            popvars = ses.config['variables']['population']
-            fk = list(popvars.keys())[0]
-            fv = popvars[fk]
-            d = popvars
-
-
-
-            with Progress(disable=False) as progress:
-
-                for var_name, var_data in d.items():
-                    progress.update(task_id=assess_task, advance=1, description=f'Processing {var_name}')
-                    v = Variable(name=var_name, component='population', **var_data)
-                    r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
-
-
-
-                #progress.remove_task(assess_task)
-
-
+#
+# if __name__ == '__main__':
+#     logger = util.setup_logger(name='rapida', level=logging.INFO)
+#     admin_layer = '/data/adhoc/MDA/adm/adm3transn.fgb'
+#     from rich.progress import Progress
+#
+#
+#     with Session() as ses:
+#
+#             popvars = ses.config['variables']['population']
+#             fk = list(popvars.keys())[0]
+#             fv = popvars[fk]
+#             d = popvars
+#
+#
+#
+#             with Progress(disable=False) as progress:
+#
+#                 for var_name, var_data in d.items():
+#                     progress.update(task_id=assess_task, advance=1, description=f'Processing {var_name}')
+#                     v = Variable(name=var_name, component='population', **var_data)
+#                     r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
+#
+#
+#
+#                 #progress.remove_task(assess_task)
+#
+#

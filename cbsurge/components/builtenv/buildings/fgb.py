@@ -109,7 +109,7 @@ def country_info(bbox=None, overpass_url=OVERPASS_API_URL):
 
     try:
 
-            data = util.http_post_json(url=overpass_url,data=overpass_query,timeout=timeout)
+            data = util.http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
             countries = dict()
             geojson = json2geojson(data=data)
 

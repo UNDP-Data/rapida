@@ -252,6 +252,7 @@ class PopulationVariable(Variable):
                 year = kwargs.get('year')
                 target_year = kwargs.get('target_year')
                 country = kwargs.get('country')
+                logger.info(f'Computing pop for {target_year} with base year {year}')
                 coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                 gdf[self.name] *= coeff
             else:

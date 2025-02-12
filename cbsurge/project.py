@@ -22,24 +22,25 @@ gdal.UseExceptions()
 class Project:
     config_file_name = 'rapida.json'
     data_folder_name = 'data'
+
     _instance = None
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
 
-    def __init__(self, path: str, polygons: str = None,
+    def __init__(self, path: str,polygons: str = None,
                  mask: str = None, projection: str = 'ESRI:54009',
-                 comment: str = None, save=True, **kwargs):
+                 comment: str = None, **kwargs ):
 
         if path is None:
             raise ValueError("Project path cannot be None")
 
         self.path = os.path.abspath(path)
         self.geopackage_file_name = f"{os.path.basename(self.path)}.gpkg"
-
-        if os.path.exists(self.config_file):
+        if not polygons:
             self.load_config()  # ✅ Call a function that loads config safely
+
         else:
             self.name = os.path.basename(self.path)
             self._cfg_ = {
@@ -102,7 +103,6 @@ class Project:
                              promote_to_multi=True)
 
 
-            if save:
                 self.save()
 
     def load_config(self):
@@ -111,6 +111,7 @@ class Project:
             with open(self.config_file, mode="r", encoding="utf-8") as f:
                 config_data = json.load(f)
             self.__dict__.update(config_data)  # ✅ Update instance variables safely
+            self.is_valid
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load config file ({self.config_file}): {e}")
 
@@ -134,15 +135,8 @@ class Project:
     @property
     def is_valid(self):
         """Conditions for a valid project"""
-        if not os.path.exists(self.path):
-            raise FileNotFoundError(f"{self.path} does not exist")
-        if not os.access(self.path, os.W_OK):
-            raise PermissionError(f"{self.path} is not writable")
-        if not os.path.exists(self.config_file):
-            raise FileNotFoundError(f"{self.config_file} does not exist")
-        if os.path.getsize(self.config_file) == 0:
-            raise ValueError(f"{self.config_file} is empty")
-        return True
+        return (os.path.exists(self.path) and os.access(self.path, os.W_OK)
+                and os.path.exists(self.config_file)) and os.path.getsize(self.config_file) > 0
 
     def delete(self, force=False):
         if not force and not click.confirm(f'Are you sure you want to delete {self.name} located in {self.path}?',
@@ -182,12 +176,14 @@ def create(name=None, polygons=None, mask=None, comment=None):
     Create a Rapida project in a new folder
 
     """
+    logger = logging.getLogger('rapida')
     abs_folder = os.path.abspath(name)
     if os.path.exists(abs_folder):
         logger.error(f'Folder "{name}" already exists in {os.getcwd()}')
         sys.exit(1)
     else:
         os.mkdir(abs_folder)
+
     project = Project(path=abs_folder, polygons=polygons, mask=mask, comment=comment)
     assert project.is_valid
     logger.info(f'Project "{project.name}" was created successfully.')

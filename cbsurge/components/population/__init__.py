@@ -16,6 +16,7 @@ import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 from cbsurge.stats.zst import zonal_stats, sumup
 import geopandas
+from cbsurge.components.population.pop_coefficient import get_pop_coeff
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -130,10 +131,7 @@ def aggregate(country, age_group, sex, download_path, force_reprocessing):
 
 class PopulationComponent(Component):
 
-    def __init__(self, year=2020):
-
-        self.year = year
-        super().__init__()
+    base_year =  2020
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
@@ -162,7 +160,7 @@ class PopulationComponent(Component):
                     v = PopulationVariable(name=var_name,
                                            component=self.component_name,
                                            **var_data)
-                    v(year=self.year, country=country, **kwargs)
+                    v(base_year=self.base_year, country=country, **kwargs)
                     if variable_task and progress:
                         progress.update(variable_task, advance=1, description=f'Assessing {var_name} in {country}')
 
@@ -231,9 +229,6 @@ class PopulationVariable(Variable):
 
 
     def evaluate(self, **kwargs):
-
-
-
         dst_layer = f'stats.{self.component}'
         with Session() as s:
             project = Project(path=os.getcwd())
@@ -245,12 +240,20 @@ class PopulationVariable(Variable):
                 polygons_layer='polygons'
             if self.operator:
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.info(f'Evaluating variable {self.name} using zonal stats')
+                logger.debug(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
                 gdf = zonal_stats(src_rasters=[self.local_path],
                                       polygon_ds=project.geopackage_file_path,
                                       polygon_layer=polygons_layer, vars_ops=[(self.name, self.operator)]
                                       )
+                assert 'year' in kwargs, f'Need year kword to compute pop coeff'
+                assert 'base_year' in kwargs, f'Need base_year kword to compute pop coeff'
+                assert 'country' in kwargs, f'Need country kword to compute pop coeff'
+                year = kwargs.get('year')
+                base_year = kwargs.get('base_year')
+                country = kwargs.get('country')
+                coeff = get_pop_coeff(base_year=base_year, target_year=year, country_code=country)
+                gdf[self.name] *= coeff
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
@@ -261,7 +264,7 @@ class PopulationVariable(Variable):
 
             # merge into stats layer for component
             # Here we rely on OGR append flag. With GPKG format and because zonal_stats
-            logger.debug(gdf.columns.tolist())
+            logger.debug(f'Writing columns "{", ".join(gdf.columns.tolist())}" to {project.geopackage_file_path}:{dst_layer}' )
 
             with io.BytesIO() as bio:
 

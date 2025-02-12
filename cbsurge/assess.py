@@ -1,3 +1,4 @@
+import datetime
 import logging
 import os
 import importlib
@@ -10,12 +11,7 @@ from cbsurge.session import Session
 from cbsurge.project import Project
 import inspect
 logger = logging.getLogger(__name__)
-# s = Session()
-# components = s.get_components()
-# options = {}
-# for c in components:
-#     v = s.get_variables(component=c)
-#     options[c] = v
+
 
 def get_callable_args(callable_obj = None):
     skip = 'cls','self'
@@ -101,6 +97,8 @@ def convert_params_to_click_options(params: dict, func):
 
 @click.option('--variables', '-v', required=False, type=click.STRING, multiple=True,
                help=f'The variable/s to be assessed. Valid input example: -v variable1 -v variable2' )
+@click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
+              show_default=True,help=f'The year for which to compute population' )
 
 @click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
               help=f'Force recomputation from sources that are files')
@@ -110,35 +108,43 @@ def convert_params_to_click_options(params: dict, func):
 
 
 
-def assess( components=None,  variables=None, force_compute=False, debug=False):
+def assess( components=None,  variables=None, year=None, force_compute=False, debug=False):
     """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
     logger = logging.getLogger('rapida')
     if debug:
         logger.setLevel(logging.DEBUG)
 
+    try:
+        current_folder = os.getcwd()
+        project = Project(path=current_folder)
+    except Exception as e:
+        logger.error(f'"{current_folder}" is not a valid rapida project folder. {e}')
+    else:
+        if project.is_valid:
+            logger.info(f'Current project/folder: {project.path}')
+            with Progress(disable=False) as progress:
+                with Session() as session:
+                    all_components = session.get_components()
+                    components = components or all_components
+                    components_task = progress.add_task(
+                        description=f'[green]Assessing {"".join(components)} ', total=len(components))
+                    for component_name in components:
+                        if not component_name in all_components:
+                            msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
+                            logger.error(msg)
+                            #click.echo(assess.get_help(ctx))
+                            progress.remove_task(components_task)
+                            sys.exit(1)
+                        fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
+                        cls = import_class(fqcn=fqcn)
+                        component = cls()
+                        component(progress=progress, variables=variables, year=year, force_compute=force_compute)
+                    progress.remove_task(components_task)
+        else:
+            logger.info(f'"{current_folder}" is not a valid rapida project folder')
 
-    current_folder = os.getcwd()
-    project = Project(path=current_folder)
-    if project.is_valid:
-        logger.info(f'Current project/folder: {project.path}')
-        with Progress(disable=False) as progress:
-            with Session() as session:
-                all_components = session.get_components()
-                components_task = progress.add_task(
-                    description=f'[green]Assessing {"".join(components)} ', total=len(components))
-                for component_name in components:
-                    if not component_name in all_components:
-                        msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
-                        logger.error(msg)
-                        #click.echo(assess.get_help(ctx))
-                        progress.remove_task(components_task)
-                        sys.exit(1)
-                    fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
-                    cls = import_class(fqcn=fqcn)
-                    component = cls()
-                    component(progress=progress, variables=variables, force_compute=force_compute)
-                progress.remove_task(components_task)
+
 
 
 

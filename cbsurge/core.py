@@ -1,4 +1,4 @@
-import abc
+
 import os.path
 import asyncio
 from sympy.parsing.sympy_parser import parse_expr
@@ -8,9 +8,8 @@ import re
 from typing import List, Dict
 from abc import abstractmethod
 from cbsurge.project import Project
-from cbsurge.stats.zst import zonal_stats, sumup
 from cbsurge.session import Session
-from cbsurge import util
+from osgeo import gdal
 import logging
 from cbsurge.az import blobstorage
 import importlib
@@ -18,7 +17,7 @@ from pkgutil import walk_packages
 
 
 logger = logging.getLogger(__name__)
-
+gdal.UseExceptions()
 def dump_variables(root_package_name = 'cbsurge', variables_module='variables', function_name='generate_variables'):
     """
     Iterate over all modules in path  that start with root_package_name, end with variables_module and are
@@ -44,7 +43,7 @@ def dump_variables(root_package_name = 'cbsurge', variables_module='variables', 
     return vars_dict
 
 
-class Component():
+class Component:
     """
     A base class for a component.
     Each component class should have the following methods to be implemented:
@@ -132,6 +131,8 @@ class Variable(BaseModel):
 
 
 
+
+
     def download(self, **kwargs):
 
         """Download variable"""
@@ -183,10 +184,9 @@ class Variable(BaseModel):
                     #logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
                     sources = self.resolve(evaluate=True, **kwargs)
 
-
-
-            return self.evaluate(**kwargs)
-
+            multinational = kwargs.get('multinational', False)
+            if not multinational:
+                return self.evaluate(**kwargs)
 
 
 

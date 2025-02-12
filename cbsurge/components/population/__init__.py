@@ -151,21 +151,61 @@ class PopulationComponent(Component):
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
             nvars = len(variables)
+            multinational = len(project.countries) > 1
+            sources = dict()
+            operators = list()
             for country in project.countries:
                 if progress:
                     variable_task = progress.add_task(
                         description=f'[red]Going to process {nvars} variables', total=nvars)
+
                 for var_name in variables:
                     var_data = variables_data[var_name]
+                    if multinational:
+                        operators.append(var_data['operator'])
+                    #create instance
                     v = PopulationVariable(name=var_name,
                                            component=self.component_name,
                                            **var_data)
-                    v(year=self.base_year, country=country, **kwargs)
+
+
+                    #assess
+                    v(year=self.base_year,
+                      country=country,
+                      multinational=multinational,
+                      **kwargs
+                      )
+                    if multinational:
+                        sources[v.local_path] = var_name
                     if variable_task and progress:
                         progress.update(variable_task, advance=1, description=f'Assessing {var_name} in {country}')
+                    #if progress and variable_task: progress.remove_task(variable_task)
 
-                if progress and variable_task:progress.remove_task(variable_task)
+            if multinational:
+                vname = set(sources.values()).pop()
+                operator = set(operators).pop()
+                input_files = list(sources.keys())
+                vrt_path = os.path.join(project.data_folder,self.component_name, vname, f'{vname}.vrt')
 
+
+                vrt_options = gdal.BuildVRTOptions(
+                    resolution='average',
+                    resampleAlg='nearest',
+                    allowProjectionDifference=False,
+
+
+                )
+                with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options):
+
+                    v = PopulationVariable(name=var_name,
+                                            component=self.component_name,
+                                           title=f'Multinational {vname}',
+                                           local_path=vrt_path,
+                                           operator=operator,
+
+                                            )
+
+                    v.evaluate(multinational=multinational, year=self.base_year, **kwargs)
 
 
 
@@ -238,9 +278,12 @@ class PopulationVariable(Variable):
                 polygons_layer = dst_layer
             else:
                 polygons_layer='polygons'
+
+
             if self.operator:
+
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.debug(f'Evaluating variable {self.name} using zonal stats')
+                logger.info(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
                 gdf = zonal_stats(src_rasters=[self.local_path],
                                       polygon_ds=project.geopackage_file_path,
@@ -248,13 +291,29 @@ class PopulationVariable(Variable):
                                       )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
-                assert 'country' in kwargs, f'Need country kword to compute pop coeff'
                 year = kwargs.get('year')
                 target_year = kwargs.get('target_year')
-                country = kwargs.get('country')
-                logger.info(f'Computing pop for {target_year} with base year {year}')
-                coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
-                gdf[self.name] *= coeff
+                countries = set(gdf['iso3'])
+                for country in countries:
+                    coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
+                    gdf.loc[gdf['iso3'] == country, self.name] *= coeff
+                #gdf.rename(columns={self.name: f'{self.name}_{target_year}'}, inplace=True)
+
+                #print(gdf.columns.tolist())
+
+
+                # assert 'year' in kwargs, f'Need year kword to compute pop coeff'
+                # assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
+                # assert 'country' in kwargs, f'Need country kword to compute pop coeff'
+                # year = kwargs.get('year')
+                # target_year = kwargs.get('target_year')
+                # country = kwargs.get('country')
+                # logger.info(f'Computing pop for {target_year} with base year {year}')
+                # coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
+                # gdf[self.name] *= coeff
+
+
+
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
@@ -262,6 +321,8 @@ class PopulationVariable(Variable):
                 expr = f'{self.name}={self.sources}'
                 logger.debug(expr)
                 gdf.eval(expr, inplace=True)
+
+
 
             # merge into stats layer for component
             # Here we rely on OGR append flag. With GPKG format and because zonal_stats

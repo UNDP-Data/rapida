@@ -22,7 +22,21 @@ RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
 
 WORKDIR /app
 
+# copy pyproject.toml to install dependencies
+COPY pyproject.toml pyproject.toml
+COPY README.md README.md
+
+# install dev and jupyter dependencies
+ENV PIPENV_VENV_IN_PROJECT=1
+RUN pipenv install --python 3 && \
+    pipenv run pip install .[dev,jupyter]
+ENV VIRTUAL_ENV=/app/.venv
+
+# copy rest of files to the image.
 COPY . .
+
+# install rapida package and dependencies
+RUN pipenv run pip install -e .
 
 # Create a group and set permissions for /app
 RUN groupadd ${GROUP_NAME} && \
@@ -35,12 +49,5 @@ RUN groupadd ${GROUP_NAME} && \
 
 RUN chmod +x /app/create_user.sh
 RUN chmod +x /app/entrypoint.sh
-
-# install package
-ENV PIPENV_VENV_IN_PROJECT=1
-RUN pipenv install --python 3 && \
-    pipenv run pip install .[dev,jupyter] && \
-    pipenv run pip install -e .
-ENV VIRTUAL_ENV=/app/.venv
 
 ENTRYPOINT ["/app/entrypoint.sh"]

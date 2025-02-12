@@ -38,7 +38,8 @@ RUN chmod +x /app/entrypoint.sh
 
 # install package
 ENV PIPENV_VENV_IN_PROJECT=1
-RUN pipenv install --dev --python 3 && \
+RUN pipenv install --python 3 && \
+    pipenv run pip install .[dev,jupyter] && \
     pipenv run pip install -e .
 ENV VIRTUAL_ENV=/app/.venv
 

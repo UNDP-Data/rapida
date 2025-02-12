@@ -19,10 +19,6 @@ def cli(ctx=None):
     by natural hazards.
     """
 
-    print(ctx.meta)
-    print(ctx.obj)
-    print(dir(ctx))
-
 cli.add_command(admin)
 cli.add_command(init)
 cli.add_command(assess)

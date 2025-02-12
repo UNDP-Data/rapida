@@ -41,7 +41,6 @@ dependencies = [
     "morecantile",
     "mapbox_vector_tile",
     "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
-    "aiopmtiles",
     "matplotlib",
     "jupyterlab_widgets",
     "ipywidgets",

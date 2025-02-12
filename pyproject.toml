@@ -16,6 +16,7 @@ dependencies = [
     "shapely",
     "h3",
     "tqdm",
+    "GDAL >=3.8.4",
     "azure-storage-blob",
     "overturemaps",
     "async",
@@ -82,5 +83,5 @@ allow-direct-references = true
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-[tool.hatchling.dependencies]
-GDAL = ">=3.6.0, <4.0.0"  # Specify the GDAL version range
+#[tool.hatchling.dependencies]
+#GDAL = ">=3.6.0, <4.0.0"  # Specify the GDAL version range

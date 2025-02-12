@@ -86,7 +86,7 @@ def convert_params_to_click_options(params: dict, func):
 
     return func
 
-@click.command()
+@click.command(short_help='TAGA')
 
 @click.option(
     '--components', '-c', required=False, multiple=True,
@@ -107,8 +107,8 @@ def convert_params_to_click_options(params: dict, func):
               help=f'Turn on debug mode')
 
 
-
-def assess( components=None,  variables=None, year=None, force_compute=False, debug=False):
+@click.pass_context
+def assess(ctx, components=None,  variables=None, year=None, force_compute=False, debug=False):
     """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
     logger = logging.getLogger('rapida')
@@ -139,7 +139,7 @@ def assess( components=None,  variables=None, year=None, force_compute=False, de
                         fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
                         cls = import_class(fqcn=fqcn)
                         component = cls()
-                        component(progress=progress, variables=variables, year=year, force_compute=force_compute)
+                        component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)
                     progress.remove_task(components_task)
         else:
             logger.info(f'"{current_folder}" is not a valid rapida project folder')

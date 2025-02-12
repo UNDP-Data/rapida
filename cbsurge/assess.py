@@ -140,7 +140,9 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
                         cls = import_class(fqcn=fqcn)
                         component = cls()
                         component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)
-                    progress.remove_task(components_task)
+                        progress.update(components_task,description=f'Assessed {component_name}', advance=1)
+
+                    #progress.remove_task(components_task)
         else:
             logger.info(f'"{current_folder}" is not a valid rapida project folder')
 

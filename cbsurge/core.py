@@ -162,7 +162,7 @@ class Variable(BaseModel):
             :param kwargs:
             :return:
             """
-            logger.info(f'Assessing variable {self.name} in {kwargs["country"]}')
+            logger.debug(f'Assessing variable {self.name} in {kwargs["country"]}')
 
             force_compute = kwargs.get('force_compute', False)
             if not self.dep_vars: #simple variable,

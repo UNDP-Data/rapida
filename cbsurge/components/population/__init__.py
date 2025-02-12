@@ -135,7 +135,7 @@ class PopulationComponent(Component):
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
-        logger.info(f'Assessing component "{self.component_name}" ')
+        logger.debug(f'Assessing component "{self.component_name}" ')
         if not variables:
             variables = self.variables
         else:
@@ -178,7 +178,7 @@ class PopulationComponent(Component):
                     if multinational:
                         sources[v.local_path] = var_name
                     if variable_task and progress:
-                        progress.update(variable_task, advance=1, description=f'Assessing {var_name} in {country}')
+                        progress.update(variable_task, advance=1, description=f'Assessed {var_name} in {country}')
                     #if progress and variable_task: progress.remove_task(variable_task)
 
             if multinational:
@@ -189,23 +189,24 @@ class PopulationComponent(Component):
 
 
                 vrt_options = gdal.BuildVRTOptions(
-                    resolution='average',
+                    resolution='highest',
                     resampleAlg='nearest',
                     allowProjectionDifference=False,
-
-
                 )
+
                 with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options):
 
-                    v = PopulationVariable(name=var_name,
-                                            component=self.component_name,
-                                           title=f'Multinational {vname}',
-                                           local_path=vrt_path,
-                                           operator=operator,
+                    v = PopulationVariable(
+                        name=var_name,
+                        component=self.component_name,
+                       title=f'Multinational {vname}',
+                       local_path=vrt_path,
+                       operator=operator,
 
-                                            )
+                    )
 
                     v.evaluate(multinational=multinational, year=self.base_year, **kwargs)
+                    logger.info(f'{var_name} was assessed in multi-country mode {set(project.countries)}')
 
 
 
@@ -283,7 +284,7 @@ class PopulationVariable(Variable):
             if self.operator:
 
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.info(f'Evaluating variable {self.name} using zonal stats')
+                logger.debug(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
                 gdf = zonal_stats(src_rasters=[self.local_path],
                                       polygon_ds=project.geopackage_file_path,

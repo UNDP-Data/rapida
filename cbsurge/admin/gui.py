@@ -46,7 +46,6 @@ def load_ui():
         'selected': None
     }
 
-    print(fc)
     data = None
     selected = None
 

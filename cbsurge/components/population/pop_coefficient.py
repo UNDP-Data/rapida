@@ -2,8 +2,11 @@ import requests
 import datetime
 import logging
 import numpy as np
-from enum import Enum
 import pycountry
+
+
+
+
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
 

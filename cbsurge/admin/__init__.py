@@ -42,6 +42,8 @@ def admin():
 
 
 @admin.command(no_args_is_help=True)
+
+
 @click.option('-b', '--bbox', required=True, type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
@@ -68,13 +70,7 @@ def admin():
     help="Precision level for H3 indexing (default is 7)."
 )
 
-@click.option(
-    '--dst_path',
-    type=click.Path(),
-    default=None,
-    required=True,
-    help="The absolute path to an OGR dataset."
-)
+@click.argument('destination_path', type=click.Path())
 
 @click.option('--debug',
 
@@ -105,7 +101,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
     To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
 
-    rapida admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 > osm.geojson
+    rapida admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 osm.geojson
     """
     logger = logging.getLogger('rapida')
     if debug:
@@ -120,6 +116,9 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
 
 @admin.command(no_args_is_help=True)
+
+
+
 @click.option('-b', '--bbox', required=True, type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
@@ -142,13 +141,9 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     help="Precision level for H3 indexing (default is 7)."
 )
 
-@click.option(
-    '--dst_path',
-    type=click.Path(),
-    default=None,
-    required=True,
-    help="The absolute path to an OGR dataset."
-)
+@click.argument('destination_path', type=click.Path())
+
+
 
 @click.option('--debug',
 
@@ -176,7 +171,7 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, dst_path=Non
     To save the result as a file, for instance, the following command can be executed to extract admin 0 data for Rwanda and Burundi as GeoJSON file:
 
 
-    rapida admin ocha -b 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip --dst_path /data/admocha.fgb --layer-name abc
+    rapida admin ocha -b 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip /data/admocha.fgb --layer-name abc
     """
 
     logger = logging.getLogger('rapida')

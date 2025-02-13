@@ -1,10 +1,9 @@
-import json
 import logging
 import click
 import os
 import shutil
 from cbsurge.session import Session
-from cbsurge.core import dump_variables
+from cbsurge.components.population.variables import generate_variables
 
 
 logger = logging.getLogger(__name__)
@@ -61,7 +60,7 @@ def setup_prompt(session: Session):
 
 
     session.save_config()
-    vars_dict = dump_variables()
+    vars_dict = generate_variables()
     session.config.update(vars_dict)
     session.save_config()
     click.echo('Setting up was successfully done!')

@@ -28,7 +28,7 @@ build:
 	@echo "------------------------------------------------------------------"
 	@echo "Building Docker image"
 	@echo "------------------------------------------------------------------"
-	docker compose -f docker-compose.yaml build
+	docker compose -f docker-compose.yaml build --build-arg PRODUCTION=$(PRODUCTION)
 
 up:
 	@echo

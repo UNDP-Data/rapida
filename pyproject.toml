@@ -57,6 +57,7 @@ jupyter = [
     "jupyterlab_widgets",
     "ipywidgets",
     "leafmap",
+    "mapclassify"
 ]
 
 [project.scripts]

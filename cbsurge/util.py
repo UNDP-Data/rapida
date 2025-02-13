@@ -25,6 +25,7 @@ def silence_httpx_az():
     requests_logger.setLevel(logging.WARNING)
 
 
+
 def chunker(iterable, size):
     it = iter(iterable)
     while True:
@@ -279,7 +280,7 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
 )
     logging_stream_handler = RichHandler(rich_tracebacks=True)
 
-    #logging_stream_handler.setFormatter(formatter)
+    logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

@@ -80,7 +80,7 @@ def admin():
 )
 
 
-def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, dst_path=None, debug=False,):
+def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, destination_path=None, debug=False,):
     """
     Fetch admin boundaries from OSM
 
@@ -111,7 +111,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     if not geojson:
         logger.error('Could not extract admin boundaries from OSM for the provided bbox')
         return
-    save(geojson_dict=geojson, dst_path=dst_path, layer_name=f'admin{admin_level}')
+    save(geojson_dict=geojson, dst_path=destination_path, layer_name=f'admin{admin_level}')
 
 
 
@@ -153,7 +153,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 )
 
 
-def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, dst_path=None, debug=False ):
+def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, destination_path=None, debug=False ):
     """
     Fetch admin boundaries from OCHA COD
 
@@ -181,5 +181,5 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, dst_path=Non
     if not geojson:
         logger.error('Could not extract admin boundaries from OCHA for the provided bbox')
         return
-    save(geojson_dict=geojson, dst_path=dst_path, layer_name=f'admin{admin_level}')
+    save(geojson_dict=geojson, dst_path=destination_path, layer_name=f'admin{admin_level}')
 

@@ -3,6 +3,7 @@ FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 
 ARG GROUP_NAME="cbsurge"
 ARG DATA_DIR='/data'
+ARG PRODUCTION
 
 ENV GROUP_NAME $GROUP_NAME
 ENV DATA_DIR $DATA_DIR
@@ -35,8 +36,12 @@ ENV VIRTUAL_ENV=/app/.venv
 # copy rest of files to the image.
 COPY . .
 
-# install rapida package and dependencies
-RUN pipenv run pip install -e .
+# Conditional installation based on PRODUCTION variable
+RUN if [ -z "$PRODUCTION" ]; then \
+        pipenv run pip install -e . ; \
+    else \
+        pipenv run pip install . ; \
+    fi
 
 # Create a group and set permissions for /app
 RUN groupadd ${GROUP_NAME} && \

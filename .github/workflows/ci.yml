@@ -98,6 +98,8 @@ jobs:
         file: Dockerfile
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
+        build-args: |
+          PRODUCTION=true
 
   deploy-github:
     name: Build and deploy to GitHub container registry
@@ -135,3 +137,5 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            PRODUCTION=true

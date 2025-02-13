@@ -25,6 +25,7 @@ def silence_httpx_az():
     requests_logger.setLevel(logging.WARNING)
 
 
+
 def chunker(iterable, size):
     it = iter(iterable)
     while True:
@@ -100,7 +101,7 @@ def http_get_json(url=None, timeout=None):
         if response.status_code == 200:
             return response.json()
 
-def http_post_json(url=None, data=None, timeout=None):
+def http_post_json(url=None, query=None, timeout=None):
     """
     Generic HTTP get function using httpx
     :param url: str, the url to be fetched
@@ -109,7 +110,7 @@ def http_post_json(url=None, data=None, timeout=None):
     """
     assert timeout is not None, f'Invalid timeout={timeout}'
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(url, data={"data": data})
+        response = client.post(url, data={"data": query})
         response.raise_for_status()
         return response.json()
 
@@ -279,7 +280,7 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
 )
     logging_stream_handler = RichHandler(rich_tracebacks=True)
 
-    #logging_stream_handler.setFormatter(formatter)
+    logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

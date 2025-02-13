@@ -84,6 +84,12 @@ before running the above command, please use `devcontainer` or `make shell` to e
 make build
 ```
 
+If you would like to build image for production, execute the below command
+
+```shell
+PRODUCTION=true make build
+```
+
 - launch docker container
 
 ```shell

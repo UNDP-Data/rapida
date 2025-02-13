@@ -2,8 +2,11 @@ import logging
 import click
 import os
 import shutil
+
+from requests import session
+
 from cbsurge.session import Session
-from cbsurge.components.population.variables import generate_variables
+from cbsurge.components.population.variables import generate_variables as gen_pop_vars
 
 
 logger = logging.getLogger(__name__)
@@ -60,7 +63,9 @@ def setup_prompt(session: Session):
 
 
     session.save_config()
-    vars_dict = generate_variables()
+    vars_dict = gen_pop_vars()
+    variables_elem = session.config.get('variables', {})
+    variables_elem.update('population', vars_dict)
     session.config.update(vars_dict)
     session.save_config()
     click.echo('Setting up was successfully done!')

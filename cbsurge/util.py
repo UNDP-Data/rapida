@@ -87,6 +87,10 @@ def fetch_drivers():
         d[drv.ShortName] = drv.GetMetadataItem(gdal.DMD_EXTENSIONS)
     return d
 
+def get_parent(directory: str) -> str:
+    """Returns the parent directory of the given folder."""
+    return os.path.abspath(os.path.join(directory, os.pardir))
+
 def http_get_json(url=None, timeout=None):
     """
     Generic HTTP get function using httpx

@@ -63,9 +63,11 @@ def setup_prompt(session: Session):
 
 
     session.save_config()
-    vars_dict = gen_pop_vars()
-    variables_elem = session.config.get('variables', {})
-    variables_elem.update('population', vars_dict)
+    vars_dict = {
+        "variables": {
+            "population":  gen_pop_vars()
+        }
+    }
     session.config.update(vars_dict)
     session.save_config()
     click.echo('Setting up was successfully done!')

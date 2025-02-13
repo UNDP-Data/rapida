@@ -52,8 +52,8 @@ def load_ui():
 
     # Map and drawing control
     m = leafmap.Map(center=[0, 34], zoom=7)
-    draw_control = DrawControl()
-    m.add(draw_control)
+
+    draw_control = next((c for c in m.controls if isinstance(c, DrawControl)), None) # leafmap.Map object already has a DrawControl object
 
     # Event handlers
     def update_datasource(change):

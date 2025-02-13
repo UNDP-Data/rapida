@@ -43,6 +43,7 @@ def admin():
 
 @admin.command(no_args_is_help=True)
 
+@click.argument('destination_path', type=click.Path())
 
 @click.option('-b', '--bbox', required=True, type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
@@ -70,7 +71,7 @@ def admin():
     help="Precision level for H3 indexing (default is 7)."
 )
 
-@click.argument('destination_path', type=click.Path())
+
 
 @click.option('--debug',
 
@@ -117,7 +118,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
 @admin.command(no_args_is_help=True)
 
-
+@click.argument('destination_path', type=click.Path())
 
 @click.option('-b', '--bbox', required=True, type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
@@ -141,7 +142,6 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     help="Precision level for H3 indexing (default is 7)."
 )
 
-@click.argument('destination_path', type=click.Path())
 
 
 

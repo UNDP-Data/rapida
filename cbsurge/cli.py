@@ -2,7 +2,7 @@ import logging
 
 from cbsurge.util import setup_logger
 from cbsurge.admin import admin
-from cbsurge.project import create
+from cbsurge.project import create, list, upload, download
 from cbsurge.initialize import init
 from cbsurge.assess import assess
 from cbsurge.stats import stats
@@ -24,6 +24,9 @@ cli.add_command(init)
 cli.add_command(assess)
 cli.add_command(stats)
 cli.add_command(create)
+cli.add_command(list)
+cli.add_command(upload)
+cli.add_command(download)
 
 
 if __name__ == '__main__':

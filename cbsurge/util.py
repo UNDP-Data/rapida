@@ -87,6 +87,10 @@ def fetch_drivers():
         d[drv.ShortName] = drv.GetMetadataItem(gdal.DMD_EXTENSIONS)
     return d
 
+def get_parent(directory: str) -> str:
+    """Returns the parent directory of the given folder."""
+    return os.path.abspath(os.path.join(directory, os.pardir))
+
 def http_get_json(url=None, timeout=None):
     """
     Generic HTTP get function using httpx
@@ -279,8 +283,8 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
     "%Y-%m-%d %H:%M:%S"
 )
     logging_stream_handler = RichHandler(rich_tracebacks=True)
-
-    logging_stream_handler.setFormatter(formatter)
+    if level == logging.DEBUG:
+        logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

@@ -11,7 +11,7 @@ from cbsurge.admin.osm import fetch_admin as fetch_osm_admin
 
 # Initialize global parameters
 global_params = {
-    "fc": FileChooser(os.getcwd()),
+    "fc": FileChooser(os.getcwd(), select_desc='Choose file', change_desc='Change file'),
     "datasource": "ocha",
     "parameters": {
         "admin_level": 0,

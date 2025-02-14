@@ -283,8 +283,8 @@ def setup_logger(name=None, make_root=True,  level=logging.INFO):
     "%Y-%m-%d %H:%M:%S"
 )
     logging_stream_handler = RichHandler(rich_tracebacks=True)
-
-    logging_stream_handler.setFormatter(formatter)
+    if level == logging.DEBUG:
+        logging_stream_handler.setFormatter(formatter)
     logger.setLevel(level)
     logger.handlers.clear()
     logger.addHandler(logging_stream_handler)

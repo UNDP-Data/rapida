@@ -337,7 +337,7 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
     logging.info("Starting data download from azure")
     session = Session()
     async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
-        container_client = blob_service_client.get_container_client(container=session.get_container_name())
+        container_client = blob_service_client.get_container_client(container=session.get_stac_container_name())
 
         blobs_path_list = await _get_blobs_list(c_client=container_client, age_group=age_group, sex=sex)
 
@@ -375,7 +375,7 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
     available_data = await get_available_data(country_code=country_code, year=year)
     session = Session()
     async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
-        container_client = blob_service_client.get_container_client(container=session.get_container_name())
+        container_client = blob_service_client.get_container_client(container=session.get_stac_container_name())
         for country_code, country_id in available_data.items():
             if country_code == "RUS":
                 continue
@@ -521,7 +521,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
         country_codes = [country_code]
 
     async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
-        container_client = blob_service_client.get_container_client(container=session.get_container_name())
+        container_client = blob_service_client.get_container_client(container=session.get_stac_container_name())
 
         async def __progress__(current, total):
             logging.info("Progress: %s/%s", current, total)

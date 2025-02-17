@@ -108,13 +108,16 @@ async def upload_blob(src_path: str = None, dst_path: str = None):
     """
     assert isinstance(src_path, str), f'src_path must be a valid string, not {type(src_path)}'
     util.validate_azure_storage_path(a_path=dst_path)
-    proto, account_name, dst_blob_path = dst_path
+    parts = dst_path.split(":", 2)
+    if len(parts) != 3:
+        raise ValueError(f"Invalid Azure path format: {dst_path}. Expected format 'az:{{account}}:{{container}}/path.ext'")
+    proto, account_name, dst_blob_path = parts
     container_name, *dst_path_parts = dst_blob_path.split(os.path.sep)
     rel_dst_blob_path = os.path.sep.join(dst_path_parts)
     async with Session() as session:
-        with session.get_blob_container_client(account_name=account_name,container_name=container_name) as cc:
+       async with session.get_blob_container_client(account_name=account_name,container_name=container_name) as cc:
             blob_client = cc.get_blob_client(blob=rel_dst_blob_path)
-            return upload(src_path, dst_path, blob_client)
+            return await upload(src_path, dst_path, blob_client)
 
 
 async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, max_at_once=10, progress=None):

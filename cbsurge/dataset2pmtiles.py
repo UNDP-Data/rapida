@@ -10,9 +10,9 @@ from traceback import print_exc
 from osgeo import gdal, ogr, osr
 from pmtiles.reader import Reader, MmapSource
 
+from cbsurge.az.blobstorage import upload_blob
 from cbsurge.session import Session
-from cbsurge.util import chop_blob_url
-
+from cbsurge.util import setup_logger
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -90,8 +90,7 @@ def dataset2fgb(fgb_dir: str = None,
                 dst_prj_epsg: int = 4326,
                 conn_string: str = None,
                 blob_url: str = None,
-                timeout_event=None,
-                silent_mode=False):
+                timeout_event=None):
     """
     Convert one or more layers from src_ds into FlatGeobuf format in a (temporary) directory featuring dst_prj_epsg
     projection. The layer is possibly reprojected. In case errors are encountered an error blob is uploaded for now
@@ -103,7 +102,6 @@ def dataset2fgb(fgb_dir: str = None,
     @param conn_string: the connection string used to connect to the Azure storage account
     @param blob_url: the url of the blob to be ingested
     @param timeout_event:
-    @param silent_mode: if True, it will not upload error file
     @return:
     """
     dst_srs = osr.SpatialReference()
@@ -154,20 +152,8 @@ def dataset2fgb(fgb_dir: str = None,
             del fgb_ds
             #issue a warning in case the out features are 0 or there is
             if converted_features == 0 or converted_features!= original_features and conn_string:
-                # upload error blob
-                blob_name = chop_blob_url(blob_url=blob_url)
-                container_name, *rest, blob_name = blob_name.split("/")
-                error_blob_path = f'{"/".join(rest)}/{blob_name}.error'
-                logger.info(f'Uploading error message to {error_blob_path}')
                 error_message = f'There could be issues with layer "{lname}".\nOriginal number of features/geometries ={original_features} while converted={converted_features}'
                 logger.error(error_message)
-                # if silent_mode:
-                #     logger.info(f"skipped uploading error file")
-                # else:
-                #     upload_content_to_blob(content=error_message, connection_string=conn_string,
-                #                            container_name=container_name,
-                #                            dst_blob_path=error_blob_path)
-
 
 
         except (RuntimeError, Exception) as re:
@@ -184,25 +170,12 @@ def dataset2fgb(fgb_dir: str = None,
                     msg += f'layer: {lname}\n'
                     msg += f'gdal_error_message: {error_message}'
                     logger.error(msg)
-                    # if conn_string :
-                    #     # upload error blob
-                    #     blob_name = chop_blob_url(blob_url=blob_url)
-                    #     container_name, *rest, blob_name = blob_name.split("/")
-                    #     error_blob_path = f'{"/".join(rest)}/{blob_name}.error'
-                    #     logger.info(f'Uploading error message to {error_blob_path}')
-                    #     if silent_mode:
-                    #         logger.info(f"skipped uploading error file")
-                    #     else:
-                    #         upload_content_to_blob(content=error_message, connection_string=conn_string,
-                    #                                container_name=container_name,
-                    #                                dst_blob_path=error_blob_path)
-
 
     return converted_layers
 
 
-def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str = None,
-                timeout_event=multiprocessing.Event):
+async def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str = None,
+                timeout_event=multiprocessing.Event()):
     """
     Converts all FlatGeobuf files from fgb_layers dict into PMtile format and uploads the result to Azure
     blob. Supports cancellation through event arg
@@ -258,19 +231,12 @@ def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, pmtiles
 
 
         logger.info(f'Created multilayer PMtiles file {pmtiles_path}')
-        # # upload layer_pmtiles_path to azure
-        # if conn_string is not None:
-        #     container_name, pmtiles_blob_path = get_azure_blob_path(blob_url=blob_url,
-        #                                                             local_path=pmtiles_path)
-        #     logger.info(f'Uploading {pmtiles_path} to {pmtiles_blob_path}')
-        #     upload_blob(src_path=pmtiles_path, connection_string=conn_string, container_name=container_name,
-        #                 dst_blob_path=pmtiles_blob_path)
-        #
-        #     for layer_name, fgb_layer_path in fgb_layers.items():
-        #         upload_blob(src_path=fgb_layer_path, connection_string=conn_string, container_name=container_name,
-        #                     dst_blob_path=f"{pmtiles_blob_path}.{layer_name}.fgb")
-        #
-        #     upload_ingesting_blob(pmtiles_blob_path, container_name=container_name, connection_string=conn_string)
+        # upload layer_pmtiles_path to azure
+        await upload_blob(src_path=pmtiles_path, dst_path=blob_url)
+
+        # upload fgb files to azure
+        for layer_name, fgb_layer_path in fgb_layers.items():
+            await upload_blob(src_path=fgb_layer_path, dst_path=f"{blob_url}.{layer_name}.fgb")
 
 
     except subprocess.TimeoutExpired as te:
@@ -289,27 +255,17 @@ def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, pmtiles
             logger.error(msg)
 
 
-            # # upload error file
-            # if conn_string is not None:
-            #     blob_name = chop_blob_url(blob_url=blob_url)
-            #     container_name, *rest, blob_name = blob_name.split("/")
-            #     error_blob_path = f'{"/".join(rest)}/{blob_name}.error'
-            #     logger.info(f'Uploading error message to {error_blob_path}')
-            #     upload_content_to_blob(content=error_message, connection_string=conn_string,
-            #                            container_name=container_name,
-            #                            dst_blob_path=error_blob_path)
-
-
 def gdal_callback(complete, message, timeout_event):
     logger.debug(f'{complete * 100:.2f}%')
     if timeout_event and timeout_event.is_set():
         logger.info(f'GDAL received timeout signal')
         return 0
 
-def dataset2pmtiles(blob_url: str = None,
+async def dataset2pmtiles(blob_url: str = None,
                     src_ds: gdal.Dataset = None,
                     layers: typing.List[str] = None,
-                    pmtiles_file_name: typing.Optional[str] = None):
+                    pmtiles_file_name: typing.Optional[str] = None,
+                    timeout_event=multiprocessing.Event()):
     """
     Converts the layer/s contained in src_ds GDAL dataset  to PMTiles and uploads them to Azure
 
@@ -336,14 +292,16 @@ def dataset2pmtiles(blob_url: str = None,
         fgb_layers = dataset2fgb(fgb_dir=temp_dir,
                                  src_ds=src_ds,
                                  layers=layers,
-                                 blob_url=blob_url)
+                                 blob_url=blob_url,
+                                 timeout_event=timeout_event)
+        logger.info(fgb_layers)
         if fgb_layers:
-            fgb2pmtiles(blob_url=blob_url, fgb_layers=fgb_layers, pmtiles_file_name=pmtiles_file_name)
+            await fgb2pmtiles(blob_url=blob_url, fgb_layers=fgb_layers, pmtiles_file_name=pmtiles_file_name, timeout_event=timeout_event)
 
 
 import asyncio
 async def main():
-    src_file = "/data/kigali/kigali.gpkg"
+    src_file = "/data/kigali/data/kigali.gpkg"
     with Session() as s:
         dst_file = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/kigali/kigali.pmtiles"
 
@@ -370,8 +328,9 @@ async def main():
     logger.info(f'Ingesting all vector layers into one multilayer PMtiles file')
     fname, *ext = file_name.split(os.extsep)
 
-    dataset2pmtiles(blob_url=dst_file, src_ds=vdataset, layers=layer_names,
+    await dataset2pmtiles(blob_url=dst_file, src_ds=vdataset, layers=layer_names,
                     pmtiles_file_name=fname)
 
 if __name__ == "__main__":
+    logger = setup_logger('rapida', level=logging.DEBUG)
     asyncio.run(main())

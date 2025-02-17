@@ -109,11 +109,17 @@ class Session(object):
     def get_account_name(self):
         return self.get_config_value_by_key("account_name")
 
-    def set_container_name(self, container_name: str):
-        self.set_config_value_by_key("container_name", container_name)
+    def set_stac_container_name(self, container_name: str):
+        self.set_config_value_by_key("stac_container_name", container_name)
 
-    def get_container_name(self):
-        return self.get_config_value_by_key("container_name")
+    def get_stac_container_name(self):
+        return self.get_config_value_by_key("stac_container_name")
+
+    def set_publish_container_name(self, container_name: str):
+        self.set_config_value_by_key("publish_container_name", container_name)
+
+    def get_publish_container_name(self):
+        return self.get_config_value_by_key("publish_container_name")
 
     def set_file_share_name(self, file_share_name: str):
         self.set_config_value_by_key("file_share_name", file_share_name)
@@ -129,8 +135,8 @@ class Session(object):
             raise RuntimeError(f"root_data_folder is not set")
         if self.get_account_name() is None:
             raise RuntimeError(f"account_name is not set")
-        if self.get_container_name() is None:
-            raise RuntimeError(f"container_name is not set")
+        if self.get_stac_container_name() is None:
+            raise RuntimeError(f"stac_container_name is not set")
         if self.get_file_share_name() is None:
             raise RuntimeError(f"file_share_name is not set")
 
@@ -262,7 +268,7 @@ class Session(object):
         """
         credential = self.get_credential()
         account_url = self.get_blob_service_account_url(account_name)
-        ct_name = container_name if container_name is not None else self.get_container_name()
+        ct_name = container_name if container_name is not None else self.get_stac_container_name()
         container_client = ContainerClient(
             account_url=account_url,
             credential=credential,

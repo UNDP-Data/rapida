@@ -3,6 +3,9 @@ import os.path
 from cbsurge import util
 from collections import OrderedDict
 import logging
+
+from cbsurge.session import Session
+
 logger = logging.getLogger(__name__)
 '''
 Age groups
@@ -25,7 +28,7 @@ Age groups
 SEXES = 'male', 'female'
 AGE_GROUPS = ('child', {0,1,5,10}), ('active', set(range(15, 65, 5) )), ('elderly', set(range(65, 85, 5)))
 AGGREGATE = 'total'
-UNDP_AZURE_WPOP_PATH = f'az:undpgeohub:stacdata/worldpop/{{year}}/{{country}}'
+UNDP_AZURE_WPOP_PATH = f'az:{{account_name}}:{{stac_container_name}}/worldpop/{{year}}/{{country}}'
 
 
 def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
@@ -37,6 +40,11 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
     :param age_groups:
     :return:
     """
+    with Session() as session:
+        # if root is same with UNDP_AZURE_WPOP_PATH, replace account name and container name from session object
+        if root == UNDP_AZURE_WPOP_PATH:
+            root = root.replace("{account_name}", session.get_account_name()).replace("{stac_container_name}", session.get_stac_container_name())
+
     aggregate_root = os.path.join(root, 'aggregate')
 
     variables = OrderedDict()

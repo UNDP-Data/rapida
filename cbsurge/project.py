@@ -13,6 +13,7 @@ import json
 import sys
 from cbsurge.admin.osm import fetch_admin
 from cbsurge.az.fileshare import list_projects, upload_project, download_project
+from cbsurge.publish import publish_project
 from rich.progress import Progress
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ class Project:
                 config_data = json.load(f)
             self.__dict__.update(config_data)  # ✅ Update instance variables safely
             self.is_valid
+            return config_data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load config file ({self.config_file}): {e}")
 
@@ -159,6 +161,14 @@ class Project:
 
         with open(self.config_file, 'w', encoding="utf-8") as cfgf:
             json.dump(data, cfgf, indent=4)
+
+    def publish(self):
+        config = self.load_config()
+        if config:
+            gpkg_path = f"{self.data_folder}/{config["name"]}.gpkg"
+            if not os.path.exists(gpkg_path):
+                raise RuntimeError(f"Could not find {gpkg_path} in {self.data_folder}. Please do assess command first.")
+            publish_project(src_file_path=gpkg_path)
 
 
 @click.command(no_args_is_help=True)
@@ -239,3 +249,17 @@ def download(name=None, destination_path=None, max_concurrency=None,overwrite=No
         download_project(name=name, dst_folder=destination_path, progress=progress, overwrite=overwrite, max_concurrency=max_concurrency)
         progress.console.print(f'Project "{name}" was downloaded successfully to {os.path.join(destination_path, name)}')
 
+
+@click.command(short_help=f'publish a project data to Azure and GeoHub')
+@click.option('-p', '--project',
+              default=None,
+              type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
+              help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
+def publish(project: str):
+    if project is None:
+        project = os.getcwd()
+    else:
+        os.chdir(project)
+        logger.info(f"Moved to the project folder: {project}")
+    prj = Project(path=project)
+    prj.publish()

@@ -50,10 +50,15 @@ def setup_prompt(session: Session):
     session.set_account_name(account_name)
     click.echo(f"account name: {account_name}")
 
-    container_name = click.prompt('Please enter container name for UNDP Azure. Enter to skip if use default value',
+    publish_container_name = click.prompt('Please enter UNDP Azure container name of publishing project outcome. Enter to skip if use default value',
+                                  type=str, default='rapida')
+    session.set_publish_container_name(publish_container_name)
+    click.echo(f"publish container name: {publish_container_name}")
+
+    stac_container_name = click.prompt('Please enter container name for UNDP Azure STAC. Enter to skip if use default value',
                                   type=str, default='stacdata')
-    session.set_container_name(container_name)
-    click.echo(f"container name: {container_name}")
+    session.set_stac_container_name(stac_container_name)
+    click.echo(f"stac container name: {stac_container_name}")
 
     # azure file share setting
     share_name = click.prompt('Please enter share name for UNDP Azure. Enter to skip if use default value',

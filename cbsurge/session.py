@@ -127,6 +127,12 @@ class Session(object):
     def get_file_share_name(self):
         return self.get_config_value_by_key("file_share_name")
 
+    def set_geohub_endpoint(self, account_name: str):
+        self.set_config_value_by_key("geohub_endpoint", account_name)
+
+    def get_geohub_endpoint(self):
+        return self.get_config_value_by_key("geohub_endpoint")
+
     def save_config(self):
         """
         Save config.json under user directory as ~/.cbsurge/config.json

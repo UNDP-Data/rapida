@@ -12,9 +12,13 @@ import geopandas
 import json
 import sys
 from cbsurge.admin.osm import fetch_admin
+from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.az.fileshare import list_projects, upload_project, download_project
-from cbsurge.publish import publish_project
+from cbsurge.dataset2pmtiles import dataset2pmtiles
+from cbsurge.session import Session
 from rich.progress import Progress
+import asyncio
+
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -113,7 +117,7 @@ class Project:
                 config_data = json.load(f)
             self.__dict__.update(config_data)  # ✅ Update instance variables safely
             self.is_valid
-            return config_data
+            self._cfg_ = config_data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load config file ({self.config_file}): {e}")
 
@@ -162,13 +166,45 @@ class Project:
         with open(self.config_file, 'w', encoding="utf-8") as cfgf:
             json.dump(data, cfgf, indent=4)
 
-    def publish(self):
-        config = self.load_config()
-        if config:
-            gpkg_path = f"{self.data_folder}/{config["name"]}.gpkg"
-            if not os.path.exists(gpkg_path):
-                raise RuntimeError(f"Could not find {gpkg_path} in {self.data_folder}. Please do assess command first.")
-            publish_project(src_file_path=gpkg_path)
+
+    async def publish(self):
+        project_name = self._cfg_["name"]
+
+        gpkg_path = f"{self.data_folder}/{project_name}.gpkg"
+        if not os.path.exists(gpkg_path):
+            raise RuntimeError(f"Could not find {gpkg_path} in {self.data_folder}. Please do assess command first.")
+
+        with Session() as s:
+            blob_url = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/{project_name}/{project_name}.pmtiles"
+
+            uploaded_files = None
+            try:
+                uploaded_files = await dataset2pmtiles(blob_url=blob_url, src_file=gpkg_path, overwrite=True)
+            except Exception as e:
+                logger.error(e)
+
+            if not uploaded_files:
+                logger.error(f"Failed to ingest {gpkg_path}")
+            else:
+                # get PMTiles blob path
+                pmtiles_file = [url for url in uploaded_files if url.endswith(".pmtiles")][0]
+                # generate URL for GeoHub publish page
+                parts = pmtiles_file.split(":", 2)
+                proto, account_name, dst_blob_path = parts
+                container_name, *dst_path_parts = dst_blob_path.split(os.path.sep)
+                blob_account_url = s.get_blob_service_account_url(account_name=account_name)
+                rel_dst_blob_path = os.path.sep.join(dst_path_parts)
+                pmtiles_url = f"{blob_account_url}/{container_name}/{rel_dst_blob_path}"
+
+                geohub_endpoint = s.get_geohub_endpoint()
+                publish_url = f"{geohub_endpoint}/data/edit?url={pmtiles_url}"
+                logger.info(publish_url)
+
+                # save published information to rapida.json
+                self._cfg_["pmtiles_url"] = pmtiles_url
+                self._cfg_["uploaded_files"] = uploaded_files
+                self._cfg_["publish_url"] = publish_url
+                self.save()
 
 
 @click.command(no_args_is_help=True)
@@ -262,4 +298,4 @@ def publish(project: str):
         os.chdir(project)
         logger.info(f"Moved to the project folder: {project}")
     prj = Project(path=project)
-    prj.publish()
+    asyncio.run(prj.publish())

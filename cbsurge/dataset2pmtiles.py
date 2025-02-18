@@ -1,5 +1,4 @@
 import io
-import json
 import logging
 import multiprocessing
 import os
@@ -10,7 +9,7 @@ from traceback import print_exc
 from osgeo import gdal, ogr, osr
 from pmtiles.reader import Reader, MmapSource
 
-from cbsurge.az.blobstorage import upload_blob
+from cbsurge.az.blobstorage import upload_blob, check_blob_exists
 from cbsurge.session import Session
 from cbsurge.util import setup_logger
 
@@ -88,21 +87,17 @@ def dataset2fgb(fgb_dir: str = None,
                 src_ds: typing.Union[gdal.Dataset, ogr.DataSource] = None,
                 layers: typing.List[str] = None,
                 dst_prj_epsg: int = 4326,
-                conn_string: str = None,
-                blob_url: str = None,
                 timeout_event=None):
     """
     Convert one or more layers from src_ds into FlatGeobuf format in a (temporary) directory featuring dst_prj_epsg
-    projection. The layer is possibly reprojected. In case errors are encountered an error blob is uploaded for now
-    #TODO
+    projection. The layer is possibly reprojected.
+
     @param fgb_dir: the abs path to a directory where the FGB files will be created
     @param src_ds: GDAL Dataset  or OGR Datasource instance where the layers will be read from
     @param layers: list of layer name ot be converted
     @param dst_prj_epsg: the  target projection as an EPSG code
-    @param conn_string: the connection string used to connect to the Azure storage account
-    @param blob_url: the url of the blob to be ingested
     @param timeout_event:
-    @return:
+    @return: returns FGB file paths generated in local
     """
     dst_srs = osr.SpatialReference()
     dst_srs.ImportFromEPSG(dst_prj_epsg)
@@ -151,7 +146,7 @@ def dataset2fgb(fgb_dir: str = None,
             converted_layers[lname] = dst_path
             del fgb_ds
             #issue a warning in case the out features are 0 or there is
-            if converted_features == 0 or converted_features!= original_features and conn_string:
+            if converted_features == 0 or converted_features!= original_features:
                 error_message = f'There could be issues with layer "{lname}".\nOriginal number of features/geometries ={original_features} while converted={converted_features}'
                 logger.error(error_message)
 
@@ -165,25 +160,22 @@ def dataset2fgb(fgb_dir: str = None,
                         file=m
                     )  # exc is extracted using system.exc_info
                     error_message = m.getvalue()
-                    dataset_path = blob_url
-                    msg = f'dataset: {dataset_path}\n'
-                    msg += f'layer: {lname}\n'
+                    msg = f'layer: {lname}\n'
                     msg += f'gdal_error_message: {error_message}'
                     logger.error(msg)
 
     return converted_layers
 
 
-async def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str = None,
+def fgb2pmtiles(fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str = None,
                 timeout_event=multiprocessing.Event()):
     """
-    Converts all FlatGeobuf files from fgb_layers dict into PMtile format and uploads the result to Azure
-    blob. Supports cancellation through event arg
+    Converts all FlatGeobuf files from fgb_layers dict into PMtile format. Supports cancellation through event arg
     @param fgb_layers: a dict where the key is the layer name and the value is the abs path to the FlatGeobuf file
     @param pmtiles_file_name: the name of the output PMTiles file. If supplied all layers will be added to this file
     @param timeout_event: arg to signalize to Tippecanoe a timeout/interrupt
     @param conn_string: the connection string used t connect to the Azure storage account
-    @return:
+    @return: a PMTiles file path generated in local
     """
 
     # fgb_dir = None
@@ -231,13 +223,7 @@ async def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, p
 
 
         logger.info(f'Created multilayer PMtiles file {pmtiles_path}')
-        # upload layer_pmtiles_path to azure
-        await upload_blob(src_path=pmtiles_path, dst_path=blob_url)
-
-        # upload fgb files to azure
-        for layer_name, fgb_layer_path in fgb_layers.items():
-            await upload_blob(src_path=fgb_layer_path, dst_path=f"{blob_url}.{layer_name}.fgb")
-
+        return pmtiles_path
 
     except subprocess.TimeoutExpired as te:
         logger.error(f'Conversion of layers {",".join(fgb_layers)} from {fgb_dir} has timed out.')
@@ -248,9 +234,7 @@ async def fgb2pmtiles(blob_url=None, fgb_layers: typing.Dict[str, str] = None, p
                 file=m
             )  # exc is extracted using system.exc_info
             error_message = m.getvalue()
-            dataset_path = blob_url
-            msg = f'dataset: {dataset_path}\n'
-            msg += f'layers: {",".join(fgb_layers)}\n'
+            msg = f'layers: {",".join(fgb_layers)}\n'
             msg += f'gdal_error_message: {error_message}'
             logger.error(msg)
 
@@ -261,50 +245,14 @@ def gdal_callback(complete, message, timeout_event):
         logger.info(f'GDAL received timeout signal')
         return 0
 
-async def dataset2pmtiles(blob_url: str = None,
-                    src_ds: gdal.Dataset = None,
-                    layers: typing.List[str] = None,
-                    pmtiles_file_name: typing.Optional[str] = None,
-                    timeout_event=multiprocessing.Event()):
+
+def validate_src_file(src_file: str):
     """
-    Converts the layer/s contained in src_ds GDAL dataset  to PMTiles and uploads them to Azure
+    Validate a source file and return required info for further processing.
 
-    @param blob_url:
-    @param src_ds: instance of GDAL Dataset
-    @param layers: iter or layer/s name/s
-    @param conn_string: Azure storage account connection string
-    @param pmtiles_file_name: optional, the output PMtiles file name. If supplied all vector layers
-    will ve stored in one multilayer PMTile file
-    @param timeout_event: instance of multiprocessing.Event used to interrupt the processing
-    @return: None
-
-    The conversion is implemented in two stages
-
-    1. every layer is converted into a FlatGeobuf file. A FlaGeobuf file supports only one layer.
-    2. FGB files are converted to PMTiles using tippecanoe
-        a) if pmtiles_file_name arg is supplied a multilayer OMTile file is created
-        b) else each layer is extracted to it;s own OMTiles file
-
-    Last, the PMTile files are uploaded to Azure
-
+    :param src_file: source filename
+    :return: An array of GDAL dataset instance, layers (iter or layer/s name/s) and filename (str).
     """
-    with tempfile.TemporaryDirectory() as temp_dir:
-        fgb_layers = dataset2fgb(fgb_dir=temp_dir,
-                                 src_ds=src_ds,
-                                 layers=layers,
-                                 blob_url=blob_url,
-                                 timeout_event=timeout_event)
-        logger.info(fgb_layers)
-        if fgb_layers:
-            await fgb2pmtiles(blob_url=blob_url, fgb_layers=fgb_layers, pmtiles_file_name=pmtiles_file_name, timeout_event=timeout_event)
-
-
-import asyncio
-async def main():
-    src_file = "/data/kigali/data/kigali.gpkg"
-    with Session() as s:
-        dst_file = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/kigali/kigali.pmtiles"
-
     try:
         vdataset = gdal.OpenEx(src_file, gdal.OF_VECTOR)
     except RuntimeError as ioe:
@@ -328,9 +276,73 @@ async def main():
     logger.info(f'Ingesting all vector layers into one multilayer PMtiles file')
     fname, *ext = file_name.split(os.extsep)
 
-    await dataset2pmtiles(blob_url=dst_file, src_ds=vdataset, layers=layer_names,
-                    pmtiles_file_name=fname)
+    return [vdataset, layer_names, fname]
 
-if __name__ == "__main__":
-    logger = setup_logger('rapida', level=logging.DEBUG)
-    asyncio.run(main())
+async def dataset2pmtiles(blob_url: str,
+                          src_file: str,
+                          overwrite: bool = True,
+                          timeout_event=multiprocessing.Event()):
+    """
+    Converts the layer/s contained in src_ds GDAL dataset  to PMTiles and uploads them to Azure.
+    If supplied all vector layers will ve stored in one multilayer PMTile file
+
+    @param blob_url:
+    @param src_file: a vector source file to be ingested
+    @param overwrite: if True, overwrite existing PMTiles and FlatGeobuf
+    @param timeout_event: instance of multiprocessing.Event used to interrupt the processing
+    @return: an array of uploaded blob URLs if successful, None otherwise.
+
+    The conversion is implemented in two stages
+
+    1. every layer is converted into a FlatGeobuf file. A FlaGeobuf file supports only one layer.
+    2. FGB files are converted to PMTiles using tippecanoe, then all vector layers will ve stored in one multilayer PMTile file
+
+    Last, the PMTile files and Flatgeobuf files are uploaded to Azure
+
+    """
+
+    blob_exists = await check_blob_exists(blob_url)
+    if blob_exists:
+        if not overwrite:
+            logger.error(f"{blob_url} already exists")
+            return
+        else:
+            logger.info(f"{blob_url} already exists. It will be overwritten.")
+
+    vdataset, layers, pmtiles_file_name = validate_src_file(src_file)
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+        fgb_layers = dataset2fgb(fgb_dir=temp_dir,
+                                 src_ds=vdataset,
+                                 layers=layers,
+                                 timeout_event=timeout_event)
+        if fgb_layers:
+            pmtiles_path = fgb2pmtiles(fgb_layers=fgb_layers, pmtiles_file_name=pmtiles_file_name, timeout_event=timeout_event)
+
+            if pmtiles_path:
+                uploaded_blobs = [
+                    blob_url
+                ]
+                # upload layer_pmtiles_path to azure
+                await upload_blob(src_path=pmtiles_path, dst_path=blob_url, overwrite=overwrite)
+                logger.info(f"{pmtiles_path} was uploaded to {blob_url}")
+                # upload fgb files to azure
+                for layer_name, fgb_layer_path in fgb_layers.items():
+                    fgb_blob_url = f"{blob_url}.{layer_name}.fgb"
+                    uploaded_blobs.append(fgb_blob_url)
+                    await upload_blob(src_path=fgb_layer_path, dst_path=fgb_blob_url, overwrite=overwrite)
+                    logger.info(f"{fgb_layer_path} was uploaded to {fgb_blob_url}")
+                return uploaded_blobs
+
+# import asyncio
+# async def main():
+#     src_file = "/data/kigali/data/kigali.gpkg"
+#     with Session() as s:
+#         dst_file = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/kigali/kigali.pmtiles"
+#
+#     files = await dataset2pmtiles(blob_url=dst_file, src_file=src_file, overwrite=True)
+#     logger.info(files)
+#
+# if __name__ == "__main__":
+#     logger = setup_logger('rapida', level=logging.INFO)
+#     asyncio.run(main())

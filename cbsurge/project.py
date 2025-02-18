@@ -216,11 +216,13 @@ class Project:
                 dataset_api = f"{geohub_endpoint}/api/datasets/{dataset_id}"
 
                 # save published information to rapida.json
-                self._cfg_["publish_pmtiles_url"] = pmtiles_url
-                self._cfg_["publish_files"] = uploaded_files
-                self._cfg_["geohub_publish_url"] = publish_url
-                self._cfg_["geohub_dataset_id"] = dataset_id
-                self._cfg_["geohub_dataset_api"] = dataset_api
+                self._cfg_["publish_info"] = {
+                    "publish_pmtiles_url": pmtiles_url,
+                    "publish_files": uploaded_files,
+                    "geohub_publish_url": publish_url,
+                    "geohub_dataset_id": dataset_id,
+                    "geohub_dataset_api": dataset_api,
+                }
                 self.save()
                 click.echo(f"Publishing information was stored at {self.config_file}")
                 click.echo(f"Open the following URL to register metadata on GeoHub: {publish_url}")
@@ -342,6 +344,6 @@ def publish(project: str, yes: bool):
         project = os.getcwd()
     else:
         os.chdir(project)
-        logger.info(f"Moved to the project folder: {project}")
+        logger.info(f"Publish command is executed at the project folder: {project}")
     prj = Project(path=project)
     prj.publish(yes=yes)

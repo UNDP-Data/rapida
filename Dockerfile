@@ -1,3 +1,15 @@
+# Build felt/tippecanoe
+# Dockerfile from https://github.com/felt/tippecanoe/blob/main/Dockerfile
+FROM ubuntu:22.04 AS tippecanoe-builder
+
+RUN apt-get update \
+  && apt-get -y install build-essential libsqlite3-dev zlib1g-dev git
+
+RUN git clone https://github.com/felt/tippecanoe
+WORKDIR tippecanoe
+RUN make
+
+
 # Use the GDAL image as the base
 FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 
@@ -32,6 +44,10 @@ ENV PIPENV_VENV_IN_PROJECT=1
 RUN pipenv install --python 3 && \
     pipenv run pip install .[dev,jupyter]
 ENV VIRTUAL_ENV=/app/.venv
+
+# copy tippecanoe to production docker image
+COPY --from=tippecanoe-builder /tippecanoe/tippecanoe* /usr/local/bin/
+COPY --from=tippecanoe-builder /tippecanoe/tile-join /usr/local/bin/
 
 # copy rest of files to the image.
 COPY . .

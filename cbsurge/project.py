@@ -18,6 +18,8 @@ from cbsurge.dataset2pmtiles import dataset2pmtiles
 from cbsurge.session import Session
 from rich.progress import Progress
 import asyncio
+import webbrowser
+import hashlib
 
 
 logger = logging.getLogger(__name__)
@@ -167,7 +169,12 @@ class Project:
             json.dump(data, cfgf, indent=4)
 
 
-    async def publish(self):
+    def publish(self, yes=False):
+        """
+        Publish project outcome to Azure blob storage and make data registration URL of GeoHub.
+
+        :param yes: optional. If True, it will automatically answer yes to prompts. Default is False.
+        """
         project_name = self._cfg_["name"]
 
         gpkg_path = f"{self.data_folder}/{project_name}.gpkg"
@@ -177,9 +184,15 @@ class Project:
         with Session() as s:
             blob_url = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/{project_name}/{project_name}.pmtiles"
 
+            publish_blob_exists = asyncio.run(check_blob_exists(blob_url))
+            if publish_blob_exists:
+                if not yes and not click.confirm(f"Project data was already published at {blob_url}. Do you want to overwrite it? Type yes to proceed, No/Enter to exit. ", default=False):
+                    click.echo("Canceled to publish")
+                    return
+
             uploaded_files = None
             try:
-                uploaded_files = await dataset2pmtiles(blob_url=blob_url, src_file=gpkg_path, overwrite=True)
+                uploaded_files = asyncio.run(dataset2pmtiles(blob_url=blob_url, src_file=gpkg_path, overwrite=True))
             except Exception as e:
                 logger.error(e)
 
@@ -187,7 +200,7 @@ class Project:
                 logger.error(f"Failed to ingest {gpkg_path}")
             else:
                 # get PMTiles blob path
-                pmtiles_file = [url for url in uploaded_files if url.endswith(".pmtiles")][0]
+                pmtiles_file = next((url for url in uploaded_files if url.endswith(".pmtiles")), None)
                 # generate URL for GeoHub publish page
                 parts = pmtiles_file.split(":", 2)
                 proto, account_name, dst_blob_path = parts
@@ -198,13 +211,30 @@ class Project:
 
                 geohub_endpoint = s.get_geohub_endpoint()
                 publish_url = f"{geohub_endpoint}/data/edit?url={pmtiles_url}"
-                logger.info(publish_url)
+
+                dataset_id = hashlib.md5(pmtiles_url.encode()).hexdigest()
+                dataset_api = f"{geohub_endpoint}/api/datasets/{dataset_id}"
 
                 # save published information to rapida.json
-                self._cfg_["pmtiles_url"] = pmtiles_url
-                self._cfg_["uploaded_files"] = uploaded_files
-                self._cfg_["publish_url"] = publish_url
+                self._cfg_["publish_pmtiles_url"] = pmtiles_url
+                self._cfg_["publish_files"] = uploaded_files
+                self._cfg_["geohub_publish_url"] = publish_url
+                self._cfg_["geohub_dataset_id"] = dataset_id
+                self._cfg_["geohub_dataset_api"] = dataset_api
                 self.save()
+                click.echo(f"Publishing information was stored at {self.config_file}")
+                click.echo(f"Open the following URL to register metadata on GeoHub: {publish_url}")
+
+                # if yes, don't open browser.
+                if not yes:
+                    browser = None
+                    try:
+                        browser = webbrowser.get()
+                    except:
+                        click.echo("No browser runnable in this environment. Please copy URL and open the browser manually.")
+                    if browser:
+                        # if there is a runnable browser, launch a browser to open URL.
+                        webbrowser.open(publish_url)
 
 
 @click.command(no_args_is_help=True)
@@ -291,11 +321,27 @@ def download(name=None, destination_path=None, max_concurrency=None,overwrite=No
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
               help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
-def publish(project: str):
+@click.option('-y', '--yes',
+              is_flag=True,
+              default=False,
+              help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
+def publish(project: str, yes: bool):
+    """
+    Publish project data to Azure and open GeoHub registration page URL.
+
+    Usage:
+        If you are already in a project folder, run the below command:
+        rapida publish
+
+        If you are not in a project folder, run the below command:
+        rapida publish --project=<project folder path>
+
+        If you answer all prompts to yes, use '--yes' option of the command.
+    """
     if project is None:
         project = os.getcwd()
     else:
         os.chdir(project)
         logger.info(f"Moved to the project folder: {project}")
     prj = Project(path=project)
-    asyncio.run(prj.publish())
+    prj.publish(yes=yes)

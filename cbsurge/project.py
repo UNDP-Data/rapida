@@ -21,6 +21,7 @@ import asyncio
 import webbrowser
 import hashlib
 
+from cbsurge.util import setup_logger
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -327,11 +328,17 @@ def download(name=None, destination_path=None, max_concurrency=None,overwrite=No
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
-def publish(project: str, yes: bool):
+@click.option('--debug',
+              is_flag=True,
+              default=False,
+              help="Set log level to debug"
+              )
+def publish(project: str, yes: bool = False, debug: bool =False):
     """
     Publish project data to Azure and open GeoHub registration page URL.
 
     Usage:
+
         If you are already in a project folder, run the below command:
         rapida publish
 
@@ -340,6 +347,8 @@ def publish(project: str, yes: bool):
 
         If you answer all prompts to yes, use '--yes' option of the command.
     """
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
     if project is None:
         project = os.getcwd()
     else:

@@ -178,7 +178,7 @@ class Project:
         """
         project_name = self._cfg_["name"]
 
-        gpkg_path = f"{self.data_folder}/{project_name}.gpkg"
+        gpkg_path = self.geopackage_file_path
         if not os.path.exists(gpkg_path):
             raise RuntimeError(f"Could not find {gpkg_path} in {self.data_folder}. Please do assess command first.")
 

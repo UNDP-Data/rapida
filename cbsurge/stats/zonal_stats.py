@@ -1,8 +1,8 @@
 import logging
 import os
 from exactextract import exact_extract
-from cbsurge.stats.GDALRasterSource import GDALRasterSource
-from cbsurge.stats.OGRDataSource import OGRDataSource
+from cbsurge.stats.gdal_raster_source import GDALRasterSource
+from cbsurge.stats.ogr_data_source import OGRDataSource
 import geopandas
 
 logger = logging.getLogger(__name__)

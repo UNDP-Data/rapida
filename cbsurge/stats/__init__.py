@@ -1,6 +1,6 @@
 import logging
 import click
-from cbsurge.stats.ZonalStats import ZonalStats
+from cbsurge.stats.zonal_stats import ZonalStats
 
 
 @click.group()

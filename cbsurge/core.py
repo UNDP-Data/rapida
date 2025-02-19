@@ -6,6 +6,7 @@ import time
 from collections import deque
 
 import shapely
+from pyogrio import read_info
 from rich.progress import Progress
 from sympy.parsing.sympy_parser import parse_expr
 import random
@@ -160,21 +161,27 @@ class Variable(BaseModel):
         assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
 
 
-    def download_vector_geo(self, dataset_url, admin_path=None, country_col_name=None, admin_col_name=None, out_path=None,
+    @staticmethod # NOTE: I made this currently a static method because it does not use any instance variables as of now
+    def download_vector_geo(dataset_url, admin_path=None, country_col_name='iso3', admin_col_name="undp_admin_level", out_path=None,
                                 batch_size=5000, NWORKERS=4):
         """
         Download a geospatial vector file with admin units as mask
 
         :param dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
         :param admin_path: str, absolute path to a geospatial vector dataset representing administrative unit names
-        :param out_path: str, abs path to buildings dataset
+        :param out_path: str, abs path to vector dataset to download
         :param country_col_name: str, name of the column from admin attr table that contains iso3 country code
         :param admin_col_name: str, name of the column from the admin attr table that contains amin unit name
-        :param batch_size: int, defaults to 5000, the number of buildings to download in one batch
+        :param batch_size: int, defaults to 5000, the number of features to download in one batch
         :param NWORKERS, int, defaults to 4. The number of threads to use for parallel download.
         """
         assert os.path.exists(admin_path), f'Admin path {admin_path} does not exist'
         assert dataset_url, 'Dataset URL is required'
+        dataset_info = read_info(dataset_url)
+        assert dataset_info, f'Could not read info from {dataset_url}. Please check the URL or the dataset format'
+
+
+        layer_name = dataset_info['layer_name']
 
         ndownloaded = 0
         failed = []
@@ -220,8 +227,7 @@ class Variable(BaseModel):
                                                 src_epsg = int(meta['crs'].split(':')[-1])
                                                 src_srs = osr.SpatialReference()
                                                 src_srs.ImportFromEPSG(src_epsg)
-                                                dst_lyr = dst_ds.CreateLayer('grid', geom_type=ogr.wkbMultiLineString,
-                                                                             srs=src_srs)
+                                                dst_lyr = dst_ds.CreateLayer(layer_name, srs=src_srs)
                                                 for name in batch.schema.names:
                                                     if 'wkb' in name or 'geometry' in name: continue
                                                     field = batch.schema.field(name)
@@ -259,7 +265,7 @@ class Variable(BaseModel):
                                     failed.append(f'Downloading {au_name} failed: {e.__class__.__name__}("{e}")')
                                     ndownloaded += 1
                                     progress.update(total_task,
-                                                    description=f'[red]Downloaded electricity grid from {ndownloaded} out of {njobs} admin units',
+                                                    description=f'[red]Downloaded geospatial data from {ndownloaded} out of {njobs} admin units',
                                                     advance=1)
                                 except KeyboardInterrupt:
                                     logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')

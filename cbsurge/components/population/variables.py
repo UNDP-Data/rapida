@@ -5,6 +5,7 @@ from collections import OrderedDict
 import logging
 
 from cbsurge.session import Session
+from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
 '''
@@ -92,7 +93,7 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
 
 
 if __name__ == '__main__':
-    logger = util.setup_logger(name='rapida', level=logging.INFO)
+    logger = setup_logger(name='rapida', level=logging.INFO)
 
     variables = generate_variables()
     print(json.dumps(variables, indent=2))

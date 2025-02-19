@@ -22,7 +22,7 @@ from sympy.parsing.sympy_parser import parse_expr
 from cbsurge.az import blobstorage
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
-from cbsurge.util import downloader
+from cbsurge.util.downloader import downloader
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()

@@ -20,7 +20,7 @@ import asyncio
 import webbrowser
 import hashlib
 from cbsurge.util.dataset2pmtiles import dataset2pmtiles
-from cbsurge.util import setup_logger
+from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()

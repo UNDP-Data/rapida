@@ -66,6 +66,11 @@ def setup_prompt(session: Session):
     session.set_file_share_name(share_name)
     click.echo(f"file share name: {share_name}")
 
+    # geohub endpoint setting
+    geohub_endpoint = click.prompt('Please enter URL of GeoHub endpoint. Enter to skip if use default value',
+                              type=str, default='https://geohub.data.undp.org')
+    session.set_geohub_endpoint(geohub_endpoint)
+    click.echo(f"GeoHub endpoint: {geohub_endpoint}")
 
     session.save_config()
     vars_dict = {

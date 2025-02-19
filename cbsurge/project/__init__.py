@@ -41,51 +41,36 @@ def create(name=None, polygons=None, mask=None, comment=None):
     logger.info(f'Project "{project.name}" was created successfully.')
 
 
-
-
 @click.command(short_help=f'List rapida projects/folders located in default Azure file share')
 def list():
     for project_name in list_projects():
         click.echo(project_name)
 
 
-
-
 @click.command()
-
 @click.argument('project_folder', nargs=1 )
 @click.option('--max_concurrency', default=4, show_default=True, type=int,
               help=f'The number of threads to use when uploading a file')
 @click.option('--overwrite','-o',is_flag=True,default=False, help="Whether to overwrite the project in case it already exists."
 )
-
-
 def upload(project_folder=None,max_concurrency=None,overwrite=None):
 
     project_folder = os.path.abspath(project_folder)
     assert os.path.exists(project_folder), f'{project_folder} does not exist'
-
 
     with Progress() as progress:
         progress.console.print(f'Going to upload {project_folder} to Azure')
         upload_project(project_folder=project_folder, progress=progress, overwrite=overwrite, max_concurrency=max_concurrency)
         progress.console.print(f'Rapida project "{project_folder}" was uploaded successfully to Azure')
 
-@click.command()
 
+@click.command()
 @click.argument('name', nargs=1 )
 @click.argument('destination_path', type=click.Path())
-
 @click.option('--max_concurrency', default=4, show_default=True, type=int,
               help=f'The number of threads to use when downloading a file')
-@click.option('--overwrite','-o',is_flag=True,default=False, help="Whether to overwrite the project in case it already exists locally."
-)
-
+@click.option('--overwrite','-o',is_flag=True,default=False, help="Whether to overwrite the project in case it already exists locally.")
 def download(name=None, destination_path=None, max_concurrency=None,overwrite=None ):
-
-
-
-
     with Progress() as progress:
         progress.console.print(f'Going to download rapida project "{name}" from Azure')
         download_project(name=name, dst_folder=destination_path, progress=progress, overwrite=overwrite, max_concurrency=max_concurrency)

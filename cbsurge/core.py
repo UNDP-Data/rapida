@@ -161,7 +161,7 @@ class Variable(BaseModel):
         assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
 
 
-    def download_vector_geo(self, dataset_url, admin_path=None, country_col_name='iso3', admin_col_name="undp_admin_level", out_path=None,
+    def download_geodata_by_admin(self, dataset_url, admin_path=None, country_col_name='iso3', admin_col_name="undp_admin_level", out_path=None,
                                 batch_size=5000, NWORKERS=4):
         """
         Download a geospatial vector file with admin units as mask

@@ -12,7 +12,7 @@ import h3.api.basic_int as h3
 import shapely
 from cbsurge.admin.util import is_int
 from tqdm import tqdm
-from cbsurge.util import http_get_json
+from cbsurge.util.http_get_json import http_get_json
 
 logger = logging.getLogger(__name__)
 

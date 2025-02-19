@@ -21,6 +21,10 @@ import pyarrow as pa
 
 from multiprocessing import Manager
 from cbsurge import util
+from cbsurge.util.chunker import chunker
+from cbsurge.util.generator_length import generator_length
+from cbsurge.util.validate import validate
+from cbsurge.util.validate_path import validate_path
 
 ogr.UseExceptions()
 osr.UseExceptions()
@@ -38,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 def validate_source():
     try:
-        util.validate(url=GMOSM_BUILDINGS, timeout=3)
+        validate(url=GMOSM_BUILDINGS, timeout=3)
         return  True
     except Exception as e:
         msg  = f'Failed to validate buildings source {GMOSM_BUILDINGS}. Error is {e}'
@@ -46,13 +50,13 @@ def validate_source():
         raise
 
 
-def chunker(iterable, size):
-    it = iter(iterable)
-    while True:
-        chunk = tuple(itertools.islice(it, size))
-        if not chunk:
-            break
-        yield chunk
+# def chunker(iterable, size):
+#     it = iter(iterable)
+#     while True:
+#         chunk = tuple(itertools.islice(it, size))
+#         if not chunk:
+#             break
+#         yield chunk
 
 #@atimeit
 async def get_admin_level_bbox(iso3, admin_level=2):
@@ -330,7 +334,7 @@ async def download(bbox=None, zoom_level=None, x=None, y=None, out_path=None, ur
     :return:
     """
 
-    util.validate_path(src_path=out_path)
+    validate_path(src_path=out_path)
 
     bb = m.BoundingBox(*bbox)
     bbox_polygon = box(*bbox)
@@ -350,7 +354,7 @@ async def download(bbox=None, zoom_level=None, x=None, y=None, out_path=None, ur
 
         all_tiles = WEB_MERCATOR_TMS.tiles(west=bb.left,south=bb.bottom, east=bb.right, north=bb.top,
                                    zooms=[zoom_level],)
-        ntiles, all_tiles = util.generator_length(all_tiles)
+        ntiles, all_tiles = generator_length(all_tiles)
 
 
         with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:

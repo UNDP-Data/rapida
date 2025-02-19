@@ -1,95 +1,31 @@
-import concurrent
-import os.path
 import asyncio
+import concurrent
+import logging
+import os.path
+import random
+import re
 import threading
 import time
+from abc import abstractmethod
 from collections import deque
+from typing import List
+from typing import Optional, Union
 
 import shapely
+from osgeo import gdal, ogr, osr
+from pyarrow import compute as pc
+from pydantic import BaseModel, FilePath
 from pyogrio import read_info
 from rich.progress import Progress
 from sympy.parsing.sympy_parser import parse_expr
-import random
-from pydantic import BaseModel, FilePath
-from typing import Optional, List, Union
-from pyarrow import compute as pc
-import re
-from typing import List, Dict
-from abc import abstractmethod
 
+from cbsurge.az import blobstorage
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
-from cbsurge.session import Session
-from osgeo import gdal, ogr, osr
-import logging
-from cbsurge.az import blobstorage
-import importlib
-from pkgutil import walk_packages
-
-from cbsurge.util import downloader
+from cbsurge.util.downloader import downloader
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-def dump_variables(root_package_name = 'cbsurge', variables_module='variables', function_name='generate_variables'):
-    """
-    Iterate over all modules in path  that start with root_package_name, end with variables_module and are
-    not packages. Consequently import the function_name function and run it.
-
-    :param root_package_name: str, cbsurge
-    :param variables_module: str, variables
-    :param function_name: 'generate_variables'
-    :return: dict['variables'] = {'component': component_vars}
-    """
-    vars_dict = {}
-    vars_dict[variables_module] = {}
-    # dir_path should be a parent folder of cbsurge package
-    dir_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    for p in walk_packages(path=[dir_path]):
-        if p.name.startswith(root_package_name) and p.name.endswith(variables_module) and not p.ispkg:
-            m = importlib.import_module(name=p.name)
-            if hasattr(m, function_name):
-                var_dict = getattr(m, 'generate_variables')()
-                component_name = p.name.split('.')[-2]
-
-                vars_dict[variables_module][component_name] = var_dict
-    return vars_dict
-
-
-class Component:
-    """
-    A base class for a component.
-    Each component class should have the following methods to be implemented:
-
-    - download: Download files for a component
-    - assess: A command to do all processing for a component including downloading component data, merging and making stats for a given admin data.
-    """
-
-    def __init__(self, **kwargs):
-        self.component_name = self.__class__.__name__.lower().split('component')[0]
-        super().__init__(**kwargs)
-
-    @property
-    def variables(self) -> List[str]:
-        with Session() as ses:
-            return ses.get_variables(component=self.component_name)
-
-
-
-    @abstractmethod
-    def download(self, variables: List[str] = None, **kwargs) -> List[str]:
-        """
-        Iterate over variables and download one by one
-        :param variables:
-        :param kwargs:
-        :return:
-        """
-        pass
-
-    @abstractmethod
-    def __call__(self, **kwargs):
-
-        pass
-
 
 class Variable(BaseModel):
     name: str
@@ -334,33 +270,3 @@ class Variable(BaseModel):
         else:
             return template
 
-
-
-#
-# if __name__ == '__main__':
-#     logger = util.setup_logger(name='rapida', level=logging.INFO)
-#     admin_layer = '/data/adhoc/MDA/adm/adm3transn.fgb'
-#     from rich.progress import Progress
-#
-#
-#     with Session() as ses:
-#
-#             popvars = ses.config['variables']['population']
-#             fk = list(popvars.keys())[0]
-#             fv = popvars[fk]
-#             d = popvars
-#
-#
-#
-#             with Progress(disable=False) as progress:
-#
-#                 for var_name, var_data in d.items():
-#                     progress.update(task_id=assess_task, advance=1, description=f'Processing {var_name}')
-#                     v = Variable(name=var_name, component='population', **var_data)
-#                     r = v(year=2020, country='MDA', force_compute=False, admin=admin_layer, progress=progress)
-#
-#
-#
-#                 #progress.remove_task(assess_task)
-#
-#

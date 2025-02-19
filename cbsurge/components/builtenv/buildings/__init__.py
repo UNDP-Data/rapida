@@ -1,7 +1,7 @@
 import click
 from cbsurge.components.builtenv.buildings.fgb import download_bbox, download_admin
 from cbsurge.components.builtenv.buildings.pmt import download as download_pmt, GMOSM_BUILDINGS
-from cbsurge.util import BboxParamType
+from cbsurge.util.bbox_param_type import BboxParamType
 import asyncio
 
 @click.group()

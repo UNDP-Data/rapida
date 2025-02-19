@@ -4,6 +4,7 @@ from azure.storage.fileshare import ShareClient
 import logging
 from cbsurge import util
 from cbsurge.session import Session
+from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ def download_project(name:str=None, dst_folder=None, progress=None, overwrite=Fa
        for _ in range(len(tasks)):
             progress.remove_task(tasks.pop())
 if __name__ == '__main__':
-    logger = util.setup_logger(name='rapida')
+    logger = setup_logger(name='rapida')
 
     from rich.progress import Progress
     src_folder = '/home/work/py/geo-cb-surge/ap'

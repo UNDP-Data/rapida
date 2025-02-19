@@ -1,7 +1,7 @@
 import json
 import httpx
 import h3.api.basic_int as h3
-from cbsurge.util import http_post_json
+from cbsurge.util.http_post_json import http_post_json
 from osm2geojson import json2geojson
 import shapely
 from shapely.geometry import shape, box

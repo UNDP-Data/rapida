@@ -10,8 +10,7 @@ from osgeo import gdal, ogr, osr
 from pmtiles.reader import Reader, MmapSource
 
 from cbsurge.az.blobstorage import upload_blob, check_blob_exists
-from cbsurge.session import Session
-from cbsurge.util import setup_logger
+
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()

@@ -7,7 +7,7 @@ from exactextract import exact_extract
 from typing import Iterable
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
-from cbsurge.util import proj_are_equal
+from cbsurge.util.proj_are_equal import proj_are_equal
 from osgeo_utils.gdal_calc import Calc
 
 logger = logging.getLogger(__name__)

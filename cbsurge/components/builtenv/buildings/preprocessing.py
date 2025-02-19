@@ -1,26 +1,24 @@
+import concurrent
 import logging
-import multiprocessing
 import random
-from multiprocessing import sharedctypes
 import threading
+from collections import deque
+
 import numpy as np
 import pyarrow as pa
-import pyproj
-import shapely
-from osgeo import gdal, ogr, osr
-
-
-from cbsurge import util
-from collections import deque
-from rich.progress import Progress
-import concurrent
-from pyogrio import read_info, read_arrow, read_dataframe
-from rasterio import warp
 # from pyogrio.raw import open_arrow, read_arrow
 import rasterio
+from osgeo import gdal, ogr, osr
+from pyogrio import read_dataframe
 from rasterio.windows import Window
-from pyarrow import compute as pc
+from rich.progress import Progress
+
+from cbsurge import util
 from cbsurge.constants import ARROWTYPE2OGRTYPE
+from cbsurge.util.gen_blocks import gen_blocks
+from cbsurge.util.generator_length import generator_length
+from cbsurge.util.setup_logger import setup_logger
+
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -197,8 +195,8 @@ def filter_buildings(buildings_path=None, mask_path=None, mask_pixel_value=None,
             # height = mds.RasterYSize
             block_xsize = width // horizontal_chunks
             block_ysize = height // vertical_chunks
-            blocks = util.gen_blocks(blockxsize=block_xsize, blockysize=block_ysize, width=width, height=height)
-            nblocks, blocks = util.generator_length(blocks)
+            blocks = gen_blocks(blockxsize=block_xsize, blockysize=block_ysize, width=width, height=height)
+            nblocks, blocks = generator_length(blocks)
             stop_event = threading.Event()
             jobs = deque()
             results = deque()
@@ -286,7 +284,7 @@ def filter_buildings(buildings_path=None, mask_path=None, mask_pixel_value=None,
 if __name__ == '__main__':
     import time
 
-    logger = util.setup_logger(name='rapida', level=logging.INFO, make_root=True)
+    logger = setup_logger(name='rapida', level=logging.INFO, make_root=True)
 
 
     src_path = '/data/surge/buildings_eqar.fgb'

@@ -12,8 +12,15 @@ import geopandas
 import json
 import sys
 from cbsurge.admin.osm import fetch_admin
+from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.az.fileshare import list_projects, upload_project, download_project
+from cbsurge.session import Session
 from rich.progress import Progress
+import asyncio
+import webbrowser
+import hashlib
+from cbsurge.util.dataset2pmtiles import dataset2pmtiles
+from cbsurge.util import setup_logger
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -112,6 +119,7 @@ class Project:
                 config_data = json.load(f)
             self.__dict__.update(config_data)  # ✅ Update instance variables safely
             self.is_valid
+            self._cfg_ = config_data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load config file ({self.config_file}): {e}")
 
@@ -159,6 +167,76 @@ class Project:
 
         with open(self.config_file, 'w', encoding="utf-8") as cfgf:
             json.dump(data, cfgf, indent=4)
+
+
+    def publish(self, yes=False):
+        """
+        Publish project outcome to Azure blob storage and make data registration URL of GeoHub.
+
+        :param yes: optional. If True, it will automatically answer yes to prompts. Default is False.
+        """
+        project_name = self._cfg_["name"]
+
+        gpkg_path = self.geopackage_file_path
+        if not os.path.exists(gpkg_path):
+            raise RuntimeError(f"Could not find {gpkg_path} in {self.data_folder}. Please do assess command first.")
+
+        with Session() as s:
+            blob_url = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/{project_name}/{project_name}.pmtiles"
+
+            publish_blob_exists = asyncio.run(check_blob_exists(blob_url))
+            if publish_blob_exists:
+                if not yes and not click.confirm(f"Project data was already published at {blob_url}. Do you want to overwrite it? Type yes to proceed, No/Enter to exit. ", default=False):
+                    click.echo("Canceled to publish")
+                    return
+
+            uploaded_files = None
+            try:
+                uploaded_files = asyncio.run(dataset2pmtiles(blob_url=blob_url, src_file=gpkg_path, overwrite=True))
+            except Exception as e:
+                logger.error(e)
+
+            if not uploaded_files:
+                logger.error(f"Failed to ingest {gpkg_path}")
+            else:
+                # get PMTiles blob path
+                pmtiles_file = next((url for url in uploaded_files if url.endswith(".pmtiles")), None)
+                # generate URL for GeoHub publish page
+                parts = pmtiles_file.split(":", 2)
+                proto, account_name, dst_blob_path = parts
+                container_name, *dst_path_parts = dst_blob_path.split(os.path.sep)
+                blob_account_url = s.get_blob_service_account_url(account_name=account_name)
+                rel_dst_blob_path = os.path.sep.join(dst_path_parts)
+                pmtiles_url = f"{blob_account_url}/{container_name}/{rel_dst_blob_path}"
+
+                geohub_endpoint = s.get_geohub_endpoint()
+                publish_url = f"{geohub_endpoint}/data/edit?url={pmtiles_url}"
+
+                dataset_id = hashlib.md5(pmtiles_url.encode()).hexdigest()
+                dataset_api = f"{geohub_endpoint}/api/datasets/{dataset_id}"
+
+                # save published information to rapida.json
+                self._cfg_["publish_info"] = {
+                    "publish_pmtiles_url": pmtiles_url,
+                    "publish_files": uploaded_files,
+                    "geohub_publish_url": publish_url,
+                    "geohub_dataset_id": dataset_id,
+                    "geohub_dataset_api": dataset_api,
+                }
+                self.save()
+                click.echo(f"Publishing information was stored at {self.config_file}")
+                click.echo(f"Open the following URL to register metadata on GeoHub: {publish_url}")
+
+                # if yes, don't open browser.
+                if not yes:
+                    browser = None
+                    try:
+                        browser = webbrowser.get()
+                    except:
+                        click.echo("No browser runnable in this environment. Please copy URL and open the browser manually.")
+                    if browser:
+                        # if there is a runnable browser, launch a browser to open URL.
+                        webbrowser.open(publish_url)
 
 
 @click.command(no_args_is_help=True)
@@ -239,3 +317,41 @@ def download(name=None, destination_path=None, max_concurrency=None,overwrite=No
         download_project(name=name, dst_folder=destination_path, progress=progress, overwrite=overwrite, max_concurrency=max_concurrency)
         progress.console.print(f'Project "{name}" was downloaded successfully to {os.path.join(destination_path, name)}')
 
+
+@click.command(short_help=f'publish a project data to Azure and GeoHub')
+@click.option('-p', '--project',
+              default=None,
+              type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
+              help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
+@click.option('-y', '--yes',
+              is_flag=True,
+              default=False,
+              help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
+@click.option('--debug',
+              is_flag=True,
+              default=False,
+              help="Set log level to debug"
+              )
+def publish(project: str, yes: bool = False, debug: bool =False):
+    """
+    Publish project data to Azure and open GeoHub registration page URL.
+
+    Usage:
+
+        If you are already in a project folder, run the below command:
+        rapida publish
+
+        If you are not in a project folder, run the below command:
+        rapida publish --project=<project folder path>
+
+        If you answer all prompts to yes, use '--yes' option of the command.
+    """
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+    if project is None:
+        project = os.getcwd()
+    else:
+        os.chdir(project)
+        logger.info(f"Publish command is executed at the project folder: {project}")
+    prj = Project(path=project)
+    prj.publish(yes=yes)

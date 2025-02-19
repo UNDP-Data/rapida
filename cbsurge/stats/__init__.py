@@ -3,9 +3,8 @@ import click
 from cbsurge.stats.zonal_stats import ZonalStats
 
 
-@click.group()
+@click.group(short_help=f'compute zonal statistics using exactextract')
 def stats():
-    """Run zonal stats"""
     pass
 @stats.command(no_args_is_help=True)
 @click.argument('input_file', type=click.Path())

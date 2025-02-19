@@ -83,14 +83,14 @@ def setup_prompt(session: Session):
     click.echo('Setting up was successfully done!')
 
 
-@click.command()
+@click.command(short_help='initialize RAPIDA tool')
 @click.option('--debug',
               is_flag=True,
               default=False,
               help="Set log level to debug"
               )
 def init(debug=False):
-    """ Initialize rapida tool"""
+
 
     click.echo("Welcome to rapida CLI tool!")
     with Session() as session:

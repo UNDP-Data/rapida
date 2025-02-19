@@ -86,7 +86,7 @@ def convert_params_to_click_options(params: dict, func):
 
     return func
 
-@click.command(short_help='TAGA')
+@click.command(short_help='assess the effect of natural or social hazards')
 
 @click.option(
     '--components', '-c', required=False, multiple=True,

@@ -13,7 +13,7 @@ from cbsurge.project.project import Project
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
-@click.command(no_args_is_help=True)
+@click.command(no_args_is_help=True, short_help='create a RAPIDA project in a new folder')
 @click.option('-n', '--name', required=True, type=str,
               help='Name representing a new folder in the current directory' )
 @click.option('-p', '--polygons', required=True, type=str,
@@ -24,10 +24,7 @@ gdal.UseExceptions()
               help='Any comment you might want to add into the project config' )
 
 def create(name=None, polygons=None, mask=None, comment=None):
-    """
-    Create a Rapida project in a new folder
 
-    """
     logger = logging.getLogger('rapida')
     abs_folder = os.path.abspath(name)
     if os.path.exists(abs_folder):
@@ -41,7 +38,7 @@ def create(name=None, polygons=None, mask=None, comment=None):
     logger.info(f'Project "{project.name}" was created successfully.')
 
 
-@click.command(short_help=f'List rapida projects/folders located in default Azure file share')
+@click.command(short_help=f'list RAPIDA projects/folders located in default Azure file share')
 def list():
     const = '-'*15
     tabs = '\t'*1
@@ -52,7 +49,7 @@ def list():
 
 
 
-@click.command(short_help=f'Upload a project to Azure file share')
+@click.command(short_help=f'upload a RAPIDA project to Azure file share')
 
 @click.argument('project_folder', nargs=1,
                 type=click.Path(exists=True, dir_okay=True, readable=True, resolve_path=True) )
@@ -73,7 +70,7 @@ def upload(project_folder=None,max_concurrency=None,overwrite=None):
         upload_project(project_folder=project_folder, progress=progress, overwrite=overwrite, max_concurrency=max_concurrency)
         progress.console.print(f'Rapida project "{project_folder}" was uploaded successfully to Azure')
 
-@click.command(short_help=f'Download a project from Azure file share')
+@click.command(short_help=f'download a RAPIDA project from Azure file share')
 
 @click.argument('name', nargs=1 )
 @click.argument('destination_path', type=click.Path(exists=True, dir_okay=True, readable=True, resolve_path=True))
@@ -99,7 +96,7 @@ def download(name=None, destination_path=None, max_concurrency=None,overwrite=No
 
 
 
-@click.command(short_help=f'publish a project data to Azure and GeoHub')
+@click.command(short_help=f'publish RAPIDA project results to Azure and GeoHub')
 @click.option('-p', '--project',
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),

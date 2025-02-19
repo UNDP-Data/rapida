@@ -23,6 +23,9 @@ from rich.progress import Progress, TaskProgressColumn,BarColumn, TimeRemainingC
 import httpx
 from osm2geojson import json2geojson
 
+from cbsurge.util.generator_length import generator_length
+from cbsurge.util.http_post_json import http_post_json
+
 ogr.UseExceptions()
 gdal.UseExceptions()
 geod = Geod(ellps='WGS84')
@@ -109,7 +112,7 @@ def country_info(bbox=None, overpass_url=OVERPASS_API_URL):
 
     try:
 
-            data = util.http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
+            data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
             countries = dict()
             geojson = json2geojson(data=data)
 
@@ -249,7 +252,7 @@ def download_bbox(bbox=None, out_path=None, batch_size=5000, NWORKERS=4):
                                                 zooms=[sel_zom_level]
                                                )
 
-            ntiles, all_tiles = util.generator_length(all_tiles)
+            ntiles, all_tiles = generator_length(all_tiles)
             stop = threading.Event()
             jobs = deque()
             results = deque()
@@ -470,7 +473,8 @@ def download_admin(admin_path=None, out_path=None, country_col_name=None, admin_
 
 
 if __name__ == '__main__':
-    logger = util.setup_logger(name='rapida', level=logging.INFO)
+    from cbsurge.util.setup_logger import setup_logger
+    logger = setup_logger(name='rapida', level=logging.INFO)
 
     nf = 5829
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA

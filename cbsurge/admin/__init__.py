@@ -4,7 +4,7 @@ import os
 
 from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
-from cbsurge.util import BboxParamType
+from cbsurge.util.bbox_param_type import BboxParamType
 import click
 import json
 from osgeo import gdal, ogr, osr

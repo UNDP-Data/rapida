@@ -19,6 +19,7 @@ from tqdm.asyncio import tqdm_asyncio
 from cbsurge.components.population.constants import AZ_ROOT_FILE_PATH, WORLDPOP_AGE_MAPPING, DATA_YEAR, \
     AGESEX_STRUCTURE_COMBINATIONS, SEX_MAPPING
 from cbsurge.session import Session
+from cbsurge.util.chunker import chunker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("azure").setLevel(logging.WARNING)
@@ -62,12 +63,12 @@ class LinkExtractor(HTMLParser):
         if tag == 'td':
             self.in_td = False
 
-def chunker_function(iterable, chunk_size=4):
-    """
-    Split an iterable into chunks of the specified size.
-    """
-    for i in range(0, len(iterable), chunk_size):
-        yield iterable[i:i + chunk_size]
+# def chunker_function(iterable, chunk_size=4):
+#     """
+#     Split an iterable into chunks of the specified size.
+#     """
+#     for i in range(0, len(iterable), chunk_size):
+#         yield iterable[i:i + chunk_size]
 
 
 async def get_available_data(country_code=None, year=DATA_YEAR):
@@ -381,7 +382,7 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
                 continue
             logging.info("Processing country: %s", country_code)
             file_links = await get_links_from_table(data_id=country_id)
-            for i, file_urls_chunk in enumerate(chunker_function(file_links, chunk_size=4)):
+            for i, file_urls_chunk in enumerate(chunker(iterable=file_links, size=4)):
                 logging.info("Processing chunk %d for country: %s", i + 1, country_code)
                 # Create a fresh list of tasks for each file chunk
                 tasks = [process_single_file(file_url=url,

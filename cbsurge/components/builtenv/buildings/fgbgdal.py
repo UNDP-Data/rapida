@@ -6,10 +6,10 @@ from cbsurge import util as u
 from osgeo import ogr, gdal
 import httpx
 from cbsurge.admin.osm import OVERPASS_API_URL
-from cbsurge.util import validate
+from cbsurge.util.validate import validate
 import logging
 
-
+from cbsurge.util.validate_path import validate_path
 
 gdal.UseExceptions()
 ogr.UseExceptions()
@@ -70,7 +70,7 @@ def download(bbox=None, out_path =None):
         :param out_path: str, full path wheer the buildings layer will be written
         :return:
         """
-        u.validate_path(out_path)
+        validate_path(out_path)
         options = gdal.VectorTranslateOptions(
             format='FlatGeobuf',
             spatFilter=bbox,

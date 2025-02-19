@@ -6,11 +6,12 @@ from csv import excel
 from rich.progress import Progress, FileSizeColumn, BarColumn, TimeRemainingColumn
 
 from cbsurge.session import Session
-from cbsurge import util
+from cbsurge.util.chunker import chunker
 from azure.storage.blob import BlobType
 from azure.storage.blob.aio import BlobClient
 from typing import Iterable
 
+from cbsurge.util.validate_azure_storage_path import validate_azure_storage_path
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ async def download_blob(src_path: str = None, dst_path: str = None) -> str:
     """
     assert isinstance(dst_path, str), f'dst_path must be a valid string, not {type(dst_path)}'
 
-    util.validate_azure_storage_path(a_path=src_path)
+    validate_azure_storage_path(a_path=src_path)
 
     proto, account_name, src_blob_path = src_path.split(':')
     container_name, *src_path_parts = src_blob_path.split(os.path.sep)
@@ -101,7 +102,7 @@ async def check_blob_exists( dst_path: str):
     :param dst_path: str, the fully qualified path to a blob in az in format az:{account}:{container}/path.ext
     :return: bool, True if the blob exists
     """
-    util.validate_azure_storage_path(a_path=dst_path)
+    validate_azure_storage_path(a_path=dst_path)
     parts = dst_path.split(":", 2)
     if len(parts) != 3:
         raise ValueError(
@@ -125,7 +126,7 @@ async def upload_blob(src_path: str = None, dst_path: str = None, overwrite=True
 
     """
     assert isinstance(src_path, str), f'src_path must be a valid string, not {type(src_path)}'
-    util.validate_azure_storage_path(a_path=dst_path)
+    validate_azure_storage_path(a_path=dst_path)
     parts = dst_path.split(":", 2)
     if len(parts) != 3:
         raise ValueError(f"Invalid Azure path format: {dst_path}. Expected format 'az:{{account}}:{{container}}/path.ext'")
@@ -152,7 +153,7 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, 
                     download_task = progress.add_task(
                         description=f'[blue]Going to download {len(src_blobs)} blobs', total=len(src_blobs))
 
-                for i, blobs in enumerate(util.chunker(src_blobs, size=max_at_once), start=1):
+                for i, blobs in enumerate(chunker(src_blobs, size=max_at_once), start=1):
                     download_tasks = dict()
                     try:
 

@@ -5,6 +5,10 @@ from cbsurge.admin.osm import get_admin0_bbox, OVERPASS_API_URL
 from cbsurge  import util
 from osm2geojson import json2geojson
 import geopandas
+
+from cbsurge.util.http_post_json import http_post_json
+from cbsurge.util.setup_logger import setup_logger
+
 logger = logging.getLogger(__name__)
 
 def ll2iso3(lat=None, lon=None,overpass_url=OVERPASS_API_URL ):
@@ -15,7 +19,7 @@ def ll2iso3(lat=None, lon=None,overpass_url=OVERPASS_API_URL ):
         out body;
     """
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-    data = util.http_post_json(url=overpass_url, query=query, timeout=timeout)
+    data = http_post_json(url=overpass_url, query=query, timeout=timeout)
     if "elements" in data and data["elements"]:
         return data["elements"][0]["tags"].get("ISO3166-1:alpha3", None)
 
@@ -73,7 +77,7 @@ def bbox2iso31(lon_min=None, lat_min=None, lon_max=None, lat_max=None, overpass_
     out tags;
     """
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-    data = util.http_post_json(url=overpass_url, query=query, timeout=timeout)
+    data = http_post_json(url=overpass_url, query=query, timeout=timeout)
     iso3_codes = {element['tags'].get('ISO3166-1:alpha3') for element in data.get('elements', []) if
                   'tags' in element}
     return set(iso3_codes)
@@ -84,8 +88,7 @@ def polygons2iso3(gdf=None ):
     a0df = bbox2admin01(bbox=tuple(gdf.total_bounds))
     print(a0df.columns.tolist())
 if __name__ == '__main__':
-    from cbsurge import util
-    logger = util.setup_logger(name='rapida', level=logging.INFO)
+    logger = setup_logger(name='rapida', level=logging.INFO)
     bbox = 33.681335, -0.131836, 35.966492, 1.158979  # KEN/UGA
     lonmin, latmin, lonmax, latmax=bbox
     countries = bbox2iso31(lon_min=lonmin, lat_min=latmin, lon_max=lonmax, lat_max=latmax)

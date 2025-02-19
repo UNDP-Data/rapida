@@ -1,22 +1,24 @@
+import asyncio
 import datetime
+import hashlib
 import io
-import os
-import click
+import json
 import logging
+import os
 import shutil
-from rasterio.crs import CRS as rCRS
-from pyproj import CRS as pCRS
+import sys
+import webbrowser
+
+import click
+import geopandas
 import rasterio.warp
 from osgeo import gdal
-import geopandas
-import json
-import sys
+from pyproj import CRS as pCRS
+from rasterio.crs import CRS as rCRS
+
 from cbsurge.admin.osm import fetch_admin
 from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.session import Session
-import asyncio
-import webbrowser
-import hashlib
 from cbsurge.util.dataset2pmtiles import dataset2pmtiles
 
 logger = logging.getLogger(__name__)

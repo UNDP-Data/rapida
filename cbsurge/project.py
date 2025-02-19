@@ -14,13 +14,12 @@ import sys
 from cbsurge.admin.osm import fetch_admin
 from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.az.fileshare import list_projects, upload_project, download_project
-from cbsurge.dataset2pmtiles import dataset2pmtiles
 from cbsurge.session import Session
 from rich.progress import Progress
 import asyncio
 import webbrowser
 import hashlib
-
+from cbsurge.util.dataset2pmtiles import dataset2pmtiles
 from cbsurge.util import setup_logger
 
 logger = logging.getLogger(__name__)

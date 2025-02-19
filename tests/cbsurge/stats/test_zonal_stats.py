@@ -1,6 +1,6 @@
 import os
 import pytest
-from cbsurge.stats.ZonalStats import ZonalStats
+from cbsurge.stats.zonal_stats import ZonalStats
 
 TEST_DIR = "./tests/cbsurge/stats"
 

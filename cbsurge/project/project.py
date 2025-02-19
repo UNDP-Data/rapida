@@ -8,18 +8,19 @@ import os
 import shutil
 import sys
 import webbrowser
-
 import click
 import geopandas
 import rasterio.warp
-from osgeo import gdal
+from osgeo import gdal, ogr, osr
 from pyproj import CRS as pCRS
 from rasterio.crs import CRS as rCRS
-
+from cbsurge.util.proj_are_equal import proj_are_equal
+from cbsurge import constants
 from cbsurge.admin.osm import fetch_admin
 from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.session import Session
 from cbsurge.util.dataset2pmtiles import dataset2pmtiles
+from pyogrio import write_dataframe
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -37,7 +38,7 @@ class Project:
 
     def __init__(self, path: str,polygons: str = None,
                  mask: str = None, projection: str = 'ESRI:54009',
-                 comment: str = None, **kwargs ):
+                 comment: str = None, vector_mask_layer: str = 'mask', **kwargs ):
 
         if path is None:
             raise ValueError("Project path cannot be None")
@@ -57,10 +58,14 @@ class Project:
                 "created_on": datetime.datetime.now().isoformat(),
                 "user": os.environ.get('USER', os.environ.get('USERNAME')),
             }
-            if mask:
-                self._cfg_['mask'] = mask
+            # if mask:
+            #     self._cfg_['mask'] = mask
             if comment:
                 self._cfg_['comment'] = comment
+            bbox = None
+            target_crs = pCRS.from_user_input(projection)
+            target_srs = osr.SpatialReference()
+            target_srs.SetFromUserInput(projection)
 
             if polygons is not None:
                 l = geopandas.list_layers(polygons)
@@ -76,41 +81,147 @@ class Project:
                 if not os.path.exists(self.data_folder):
                     os.makedirs(self.data_folder)
                 gdf = geopandas.read_file(polygons, layer=layer_name, )
-                target_crs = pCRS.from_user_input(projection)
+
                 src_crs = gdf.crs
-
+                src_bbox = tuple(map(float, gdf.total_bounds))
                 if not src_crs.is_exact_same(target_crs):
-                    rgdf = gdf.to_crs(crs=target_crs)
+                    gdf.to_crs(crs=target_crs, inplace=True)
 
-                cols = rgdf.columns.tolist()
+                bbox = tuple(map(float,gdf.total_bounds))
+                cols = gdf.columns.tolist()
                 if not ('h3id' in cols and 'undp_admin_level' in cols):
                     logger.info(f'going to add rapida specific attributes country code')
-                    bbox = tuple(gdf.total_bounds)
-                    if not src_crs.is_geographic:
-                        left, bottom, right, top = bbox
-                        bbox = rasterio.warp.transform_bounds(src_crs=rCRS.from_epsg(src_crs.to_epsg()),
+
+                    if not src_crs.to_epsg() == 4326:
+                        left, bottom, right, top = src_bbox
+                        bb = rasterio.warp.transform_bounds(src_crs=rCRS.from_epsg(src_crs.to_epsg()),
                                                               dst_crs=rCRS.from_epsg(4326),
                                                               left=left, bottom=bottom,
                                                               right=right, top=top,
 
                                                                    )
-                    a0_polygons = fetch_admin(bbox=bbox,admin_level=0)
+                    else:
+                        bb = src_bbox
+
+                    a0_polygons = fetch_admin(bbox=bb,admin_level=0)
                     a0_gdf = None
                     with io.BytesIO(json.dumps(a0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
                         a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
-                    rgdf_centroids = rgdf.copy()
-                    rgdf_centroids["geometry"] = rgdf.centroid
+                    rgdf_centroids = gdf.copy()
+                    rgdf_centroids["geometry"] = gdf.centroid
                     jgdf = geopandas.sjoin(rgdf_centroids, a0_gdf, how="left", predicate="within", )
-                    jgdf['geometry'] = rgdf['geometry']
-                    rgdf = jgdf
-                self._cfg_['countries'] = tuple(set(rgdf['iso3']))
+                    jgdf['geometry'] = gdf['geometry']
+                    gdf = jgdf
+                self._cfg_['countries'] = tuple(set(gdf['iso3']))
 
-                rgdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                              promote_to_multi=True)
 
 
                 self.save()
 
+            if mask is not None:
+                logger.debug(f'Got mask {mask}')
+                raster_mask_local_path = os.path.join(self.data_folder, 'mask.tif')
+
+                try:
+                    with gdal.OpenEx(mask, gdal.OF_RASTER|gdal.OF_READONLY) as mds:
+                        mds_srs = mds.GetSpatialRef()
+                        #mds_epsg = int(mds_srs.GetAuthorityCode(None))
+                        creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256,
+                                                BLOCKYSIZE=256)
+
+                        if not proj_are_equal(mds_srs, target_srs):
+                            # reproject raster mask to target projection
+                            logger.info(f'Reprojecting  raster mask to {target_crs}')
+
+                            warp_options = gdal.WarpOptions(format='GTiff',
+                                                            xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                                                            yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                                                            dstSRS=projection,creationOptions=creation_options,
+                                                            cutlineDSName=self.geopackage_file_path, cutlineLayer='polygons',
+                                                            outputBounds=bbox, outputBoundsSRS=projection, outputType=gdal.GDT_Byte,
+                                                            srcNodata=None, dstNodata="none", targetAlignedPixels=True)
+                            rds = gdal.Warp(destNameOrDestDS=raster_mask_local_path,srcDSOrSrcDSTab=mds, options=warp_options)
+
+                        else:
+                            logger.info(f'Ingesting raster mask ')
+                            proj_win = bbox[0], bbox[-1], bbox[2], bbox[1]
+                            translate_options = gdal.TranslateOptions(
+                                format='GTiff',
+                                xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                                yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                                projWin=proj_win,
+                                projWinSRS=target_srs,
+                                creationOptions=creation_options,
+                                noData='None'
+                            )
+
+                            rds = gdal.Translate(destName=raster_mask_local_path,srcDS=mds,options=translate_options)
+
+                        with gdal.OpenEx(self.geopackage_file_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as vds:
+                            logger.info(f'Polygonizing {raster_mask_local_path} ')
+                            mband = rds.GetRasterBand(1)
+                            mask_lyr = vds.CreateLayer('mask', geom_type=ogr.wkbMultiPolygon, srs=rds.GetSpatialRef())
+                            r = gdal.Polygonize(srcBand=mband, maskBand=mband,outLayer=mask_lyr,iPixValField=-1,
+                                                   options = ['-nlt PROMOTE_TO_MULTI', '-makevalid', '-skipinvalid'])
+                            assert r == 0, f'Failed to polygonize {raster_mask_local_path}'
+                            for feature in mask_lyr:
+                                geom = feature.GetGeometryRef()
+
+                                simplified_geom = geom.Simplify(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)  # Use SimplifyPreserveTopology(tolerance) if needed
+                                smoothed_geom = simplified_geom.Buffer(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER).Buffer(-constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)
+                                # not cleat if the lines below have real value
+                                # if geom.GetGeometryType() == ogr.wkbPolygon:
+                                #     print(sm)
+                                #     multi_geom = ogr.Geometry(ogr.wkbMultiPolygon)
+                                #     multi_geom.AddGeometry(smoothed_geom.Clone())
+                                # else:
+                                #     multi_geom = smoothed_geom
+                                feature.SetGeometry(smoothed_geom)
+                                mask_lyr.SetFeature(feature)  # Save changes
+                except RuntimeError as e:
+                    if mask in str(e):
+                        with gdal.OpenEx(mask, gdal.OF_VECTOR|gdal.OF_READONLY) as mds:
+                            logger.debug(f'Mask is a vector')
+                            lyr = mds.GetLayer(0)
+                            lyr_name = lyr.GetName()
+                            gdf = geopandas.read_file(mask, layer=lyr_name)
+                            target_crs = pCRS.from_user_input(projection)
+                            src_crs = gdf.crs
+                            if not src_crs.is_exact_same(target_crs):
+                                gdf.to_crs(crs=target_crs, inplace=True)
+                            pgdf = geopandas.read_file(self.geopackage_file_path, layer='polygons')
+                            gdf = geopandas.clip(gdf=gdf, mask=pgdf)
+                            gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w',
+                                        layer=vector_mask_layer,
+                                        promote_to_multi=True)
+                            with io.BytesIO() as bio:
+                                vpath = f'/vsimem/{vector_mask_layer}.fgb'
+                                write_dataframe(df=gdf, path=bio, layer=vector_mask_layer, driver='FlatGeobuf')
+                                gdal.FileFromMemBuffer(vpath, bio.getbuffer())
+                                try:
+                                    with gdal.OpenEx(vpath) as clipped_mds:
+                                        creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256, BLOCKYSIZE=256)
+                                        rasterize_options = gdal.RasterizeOptions(
+                                            format='GTiff', outputType=gdal.GDT_Byte,
+                                            creationOptions=creation_options, noData=None, initValues=0,
+                                            burnValues=1, layers=[lyr_name],
+                                            xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                                            yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                                            targetAlignedPixels=True,
+                                            outputBounds=bbox
+                                        )
+
+                                        rds = gdal.Rasterize(destNameOrDestDS=raster_mask_local_path, srcDS=clipped_mds,options=rasterize_options)
+                                        rds = None
+
+
+                                finally:
+                                    gdal.Unlink(vpath)
+
+                    else:
+                        raise e
     def load_config(self):
         """Load configuration safely to avoid recursion"""
         try:
@@ -118,7 +229,6 @@ class Project:
                 config_data = json.load(f)
             self.__dict__.update(config_data)  # ✅ Update instance variables safely
             self.is_valid
-            self._cfg_ = config_data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load config file ({self.config_file}): {e}")
 

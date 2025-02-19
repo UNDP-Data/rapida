@@ -1,9 +1,14 @@
+import threading
+import time
+
 import httpx
 import logging
 from osgeo import gdal, osr
 import itertools
 import click
 import os
+
+from pyogrio import open_arrow
 from rich.logging import RichHandler
 logger = logging.getLogger(__name__)
 
@@ -184,6 +189,57 @@ def generator_length(gen):
     length = sum(1 for _ in gen1)  # Consume the duplicate
     return length, gen2  # Return the length and the unconsumed generator
 
+
+def read_bbox(src_path=None, bbox=None, mask=None, batch_size=None, signal_event=None, name=None, ntries=3, progress=None):
+    task = progress.add_task(description=f'[green]Downloading grid in {name}...', start=False, total=None)
+    try:
+        for attempt in range(ntries):
+            logger.debug(f'Attempt no {attempt} at {name}')
+            try:
+                with open_arrow(src_path, bbox=bbox, mask=mask, use_pyarrow=True, batch_size=batch_size) as source:
+                    meta, reader = source
+                    logger.debug(f'Opened {src_path}')
+                    batches = []
+                    nb = 0
+                    for b in reader :
+                        if signal_event.is_set():
+                            logger.info(f'Cancelling grid extraction in {name}')
+                            return name, meta, batches
+                        if b.num_rows > 0:
+                            batches.append(b)
+                            nb+=b.num_rows
+                            progress.update(task, description=f'[green]Downloaded {nb} grid in {name}', advance=nb, completed=None)
+                    return name, meta, batches
+            except Exception as e:
+                if attempt < ntries-1:
+                    logger.info(f'Attempting to download {name} again')
+                    time.sleep(1)
+                    continue
+                else:
+                    return name, e, None
+    finally:
+        progress.remove_task(task)
+
+
+
+def downloader(work=None, result=None, finished=None):
+    logger.debug(f'starting downloader thread {threading.current_thread().name}')
+    while True:
+        job = None
+        try:
+            job = work.pop()
+        except IndexError as ie:
+            pass
+        if job is None:
+            if finished.is_set():
+                logger.debug(f'worker is finishing  in {threading.current_thread().name}')
+                break
+            continue
+
+        if finished.is_set():
+            break
+        logger.debug(f'Starting job  {job["name"]}')
+        result.append(read_bbox(**job))
 
 class BboxParamType(click.ParamType):
     name = "bbox"

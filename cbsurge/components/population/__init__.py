@@ -5,10 +5,10 @@ from typing import List
 import logging
 import pycountry
 from pyogrio import write_dataframe, read_info
-from cbsurge.core import Component
+from cbsurge.core.component import Component
 from cbsurge.project import Project
 from cbsurge.session import Session
-from cbsurge.core import Variable
+from cbsurge.core.variable import Variable
 from cbsurge.az import blobstorage
 from osgeo_utils.gdal_calc import Calc
 from osgeo import gdal

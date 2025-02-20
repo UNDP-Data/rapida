@@ -227,7 +227,6 @@ class Session(object):
             return [credential, token]
         except ClientAuthenticationError as err:
             logger.error("authentication failed.")
-            logger.error(err)
             return None
 
 

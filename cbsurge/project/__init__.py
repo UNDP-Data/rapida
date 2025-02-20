@@ -6,7 +6,7 @@ from osgeo import gdal
 import sys
 from cbsurge.az.fileshare import list_projects, upload_project, download_project
 from rich.progress import Progress
-from cbsurge.util import setup_logger
+from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
 

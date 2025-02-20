@@ -6,6 +6,7 @@ from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
 from azure.storage.fileshare.aio import ShareServiceClient
+from cbsurge.az.auth import MsalTokenCredential, TOKEN_CACHE_FIlE
 
 
 logger = logging.getLogger(__name__)
@@ -158,7 +159,7 @@ class Session(object):
         logger.debug(f"config file was saved to {config_file_path}")
 
 
-    def get_credential(self):
+    def get_credential(self, interactive_browser=False):
         """
         get token credential for azure.
 
@@ -178,7 +179,16 @@ class Session(object):
         Returns:
             Azure TokenCredential is returned if authenticated.
         """
-        credential = DefaultAzureCredential()
+        # check if token file exists at user home folder
+        config_path = os.path.dirname(self.get_config_file_path())
+        token_cache_path = os.path.join(config_path, TOKEN_CACHE_FIlE)
+        if os.path.exists(token_cache_path):
+            credential = MsalTokenCredential(device_auth=False)
+        else:
+            # otherwise, use DefaultAzureCredential
+            credential = DefaultAzureCredential(
+                exclude_interactive_browser_credential=(not interactive_browser)
+            )
 
         return credential
 
@@ -220,14 +230,11 @@ class Session(object):
             Azure credential and token are returned if authenticated. If authentication failed, return None.
         """
         try:
-            credential = DefaultAzureCredential(
-                exclude_interactive_browser_credential=False,
-            )
+            credential = self.get_credential(interactive_browser=True)
             token = credential.get_token(scopes)
             return [credential, token]
         except ClientAuthenticationError as err:
             logger.error("authentication failed.")
-            logger.error(err)
             return None
 
 

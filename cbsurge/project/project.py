@@ -229,6 +229,8 @@ class Project:
                 config_data = json.load(f)
             self.__dict__.update(config_data)  # ✅ Update instance variables safely
             self.is_valid
+            # set config data to _cfg_ to ensure other method to access to config dict
+            self._cfg_ = config_data
         except (FileNotFoundError, json.JSONDecodeError) as e:
             print(f"Warning: Could not load config file ({self.config_file}): {e}")
 

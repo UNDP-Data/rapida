@@ -10,9 +10,13 @@ services:
       - ./Makefile:/app/Makefile
       - ./cbsurge:/app/cbsurge # mount app folder to container
       - ./tests:/app/tests
+      # uncomment to mount token info from local
+      # - ~/.cbsurge/token_cache.json:/root/.cbsurge/token_cache.json
     entrypoint: "/app/entrypoint.sh"
 #    entrypoint: "pipenv run jupyterhub"
     ports:
       - 8100:8000
     environment:
       - JUPYTER_USERS=${JUPYTER_USERS:-''}
+      - TENANT_ID=${TENANT_ID:-''}
+      - CLIENT_ID=${CLIENT_ID:-''}

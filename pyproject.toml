@@ -39,7 +39,9 @@ dependencies = [
     "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
     "sympy",
     "pydantic",
-    "pmtiles"
+    "pmtiles",
+    "msal",
+    "playwright"
 ]
 
 [project.optional-dependencies]

@@ -80,7 +80,6 @@ class Variable(BaseModel):
 
 
 
-
     def download(self, **kwargs):
 
         """Download variable"""

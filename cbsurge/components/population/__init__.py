@@ -11,14 +11,18 @@ from cbsurge.session import Session
 from cbsurge.core.variable import Variable
 from cbsurge.az import blobstorage
 from osgeo_utils.gdal_calc import Calc
-from osgeo import gdal
+from osgeo import gdal, osr
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
-from cbsurge.stats.zst import zonal_stats, sumup
+from cbsurge.stats.zst import zonal_stats, sumup, zst
 import geopandas
 from cbsurge.components.population.pop_coefficient import get_pop_coeff
+from cbsurge.util.proj_are_equal import proj_are_equal
+
+
+
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('rapida')
 gdal.UseExceptions()
 @click.group()
 def population():
@@ -168,7 +172,6 @@ class PopulationComponent(Component):
                                            component=self.component_name,
                                            **var_data)
 
-
                     #assess
                     v(year=self.base_year,
                       country=country,
@@ -177,7 +180,7 @@ class PopulationComponent(Component):
                       )
                     if multinational:
                         sources[v.local_path] = var_name
-                    if variable_task and progress:
+                    if progress and variable_task:
                         progress.update(variable_task, advance=1, description=f'Assessed {var_name} in {country}')
                     #if progress and variable_task: progress.remove_task(variable_task)
 
@@ -194,14 +197,14 @@ class PopulationComponent(Component):
                     allowProjectionDifference=False,
                 )
 
-                with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options):
-
+                with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options) as vrtds:
+                    vrtds.FlushCache()
                     v = PopulationVariable(
                         name=var_name,
                         component=self.component_name,
-                       title=f'Multinational {vname}',
-                       local_path=vrt_path,
-                       operator=operator,
+                        title=f'Multinational {vname}',
+                        local_path=vrt_path,
+                        operator=operator,
 
                     )
 
@@ -284,24 +287,53 @@ class PopulationVariable(Variable):
             if self.operator:
 
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.debug(f'Evaluating variable {self.name} using zonal stats')
+                logger.info(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
-                gdf = zonal_stats(src_rasters=[self.local_path],
+                src_rasters = [self.local_path]
+                var_ops = [(self.name, self.operator)]
+                # if project.raster_mask is not None:
+                #     with gdal.OpenEx(project.geopackage_file_path) as mds, gdal.OpenEx(self.local_path) as vards:
+                #
+                #         l = mds.GetLayerByName('polygons')
+                #         mask_srs = l.GetSpatialRef()
+                #         xmin, xmax, ymin, ymax = l.GetExtent()
+                #         prj_srs = vards.GetSpatialRef()
+                #         if not proj_are_equal(mask_srs, prj_srs):
+                #             creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256,
+                #                                     BLOCKYSIZE=256)
+                #             warp_options = gdal.WarpOptions(
+                #                 format='GTiff',xRes=100, yRes=100,targetAlignedPixels=True,
+                #                 creationOptions=creation_options,
+                #                 outputBounds=(xmin, ymin, xmax, ymax),
+                #                 outputBoundsSRS=mask_srs,
+                #                 dstSRS=mask_srs,
+                #             )
+                #             _, name = os.path.split(self.local_path)
+                #             dst_path = f'/vsimem/{name}'
+                #             rds = gdal.Warp(destNameOrDestDS=dst_path, srcDSOrSrcDSTab=vards,
+                #                             options=warp_options)
+                #
+                #
+                #
+                #             src_rasters.append(dst_path)
+                #             var_ops.append((f'{self.name}_affected', self.operator))
+                # print(src_rasters)
+                gdf = zst(src_rasters=src_rasters,
                                       polygon_ds=project.geopackage_file_path,
-                                      polygon_layer=polygons_layer, vars_ops=[(self.name, self.operator)]
+                                      polygon_layer=polygons_layer, vars_ops=var_ops
                                       )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
                 year = kwargs.get('year')
                 target_year = kwargs.get('target_year')
                 countries = set(gdf['iso3'])
+                print(gdf.columns.tolist())
+
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                     gdf.loc[gdf['iso3'] == country, self.name] *= coeff
+
                 #gdf.rename(columns={self.name: f'{self.name}_{target_year}'}, inplace=True)
-
-                #print(gdf.columns.tolist())
-
 
                 # assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 # assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'

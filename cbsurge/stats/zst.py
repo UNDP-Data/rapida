@@ -12,7 +12,7 @@ from osgeo_utils.gdal_calc import Calc
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-ogr.UseExceptions()
+
 
 def geoarrow_schema_adapter(schema: pa.Schema, geom_field_name=None) -> pa.Schema:
     """
@@ -214,3 +214,19 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
         combined_results.drop(columns='tempid', inplace=True)
 
         return combined_results
+
+
+
+def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
+                vars_ops:Iterable[tuple[str, str]]=None):
+    with gdal.OpenEx(polygon_ds, gdal.OF_READONLY|gdal.OF_VECTOR) as polyds:
+        poly_lyr = polyds.GetLayerByName(polygon_layer)
+        poly_srs = poly_lyr.GetSpatialRef()
+        for n, src_raster in enumerate(src_rasters):
+            with gdal.OpenEx(src_raster, gdal.OF_RASTER|gdal.OF_READONLY) as srcds:
+                src_srs = srcds.GetSpatialRef()
+                assert proj_are_equal(src_srs=src_srs, dst_srs=poly_srs), f'{src_raster}  features wrong projection'
+                var_name, operation = vars_ops[n]
+                df = exact_extract(src_raster, poly_lyr, ops=[operation], include_geom=not n, output='pandas')
+                df.rename(columns={operation: var_name}, inplace=True)
+                print(df.columns)

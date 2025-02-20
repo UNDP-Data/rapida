@@ -318,7 +318,7 @@ class PopulationVariable(Variable):
                 #             src_rasters.append(dst_path)
                 #             var_ops.append((f'{self.name}_affected', self.operator))
                 # print(src_rasters)
-                gdf = zst(src_rasters=src_rasters,
+                gdf = zonal_stats(src_rasters=src_rasters,
                                       polygon_ds=project.geopackage_file_path,
                                       polygon_layer=polygons_layer, vars_ops=var_ops
                                       )
@@ -327,8 +327,6 @@ class PopulationVariable(Variable):
                 year = kwargs.get('year')
                 target_year = kwargs.get('target_year')
                 countries = set(gdf['iso3'])
-                print(gdf.columns.tolist())
-
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                     gdf.loc[gdf['iso3'] == country, self.name] *= coeff

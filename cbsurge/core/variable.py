@@ -23,7 +23,7 @@ from cbsurge.az import blobstorage
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
 from cbsurge.util.downloader import downloader
-
+from urllib.parse import urlencode
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -77,7 +77,8 @@ class Variable(BaseModel):
     def evaluate(self, **kwargs):
         pass
 
-
+    def alter(self, **kwargs):
+        return f'vrt://{self.local_path}?{urlencode(kwargs)}'
 
 
     def download(self, **kwargs):

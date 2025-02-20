@@ -126,38 +126,39 @@ class Project:
 
                 try:
                     with gdal.OpenEx(mask, gdal.OF_RASTER|gdal.OF_READONLY) as mds:
-                        mds_srs = mds.GetSpatialRef()
-                        #mds_epsg = int(mds_srs.GetAuthorityCode(None))
-                        creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256,
-                                                BLOCKYSIZE=256)
 
-                        if not proj_are_equal(mds_srs, target_srs):
-                            # reproject raster mask to target projection
-                            logger.info(f'Reprojecting  raster mask to {target_crs}')
-
-                            warp_options = gdal.WarpOptions(format='GTiff',
-                                                            xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                                                            yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                                                            dstSRS=self.projection,creationOptions=creation_options,
-                                                            cutlineDSName=self.geopackage_file_path, cutlineLayer='polygons',
-                                                            outputBounds=bbox, outputBoundsSRS=self.projection, outputType=gdal.GDT_Byte,
-                                                            srcNodata=None, dstNodata="none", targetAlignedPixels=True)
-                            rds = gdal.Warp(destNameOrDestDS=raster_mask_local_path,srcDSOrSrcDSTab=mds, options=warp_options)
-
-                        else:
-                            logger.info(f'Ingesting raster mask ')
-                            proj_win = bbox[0], bbox[-1], bbox[2], bbox[1]
-                            translate_options = gdal.TranslateOptions(
-                                format='GTiff',
-                                xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                                yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                                projWin=proj_win,
-                                projWinSRS=target_srs,
-                                creationOptions=creation_options,
-                                noData='None'
-                            )
-
-                            rds = gdal.Translate(destName=raster_mask_local_path,srcDS=mds,options=translate_options)
+                        # mds_srs = mds.GetSpatialRef()
+                        # #mds_epsg = int(mds_srs.GetAuthorityCode(None))
+                        # creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256,
+                        #                         BLOCKYSIZE=256)
+                        #
+                        # if not proj_are_equal(mds_srs, target_srs):
+                        #     # reproject raster mask to target projection
+                        #     logger.info(f'Reprojecting  raster mask to {target_crs}')
+                        #
+                        #     warp_options = gdal.WarpOptions(format='GTiff',
+                        #                                     xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                        #                                     yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                        #                                     dstSRS=self.projection,creationOptions=creation_options,
+                        #                                     cutlineDSName=self.geopackage_file_path, cutlineLayer='polygons',
+                        #                                     outputBounds=bbox, outputBoundsSRS=self.projection, outputType=gdal.GDT_Byte,
+                        #                                     srcNodata=None, dstNodata="none", targetAlignedPixels=True)
+                        #     rds = gdal.Warp(destNameOrDestDS=raster_mask_local_path,srcDSOrSrcDSTab=mds, options=warp_options)
+                        #
+                        # else:
+                        #     logger.info(f'Ingesting raster mask ')
+                        #     proj_win = bbox[0], bbox[-1], bbox[2], bbox[1]
+                        #     translate_options = gdal.TranslateOptions(
+                        #         format='GTiff',
+                        #         xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                        #         yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                        #         projWin=proj_win,
+                        #         projWinSRS=target_srs,
+                        #         creationOptions=creation_options,
+                        #         noData='None'
+                        #     )
+                        #
+                        #     rds = gdal.Translate(destName=raster_mask_local_path,srcDS=mds,options=translate_options)
 
                         with gdal.OpenEx(self.geopackage_file_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as vds:
                             logger.info(f'Polygonizing {raster_mask_local_path} ')
@@ -284,30 +285,34 @@ class Project:
         with open(self.config_file, 'w', encoding="utf-8") as cfgf:
             json.dump(data, cfgf, indent=4)
 
-    def align_raster(self, source_raster=None):
+
+
+    def align_raster(self, source_raster=None,
+                     xres=constants.DEFAULT_MASK_RESOLUTION_METERS,
+                     yres=constants.DEFAULT_MASK_RESOLUTION_METERS):
         target_srs = osr.SpatialReference()
         target_srs.SetFromUserInput(self.projection)
 
         warp_options = dict(
             format='GTiff',
-            xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-            yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
+            xRes=xres,
+            yRes=yres,
             creationOptions=constants.GTIFF_CREATION_OPTIONS,
             cutlineDSName=self.geopackage_file_path,
             cutlineLayer=constants.POLYGONS_LAYER_NAME,
+            cropToCutline=True,
             targetAlignedPixels=True
         )
 
         with gdal.OpenEx(source_raster, gdal.OF_RASTER|gdal.OF_READONLY) as src_ds:
             src_srs = src_ds.GetSpatialRef()
-            if not proj_are_equal(src_srs, target_srs):
+            prj_equal = proj_are_equal(src_srs, target_srs)
+            if not prj_equal:
                 # reproject raster mask to target projection
-                logger.info(f'Reprojecting {src_ds} {target_srs}')
-                warp_options.update(dict(dstSRS=target_srs))
-
-            warp_options = gdal.WarpOptions(**warp_options)
+                logger.debug(f'Reprojecting {src_ds} {target_srs}')
+                warp_options.update(dict(dstSRS=self.projection))
             dst_path = source_raster.replace('.tif', '_r.tif')
-            rds = gdal.Warp(destNameOrDestDS=source_raster, srcDSOrSrcDSTab=src_ds, options=warp_options)
+            rds = gdal.Warp(destNameOrDestDS=dst_path, srcDSOrSrcDSTab=src_ds, **warp_options)
             return dst_path
 
     def publish(self, yes=False):
@@ -381,7 +386,11 @@ class Project:
 
 
 if __name__ == '__main__':
+
+    import logging
+    logger = logging.getLogger()
+
     project_path = '/data/rap/bgd'
     p = Project(path=project_path)
-    src_raster = os.path.join(p.data_folder,'pop')
-    p.align_raster()
+    src_raster = '/data/rap/bgd/data/population/female_active/BGD_female_active_r.tif'
+    p.align_raster(source_raster=src_raster)

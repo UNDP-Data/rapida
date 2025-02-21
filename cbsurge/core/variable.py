@@ -133,7 +133,7 @@ class Variable(BaseModel):
                     options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                 )
 
-                all_features = [e for e in admin_layer][:1]
+                all_features = [e for e in admin_layer]
                 stop = threading.Event()
                 jobs = deque()
                 results = deque()
@@ -143,11 +143,6 @@ class Variable(BaseModel):
                             au_geom = feature.GetGeometryRef()
 
                             au_geom.Transform(tr)
-                            # print(au_geom)
-                            # extent = au_geom.GetEnvelope()
-                            # print(extent)
-                            # bb = extent[0], extent[2], extent[1], extent[3]
-                            # print(bb)
 
                             au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
                             props = feature.items()

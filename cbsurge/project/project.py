@@ -117,7 +117,6 @@ class Project:
                 gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                              promote_to_multi=True)
 
-
                 self.save()
 
             if mask is not None:
@@ -126,61 +125,37 @@ class Project:
 
                 try:
                     with gdal.OpenEx(mask, gdal.OF_RASTER|gdal.OF_READONLY) as mds:
+                        pass
+                    '''
+                    align raster uses gdalwarp to (1) reproject if there is a need and (2)
+                    crop the source with "polygons" layer
+                    additionally it can take ANY keyword args tha gdalwarp takes. 
+                    in this case we are removing completely the mask
+                    '''
 
-                        # mds_srs = mds.GetSpatialRef()
-                        # #mds_epsg = int(mds_srs.GetAuthorityCode(None))
-                        # creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256,
-                        #                         BLOCKYSIZE=256)
-                        #
-                        # if not proj_are_equal(mds_srs, target_srs):
-                        #     # reproject raster mask to target projection
-                        #     logger.info(f'Reprojecting  raster mask to {target_crs}')
-                        #
-                        #     warp_options = gdal.WarpOptions(format='GTiff',
-                        #                                     xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                        #                                     yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                        #                                     dstSRS=self.projection,creationOptions=creation_options,
-                        #                                     cutlineDSName=self.geopackage_file_path, cutlineLayer='polygons',
-                        #                                     outputBounds=bbox, outputBoundsSRS=self.projection, outputType=gdal.GDT_Byte,
-                        #                                     srcNodata=None, dstNodata="none", targetAlignedPixels=True)
-                        #     rds = gdal.Warp(destNameOrDestDS=raster_mask_local_path,srcDSOrSrcDSTab=mds, options=warp_options)
-                        #
-                        # else:
-                        #     logger.info(f'Ingesting raster mask ')
-                        #     proj_win = bbox[0], bbox[-1], bbox[2], bbox[1]
-                        #     translate_options = gdal.TranslateOptions(
-                        #         format='GTiff',
-                        #         xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                        #         yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                        #         projWin=proj_win,
-                        #         projWinSRS=target_srs,
-                        #         creationOptions=creation_options,
-                        #         noData='None'
-                        #     )
-                        #
-                        #     rds = gdal.Translate(destName=raster_mask_local_path,srcDS=mds,options=translate_options)
+                    rds = self.align_raster(
+                        source=mask,dst=raster_mask_local_path,
+                        cropToCutline=True,return_handle=True,
+                        outputType=gdal.GDT_Byte,srcNodata=None, dstNodata="none",
+                        targetAlignedPixels=True
+                    )
+                    # we polygonize the mask
 
-                        with gdal.OpenEx(self.geopackage_file_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as vds:
-                            logger.info(f'Polygonizing {raster_mask_local_path} ')
-                            mband = rds.GetRasterBand(1)
-                            mask_lyr = vds.CreateLayer('mask', geom_type=ogr.wkbMultiPolygon, srs=rds.GetSpatialRef())
-                            r = gdal.Polygonize(srcBand=mband, maskBand=mband,outLayer=mask_lyr,iPixValField=-1,
-                                                   options = ['-nlt PROMOTE_TO_MULTI', '-makevalid', '-skipinvalid'])
-                            assert r == 0, f'Failed to polygonize {raster_mask_local_path}'
-                            for feature in mask_lyr:
-                                geom = feature.GetGeometryRef()
+                    with gdal.OpenEx(self.geopackage_file_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as vds:
+                        logger.info(f'Polygonizing {raster_mask_local_path} ')
+                        mband = rds.GetRasterBand(1)
+                        mask_lyr = vds.CreateLayer('mask', geom_type=ogr.wkbMultiPolygon, srs=rds.GetSpatialRef())
+                        r = gdal.Polygonize(srcBand=mband, maskBand=mband,outLayer=mask_lyr,iPixValField=-1)
 
-                                simplified_geom = geom.Simplify(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)  # Use SimplifyPreserveTopology(tolerance) if needed
-                                smoothed_geom = simplified_geom.Buffer(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER).Buffer(-constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)
-                                # not cleat if the lines below have real value
-                                # if geom.GetGeometryType() == ogr.wkbPolygon:
-                                #     print(sm)
-                                #     multi_geom = ogr.Geometry(ogr.wkbMultiPolygon)
-                                #     multi_geom.AddGeometry(smoothed_geom.Clone())
-                                # else:
-                                #     multi_geom = smoothed_geom
-                                feature.SetGeometry(smoothed_geom)
-                                mask_lyr.SetFeature(feature)  # Save changes
+                        assert r == 0, f'Failed to polygonize {raster_mask_local_path}'
+                        for feature in mask_lyr:
+                            geom = feature.GetGeometryRef()
+                            simplified_geom = geom.Simplify(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)  # Use SimplifyPreserveTopology(tolerance) if needed
+                            smoothed_geom = simplified_geom.Buffer(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER).Buffer(-constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)
+                            feature.SetGeometry(smoothed_geom)
+                            mask_lyr.SetFeature(feature)  # Save changes
+                        rds = None
+
                 except RuntimeError as e:
                     if mask in str(e):
                         with gdal.OpenEx(mask, gdal.OF_VECTOR|gdal.OF_READONLY) as mds:
@@ -287,33 +262,38 @@ class Project:
 
 
 
-    def align_raster(self, source_raster=None,
-                     xres=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                     yres=constants.DEFAULT_MASK_RESOLUTION_METERS):
+    def align_raster(self, source=None, dst=None,
+                     x_res:int = constants.DEFAULT_MASK_RESOLUTION_METERS,
+                     y_res:int = constants.DEFAULT_MASK_RESOLUTION_METERS,
+                     cropToCutline=True,return_handle=False,
+                     **kwargs
+                     ):
         target_srs = osr.SpatialReference()
         target_srs.SetFromUserInput(self.projection)
 
         warp_options = dict(
             format='GTiff',
-            xRes=xres,
-            yRes=yres,
+            xRes=x_res,
+            yRes=y_res,
             creationOptions=constants.GTIFF_CREATION_OPTIONS,
             cutlineDSName=self.geopackage_file_path,
             cutlineLayer=constants.POLYGONS_LAYER_NAME,
-            cropToCutline=True,
+            cropToCutline=cropToCutline,
             targetAlignedPixels=True
         )
+        warp_options.update(kwargs)
 
-        with gdal.OpenEx(source_raster, gdal.OF_RASTER|gdal.OF_READONLY) as src_ds:
+        with gdal.OpenEx(source, gdal.OF_RASTER|gdal.OF_READONLY) as src_ds:
             src_srs = src_ds.GetSpatialRef()
             prj_equal = proj_are_equal(src_srs, target_srs)
             if not prj_equal:
                 # reproject raster mask to target projection
                 logger.debug(f'Reprojecting {src_ds} {target_srs}')
                 warp_options.update(dict(dstSRS=self.projection))
-            dst_path = source_raster.replace('.tif', '_r.tif')
-            rds = gdal.Warp(destNameOrDestDS=dst_path, srcDSOrSrcDSTab=src_ds, **warp_options)
-            return dst_path
+            rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
+            assert os.path.exists(dst), f'Failed to align {source}'
+            if return_handle:
+                return rds
 
     def publish(self, yes=False):
         """

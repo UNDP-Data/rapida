@@ -4,6 +4,7 @@ import os
 import shutil
 from cbsurge.session import Session
 from cbsurge.components.population.variables import generate_variables as gen_pop_vars
+from cbsurge.components.builtenv.electricity.variables import generate_variables as gen_electric_vars
 from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,8 @@ def setup_prompt(session: Session):
     session.save_config()
     vars_dict = {
         "variables": {
-            "population":  gen_pop_vars()
+            "population":  gen_pop_vars(),
+            "builtenv.electricity": gen_electric_vars(),
         }
     }
     session.config.update(vars_dict)

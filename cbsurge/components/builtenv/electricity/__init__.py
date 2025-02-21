@@ -87,13 +87,15 @@ class ElectricityComponent(Component, ABC):
 
 
 
-class ElectricityVariable(Variable, ABC):
+class ElectricityVariable(Variable):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        project = Project(path=os.getcwd())
+        #project = Project(path=os.getcwd())
 
     def download(self, **kwargs):
-        url = self.source
+        print(kwargs)
+        url = self.ge
+        print(self.source)
         # TODO: download data within polygons layer in geopackage
         self.download_geodata_by_admin(dataset_url=url, geopackage_path=self.geopackage_path)
 

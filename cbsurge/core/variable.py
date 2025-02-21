@@ -24,6 +24,7 @@ from cbsurge.az import blobstorage
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
 from cbsurge.util.downloader import downloader
+from cbsurge.util.read_bbox import read_bbox
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -45,7 +46,8 @@ class Variable(BaseModel):
         """
         Initialize the object with the provided arguments.
         """
-
+        assert 'name' in kwargs, f'"name" arg is required to create a variable'
+        assert 'component' in kwargs, f'"component" arg is required to create a variable'
         super().__init__(**kwargs)
         self.__dict__.update(kwargs)
 
@@ -56,6 +58,7 @@ class Variable(BaseModel):
         except (SyntaxError, AttributeError):
             pass
         project = Project(path=os.getcwd())
+
         self._source_folder_ = os.path.join(project.data_folder, self.component, self.name)
 
 
@@ -110,21 +113,27 @@ class Variable(BaseModel):
         assert dataset_url, 'Dataset URL is required'
         dataset_info = read_info(dataset_url)
         assert dataset_info, f'Could not read info from {dataset_url}. Please check the URL or the dataset format'
-
         layer_name = dataset_info['layer_name']
         srs_epsg_code = int(dataset_info['crs'].split(':')[-1])
         src_srs = osr.SpatialReference()
         src_srs.ImportFromEPSG(srs_epsg_code)
+        src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
         ndownloaded = 0
         failed = []
         try:
-            with ogr.Open(geopackage_path, 1) as project_dataset:
+            with gdal.OpenEx(geopackage_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as project_dataset:
                 admin_layer = project_dataset.GetLayerByName('polygons')
                 admin_srs = admin_layer.GetSpatialRef()
-                destination_layer = project_dataset.CreateLayer(layer_name, srs=admin_srs, geom_type=ogr.wkbMultiLineString, options=['OVERWRITE=YES'])
+                tr = osr.CoordinateTransformation(admin_srs, src_srs)
+                destination_layer = project_dataset.CreateLayer(
+                    layer_name,
+                    srs=src_srs,
+                    geom_type=ogr.wkbMultiLineString,
+                    options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+                )
 
-                all_features = [e for e in admin_layer]
+                all_features = [e for e in admin_layer][:1]
                 stop = threading.Event()
                 jobs = deque()
                 results = deque()
@@ -132,14 +141,21 @@ class Variable(BaseModel):
                     with Progress() as progress:
                         for feature in all_features:
                             au_geom = feature.GetGeometryRef()
-                            au_geom.TransformTo(admin_srs)
+
+                            au_geom.Transform(tr)
+                            # print(au_geom)
+                            # extent = au_geom.GetEnvelope()
+                            # print(extent)
+                            # bb = extent[0], extent[2], extent[1], extent[3]
+                            # print(bb)
+
                             au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
                             props = feature.items()
-                            au_name = props['name'] if 'name' in props else props['h3id']
-
+                            au_name = props['name'] if 'name' in props else feature.GetFID()
                             job = dict(
                                 src_path=dataset_url,
                                 mask=au_poly,
+                                #bbox = bb,
                                 batch_size=batch_size,
                                 signal_event=stop,
                                 name=au_name,
@@ -149,40 +165,52 @@ class Variable(BaseModel):
                             jobs.append(job)
                         njobs = len(jobs)
                         total_task = progress.add_task(
-                            description=f'[red]Going to from {njobs} admin units', total=njobs)
+                            description=f'[red]Going to download data covering  {njobs} admin units', total=njobs)
                         nworkers = njobs if njobs < NWORKERS else NWORKERS
                         [executor.submit(downloader, jobs, results, stop) for i in range(nworkers)]
+                        nfields = destination_layer.GetLayerDefn().GetFieldCount()
+
                         while True:
                             try:
                                 try:
                                     au_name, meta, batches = results.pop()
+                                    logger.info(au_name)
                                     if batches is None:
+                                        logger.debug(f'{au_name} was processed')
                                         raise meta
-                                    logger.debug(f'{au_name} was processed')
-                                    for batch in batches:
-                                        # print(batch.num_rows, au_name)
-                                        for name in batch.schema.names:
-                                            if 'wkb' in name or 'geometry' in name: continue
-                                            field = batch.schema.field(name)
-                                            field_type = ARROWTYPE2OGRTYPE[field.type]
 
-                                            if not destination_layer.GetLayerDefn().GetFieldIndex(name):
-                                                destination_layer.CreateField(ogr.FieldDefn(name, field_type))
+                                    for batch in batches:
+
+                                        if nfields == 0:
+                                            logger.info('Creating fields')
+                                            for name in batch.schema.names:
+                                                if 'wkb' in name or 'geometry' in name:continue
+                                                field = batch.schema.field(name)
+                                                field_type = ARROWTYPE2OGRTYPE[field.type]
+                                                if destination_layer.GetLayerDefn().GetFieldIndex(name) == -1:
+                                                    destination_layer.CreateField(ogr.FieldDefn(name, field_type))
+
+                                            nfields = destination_layer.GetLayerDefn().GetFieldCount()
+                                            destination_layer.SyncToDisk()
 
                                         lengths = pc.binary_length(batch.column("wkb_geometry"))
                                         mask = pc.greater(lengths, 0)
                                         should_filter = pc.any(pc.invert(mask)).as_py()
                                         if should_filter:
                                             batch = batch.filter(mask)
+
                                         if batch.num_rows == 0:
                                             logger.info('skipping batch')
                                             continue
+
+                                        batch = batch.rename_columns({"wkb_geometry": "geometry"})  # Example
+
                                         try:
-                                            print(batch.num_rows, au_name)
                                             destination_layer.WritePyArrow(batch)
                                         except Exception as e:
+                                            print(batch.column_names)
                                             logger.info(
-                                                f'batch with {batch.num_rows} rows from {au_name} failed with error {e} and will be ignored')
+                                                f'writing batch with {batch.num_rows} rows from {au_name} failed with error {e} and will be ignored')
 
                                     destination_layer.SyncToDisk()
                                     ndownloaded += 1

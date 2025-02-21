@@ -1,6 +1,6 @@
 import logging
 import time
-
+from cbsurge.components.builtenv.buildings.preprocessing import geoarrow_schema_adapter
 from pyogrio import open_arrow
 
 logger = logging.getLogger(__name__)

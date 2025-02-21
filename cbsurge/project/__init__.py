@@ -2,16 +2,14 @@
 import os
 import click
 import logging
-from osgeo import gdal
 import sys
 from cbsurge.az.fileshare import list_projects, upload_project, download_project
 from rich.progress import Progress
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
+logger = setup_logger()
 
-logger = logging.getLogger(__name__)
-gdal.UseExceptions()
 
 @click.command(no_args_is_help=True, short_help='create a RAPIDA project in a new folder')
 @click.option('-n', '--name', required=True, type=str,
@@ -25,7 +23,6 @@ gdal.UseExceptions()
 
 def create(name=None, polygons=None, mask=None, comment=None):
 
-    logger = logging.getLogger('rapida')
     abs_folder = os.path.abspath(name)
     if os.path.exists(abs_folder):
         logger.error(f'Folder "{name}" already exists in {os.getcwd()}')

@@ -245,8 +245,9 @@ class Variable(BaseModel):
                         self.compute(**kwargs)
                 else:
                     #logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
-                    sources = self.resolve(evaluate=True, **kwargs)
-
+                    sources = self.resolve(**kwargs)
+            print(self.local_path)
+            self.local_path = pro
             multinational = kwargs.get('multinational', False)
             if not multinational:
                 return self.evaluate(**kwargs)

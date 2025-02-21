@@ -17,7 +17,7 @@ from cbsurge.core.component import Component
 
 logger = logging.getLogger(__name__)
 
-class ElectricityGrid(Component, ABC):
+class ElectricityComponent(Component, ABC):
 
     dataset_url = 'https://geohub.data.undp.org/api/datasets/310aadaa61ea23811e6ecd75905aaf29'
 
@@ -51,7 +51,7 @@ class ElectricityVariable(Variable, ABC):
         print(project.geopackage_file_name)
 
     def download(self, **kwargs):
-        grid_component = ElectricityGrid()
+        grid_component = ElectricityComponent()
         url = grid_component.get_url
         self.download_geodata_by_admin(dataset_url=url)
         data = http_get_json(url)

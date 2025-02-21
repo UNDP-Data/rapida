@@ -78,7 +78,7 @@ def setup_prompt(session: Session):
     vars_dict = {
         "variables": {
             "population":  gen_pop_vars(),
-            "electricity": gen_electric_vars(),
+            "builtenv.electricity": gen_electric_vars(),
         }
     }
     session.config.update(vars_dict)

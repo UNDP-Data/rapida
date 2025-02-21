@@ -88,20 +88,15 @@ class ElectricityComponent(Component, ABC):
 
 
 class ElectricityVariable(Variable, ABC):
-
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         project = Project(path=os.getcwd())
-        print(project.geopackage_file_name)
 
     def download(self, **kwargs):
-        # grid_component = ElectricityComponent()
-        # url = grid_component.get_url
         url = self.source
         # TODO: download data within polygons layer in geopackage
-        self.download_geodata_by_admin(dataset_url=url)
-        data = http_get_json(url)
-        return data
+        self.download_geodata_by_admin(dataset_url=url, geopackage_path=self.geopackage_path)
+
 
     def evaluate(self, **kwargs):
         pass
@@ -157,7 +152,8 @@ def compute_grid_length(output_path, output_crs='ESRI:54009'):
     split_lines = gpd.overlay(grid_dataset_df, admin_dataset_df, how='intersection')
 
     # Calculate length for each split line
-    split_lines['electricity_grid_length'] = np.divide(split_lines.geometry.length, 1000)  # in km
+    # split_lines['electricity_grid_length'] = np.divide(split_lines.geometry.length, 1000)  # in km
+    split_lines['electricity_grid_length'] = split_lines.geometry.length
 
     # Aggregate total length per admin unit
     length_per_admin = split_lines.groupby('name', as_index=False)['electricity_grid_length'].sum()

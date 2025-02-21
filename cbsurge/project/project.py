@@ -10,17 +10,15 @@ import sys
 import webbrowser
 import click
 import geopandas
-import rasterio.warp
 from osgeo import gdal, ogr, osr
 from pyproj import CRS as pCRS
-from rasterio.crs import CRS as rCRS
 from cbsurge.util import geo
 from cbsurge import constants
 from cbsurge.admin.osm import fetch_admin
 from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.session import Session
 from cbsurge.util.dataset2pmtiles import dataset2pmtiles
-from pyogrio import write_dataframe
+
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -62,11 +60,10 @@ class Project:
             #     self._cfg_['mask'] = mask
             if comment:
                 self._cfg_['comment'] = comment
-            bbox = None
-            target_crs = pCRS.from_user_input(self.projection)
+
             target_srs = osr.SpatialReference()
             target_srs.SetFromUserInput(self.projection)
-
+            target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
             if polygons is not None:
                 l = geopandas.list_layers(polygons)
                 lnames = l.name.tolist()
@@ -80,49 +77,48 @@ class Project:
                     layer_name = lnames[0]
                 if not os.path.exists(self.data_folder):
                     os.makedirs(self.data_folder)
-                gdf = geopandas.read_file(polygons, layer=layer_name, )
 
-                src_crs = gdf.crs
-                src_bbox = tuple(map(float, gdf.total_bounds))
-                if not src_crs.is_exact_same(target_crs):
-                    gdf.to_crs(crs=target_crs, inplace=True)
+                geo.import_vector(
+                    src_dataset=polygons,
+                    src_layer=layer_name,
+                    dst_dataset=self.geopackage_file_path,
+                    dst_layer=constants.POLYGONS_LAYER_NAME,
+                    target_srs=target_srs,
+                )
 
-                bbox = tuple(map(float,gdf.total_bounds))
+
+                gdf = geopandas.read_file(self.geopackage_file_path, layer=constants.POLYGONS_LAYER_NAME )
+                proj_bounds = tuple(map(float,gdf.total_bounds))
                 cols = gdf.columns.tolist()
                 if not ('h3id' in cols and 'undp_admin_level' in cols):
                     logger.info(f'going to add country code into "iso3" column')
+                    geo_srs = osr.SpatialReference()
+                    geo_srs.ImportFromEPSG(4326)
+                    geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                    coord_trans = osr.CoordinateTransformation(target_srs, geo_srs)
+                    geo_bounds = coord_trans.TransformBounds(*proj_bounds,21)
 
-                    if not src_crs.to_epsg() == 4326:
-                        left, bottom, right, top = src_bbox
-                        bb = rasterio.warp.transform_bounds(src_crs=rCRS.from_epsg(src_crs.to_epsg()),
-                                                              dst_crs=rCRS.from_epsg(4326),
-                                                              left=left, bottom=bottom,
-                                                              right=right, top=top,
+                    admin0_polygons = fetch_admin(bbox=geo_bounds,admin_level=0)
 
-                                                                   )
-                    else:
-                        bb = src_bbox
-
-                    a0_polygons = fetch_admin(bbox=bb,admin_level=0)
-                    a0_gdf = None
-                    with io.BytesIO(json.dumps(a0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
+                    target_crs = pCRS.from_user_input(self.projection)
+                    with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
                         a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
-                    rgdf_centroids = gdf.copy()
-                    rgdf_centroids["geometry"] = gdf.centroid
-                    jgdf = geopandas.sjoin(rgdf_centroids, a0_gdf, how="left", predicate="within", )
-                    jgdf['geometry'] = gdf['geometry']
-                    gdf = jgdf
-                self._cfg_['countries'] = tuple(set(gdf['iso3']))
+                    centroids = gdf.copy()
+                    centroids["geometry"] = gdf.centroid
+                    joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
+                    joined['geometry'] = gdf['geometry']
 
-                gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
-                             promote_to_multi=True)
+                    self._cfg_['countries'] = tuple(set(joined['iso3']))
 
-                self.save()
+                    joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                                 promote_to_multi=True)
+
+                    self.save()
 
             if mask is not None:
                 logger.debug(f'Got mask {mask}')
 
-                raster_mask_local_path = os.path.join(self.data_folder, 'mask.tif')
+                raster_mask_local_path = os.path.join(self.data_folder, f'{vector_mask_layer}.tif')
                 if geo.is_raster(mask):
                     logger.info(f'Got raster mask')
                     '''
@@ -132,91 +128,48 @@ class Project:
                     in this case we are removing completely the mask
                     '''
 
-                    rds = geo.align_raster(target_srs=target_srs,
-                        source=mask,dst=raster_mask_local_path,
-                        crop_ds=self.geopackage_file_path,
-                        crop_layer_name=constants.POLYGONS_LAYER_NAME,
-                        return_handle=True,
-                        outputType=gdal.GDT_Byte,srcNodata=None, dstNodata="none",
-                        targetAlignedPixels=True
+                    geo.import_raster(target_srs=target_srs,
+                                      source=mask, dst=raster_mask_local_path,
+                                      crop_ds=self.geopackage_file_path,
+                                      crop_layer_name=constants.POLYGONS_LAYER_NAME,
+                                      return_handle=False,
+                                      outputType=gdal.GDT_Byte, srcNodata=None, dstNodata="none",
+                                      targetAlignedPixels=True,
+
+                                      )
+                    '''
+                    the vector mask will be created now through polygonization
+                    
+                    '''
+                    geo.polygonize_raster_mask(
+                        raster_ds=raster_mask_local_path,
+                        dst_dataset=self.geopackage_file_path,
+                        dst_layer=vector_mask_layer,
+                        geom_type=ogr.wkbMultiPolygon
                     )
 
                 if geo.is_vector(mask):
+
                     logger.info(f'Got vector mask')
-                # try:
-                #     with gdal.OpenEx(mask, gdal.OF_RASTER|gdal.OF_READONLY) as mds:
-                #         pass
-                #     '''
-                #     align raster uses gdalwarp to (1) reproject if there is a need and (2)
-                #     crop the source with "polygons" layer
-                #     additionally it can take ANY keyword args tha gdalwarp takes.
-                #     in this case we are removing completely the mask
-                #     '''
-                #
-                #     rds = geo.align_raster(
-                #         source=mask,dst=raster_mask_local_path,
-                #         cropToCutline=True,return_handle=True,
-                #         outputType=gdal.GDT_Byte,srcNodata=None, dstNodata="none",
-                #         targetAlignedPixels=True
-                #     )
-                #     # we polygonize the mask
-                #     with gdal.OpenEx(self.geopackage_file_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as vds:
-                #         logger.info(f'Polygonizing {raster_mask_local_path} ')
-                #         mband = rds.GetRasterBand(1)
-                #         mask_lyr = vds.CreateLayer('mask', geom_type=ogr.wkbMultiPolygon, srs=rds.GetSpatialRef())
-                #         r = gdal.Polygonize(srcBand=mband, maskBand=mband,outLayer=mask_lyr,iPixValField=-1)
-                #
-                #         assert r == 0, f'Failed to polygonize {raster_mask_local_path}'
-                #         for feature in mask_lyr:
-                #             geom = feature.GetGeometryRef()
-                #             simplified_geom = geom.Simplify(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)  # Use SimplifyPreserveTopology(tolerance) if needed
-                #             smoothed_geom = simplified_geom.Buffer(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER).Buffer(-constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)
-                #             feature.SetGeometry(smoothed_geom)
-                #             mask_lyr.SetFeature(feature)  # Save changes
-                #         rds = None
-                #
-                # except RuntimeError as e:
-                #     if mask in str(e):
-                #         with gdal.OpenEx(mask, gdal.OF_VECTOR|gdal.OF_READONLY) as mds:
-                #             logger.debug(f'Mask is a vector')
-                #             lyr = mds.GetLayer(0)
-                #             lyr_name = lyr.GetName()
-                #             gdf = geopandas.read_file(mask, layer=lyr_name)
-                #             target_crs = pCRS.from_user_input(self.projection)
-                #             src_crs = gdf.crs
-                #             if not src_crs.is_exact_same(target_crs):
-                #                 gdf.to_crs(crs=target_crs, inplace=True)
-                #             pgdf = geopandas.read_file(self.geopackage_file_path, layer='polygons')
-                #             gdf = geopandas.clip(gdf=gdf, mask=pgdf)
-                #             gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w',
-                #                         layer=vector_mask_layer,
-                #                         promote_to_multi=True)
-                #             with io.BytesIO() as bio:
-                #                 vpath = f'/vsimem/{vector_mask_layer}.fgb'
-                #                 write_dataframe(df=gdf, path=bio, layer=vector_mask_layer, driver='FlatGeobuf')
-                #                 gdal.FileFromMemBuffer(vpath, bio.getbuffer())
-                #                 try:
-                #                     with gdal.OpenEx(vpath) as clipped_mds:
-                #                         creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256, BLOCKYSIZE=256)
-                #                         rasterize_options = gdal.RasterizeOptions(
-                #                             format='GTiff', outputType=gdal.GDT_Byte,
-                #                             creationOptions=creation_options, noData=None, initValues=0,
-                #                             burnValues=1, layers=[lyr_name],
-                #                             xRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                #                             yRes=constants.DEFAULT_MASK_RESOLUTION_METERS,
-                #                             targetAlignedPixels=True,
-                #                             outputBounds=bbox
-                #                         )
-                #
-                #                         rds = gdal.Rasterize(destNameOrDestDS=raster_mask_local_path, srcDS=clipped_mds,options=rasterize_options)
-                #                         rds = None
-                #
-                #
-                #                 finally:
-                #                     gdal.Unlink(vpath)
-                #
-                #     else:
-                #         raise e
+                    # import vector mask
+                    geo.import_vector(
+                        src_dataset=mask,
+                        dst_dataset=self.geopackage_file_path,
+                        dst_layer=vector_mask_layer,
+                        target_srs=target_srs,
+                        clip_dataset=self.geopackage_file_path,
+                        clip_layer=constants.POLYGONS_LAYER_NAME
+                    )
+
+                    # rasterize the imported mask
+                    geo.rasterize_vector_mask(
+                        src_dataset=self.geopackage_file_path,
+                        src_layer=vector_mask_layer,
+                        dst_dataset=raster_mask_local_path
+
+                    )
+
+
     def load_config(self):
         """Load configuration safely to avoid recursion"""
         try:

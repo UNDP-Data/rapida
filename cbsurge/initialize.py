@@ -2,24 +2,25 @@ import logging
 import click
 import os
 import shutil
-
-from requests import session
-
 from cbsurge.session import Session
 from cbsurge.components.population.variables import generate_variables as gen_pop_vars
-
+from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
 
 
 def setup_prompt(session: Session):
-    credential, token = session.authenticate()
-    logger.debug(token)
-    if token is None:
-        click.prompt("Authentication failed.Please `az login` to authenticate first.")
-        return
+    auth = session.authenticate()
+    if auth is None:
+        if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
+            click.echo("Initialization will continue without authentication. Please authenticate later.")
+        else:
+            click.echo("rapida init was cancelled. Please authenticate later.")
+            return
+    else:
+        click.echo("Authentication successful.")
 
-    click.echo("Authentication successful. We need more information to setup from you.")
+    click.echo("We need more information to setup from you.")
 
     # project root data folder
     root_data_folder = None
@@ -91,6 +92,7 @@ def setup_prompt(session: Session):
               )
 def init(debug=False):
     """ Initialize rapida tool"""
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     click.echo("Welcome to rapida CLI tool!")
     with Session() as session:

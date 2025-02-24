@@ -40,9 +40,11 @@ class Project:
 
         if path is None:
             raise ValueError("Project path cannot be None")
-
         self.path = os.path.abspath(path)
         self.geopackage_file_name = f"{os.path.basename(self.path)}.gpkg"
+        self.target_srs = osr.SpatialReference()
+        self.target_srs.SetFromUserInput(self.projection)
+        self.target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
         if not polygons:
             self.load_config()  # ✅ Call a function that loads config safely
 
@@ -61,9 +63,7 @@ class Project:
             if comment:
                 self._cfg_['comment'] = comment
 
-            target_srs = osr.SpatialReference()
-            target_srs.SetFromUserInput(self.projection)
-            target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
             if polygons is not None:
                 l = geopandas.list_layers(polygons)
                 lnames = l.name.tolist()
@@ -83,7 +83,7 @@ class Project:
                     src_layer=layer_name,
                     dst_dataset=self.geopackage_file_path,
                     dst_layer=constants.POLYGONS_LAYER_NAME,
-                    target_srs=target_srs,
+                    target_srs=self.target_srs,
                 )
 
 
@@ -95,7 +95,7 @@ class Project:
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
                     geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-                    coord_trans = osr.CoordinateTransformation(target_srs, geo_srs)
+                    coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
                     geo_bounds = coord_trans.TransformBounds(*proj_bounds,21)
 
                     admin0_polygons = fetch_admin(bbox=geo_bounds,admin_level=0)
@@ -128,12 +128,12 @@ class Project:
                     in this case we are removing completely the mask
                     '''
 
-                    geo.import_raster(target_srs=target_srs,
+                    geo.import_raster(target_srs=self.target_srs,
                                       source=mask, dst=raster_mask_local_path,
                                       crop_ds=self.geopackage_file_path,
                                       crop_layer_name=constants.POLYGONS_LAYER_NAME,
                                       return_handle=False,
-                                      outputType=gdal.GDT_Byte, srcNodata=None, dstNodata="none",
+                                      outputType=gdal.GDT_Byte, srcNodata=None, dstNodata=0,
                                       targetAlignedPixels=True,
 
                                       )
@@ -156,7 +156,7 @@ class Project:
                         src_dataset=mask,
                         dst_dataset=self.geopackage_file_path,
                         dst_layer=vector_mask_layer,
-                        target_srs=target_srs,
+                        target_srs=self.target_srs,
                         clip_dataset=self.geopackage_file_path,
                         clip_layer=constants.POLYGONS_LAYER_NAME
                     )

@@ -3,7 +3,6 @@ from osgeo import gdal, ogr, osr
 from cbsurge.util.proj_are_equal import proj_are_equal
 import os
 import logging
-from functools import partial, wraps
 logger = logging.getLogger('rapida')
 gdal.UseExceptions()
 
@@ -30,14 +29,14 @@ is_raster = lambda src: isgdal(src=src, file_type='raster')
 is_vector = lambda src: isgdal(src=src, file_type='vector')
 
 
-def import_raster(target_srs=None, source=None, dst=None,
+def import_raster(source=None, dst=None, target_srs=None,
                   x_res: int = constants.DEFAULT_MASK_RESOLUTION_METERS,
                   y_res: int = constants.DEFAULT_MASK_RESOLUTION_METERS,
                   crop_ds=None, crop_layer_name=None, return_handle=False,
                   **kwargs
                   ):
     """
-    Import a rastter into RAPIDA project ans GeoTiff
+    Import a raster into RAPIDA project as a GeoTiff
     :param target_srs:
     :param source:
     :param dst:
@@ -53,7 +52,8 @@ def import_raster(target_srs=None, source=None, dst=None,
     assert crop_layer_name not in ('', None), f'crop_layer_name: {crop_layer_name} is invalid'
     assert is_vector(crop_ds), f'{crop_ds} is not a vector dataset'
 
-    should_crop = crop_ds and crop_layer_name
+    should_crop = crop_ds is not None and crop_layer_name not in ('', None)
+
 
     warp_options = dict(
         format='GTiff',
@@ -101,11 +101,21 @@ def polygonize_raster_mask(raster_ds=None, band=1, dst_dataset=None, dst_layer=N
 
 def import_vector(src_dataset=None, src_layer=0, dst_dataset=None, dst_layer=None, access_mode=None, target_srs=None,
                   clip_dataset=None, clip_layer=None, return_handle=False):
+    """
+    Import a vector layer into RAPIDA.
+    Essentially this will reproject, crop and save to project GPKG
+    :param src_dataset:
+    :param src_layer:
+    :param dst_dataset:
+    :param dst_layer:
+    :param access_mode:
+    :param target_srs:
+    :param clip_dataset:
+    :param clip_layer:
+    :param return_handle:
+    :return:
+    """
     layer_creation_options = ['OVERWRITE=YES']
-    # gdal.VectorTranslateOptions(format='GPKG', accessMode='update',dstSRS=target_srs,reproject=True,
-    #                             layerName=dst_layer,clipDst=clip_dataset, clipDstLayer=clip_layer,makeValid=True,
-    #                             preserveFID=True,layerCreationOptions=layer_creation_options)
-
     with gdal.OpenEx(src_dataset, gdal.OF_VECTOR|gdal.OF_READONLY) as src_ds:
         try:
             int(src_layer)

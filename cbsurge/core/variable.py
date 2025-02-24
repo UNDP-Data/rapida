@@ -11,6 +11,11 @@ from collections import deque
 from typing import List
 from typing import Optional, Union
 
+from fontTools.misc.cython import returns
+from osgeo_utils.gdal_calc import Calc
+from cbsurge import constants
+
+from cbsurge.util import geo
 import shapely
 from osgeo import gdal, ogr, osr
 from pyarrow import compute as pc
@@ -81,7 +86,7 @@ class Variable(BaseModel):
         return f'vrt://{self.local_path}?{urlencode(kwargs)}'
 
 
-    def download(self, **kwargs):
+    def download_from_azure(self, **kwargs):
 
         """Download variable"""
         logger.debug(f'Downloading {self.name}')
@@ -89,13 +94,15 @@ class Variable(BaseModel):
         _, file_name = os.path.split(src_path)
         self.local_path = os.path.join(self._source_folder_, file_name)
         if os.path.exists(self.local_path):
+            self._compute_affected_()
             return self.local_path
         if not os.path.exists(self._source_folder_):
             os.makedirs(self._source_folder_)
         logger.info(f'Going to download {self.name} from {src_path}')
-        downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path)                             )
+        downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path))
+        self.import_raster()
         assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
-
+        self._compute_affected_()
 
     def download_geodata_by_admin(self, dataset_url, admin_path=None, country_col_name='iso3', admin_col_name="undp_admin_level", out_path=None,
                                 batch_size=5000, NWORKERS=4):
@@ -231,7 +238,7 @@ class Variable(BaseModel):
             if not self.dep_vars: #simple variable,
                 if not force_compute:
                     # logger.debug(f'Downloading {self.name} source')
-                    self.download(**kwargs)
+                    self.download_from_azure(**kwargs)
                 else:
                     # logger.debug(f'Computing {self.name} using gdal_calc from sources')
                     self.compute(**kwargs)
@@ -239,21 +246,54 @@ class Variable(BaseModel):
                 if self.operator:
                     if not force_compute:
                         # logger.debug(f'Downloading {self.name} from  source')
-                        self.download(**kwargs)
+                        self.download_from_azure(**kwargs)
                     else:
                         # logger.debug(f'Computing {self.name}={self.sources} using GDAL')
                         self.compute(**kwargs)
                 else:
                     #logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
                     sources = self.resolve(**kwargs)
-            print(self.local_path)
-            self.local_path = pro
             multinational = kwargs.get('multinational', False)
             if not multinational:
                 return self.evaluate(**kwargs)
 
 
+    def import_raster(self):
+        local_path = self.local_path
+        project = Project(os.getcwd())
+        path, file_name = os.path.split(local_path)
+        fname, ext = os.path.splitext(file_name)
+        imported_local_path = os.path.join(path, f'{fname}_imported{ext}')
 
+        geo.import_raster(
+            source=local_path,
+            dst=imported_local_path,
+            target_srs=project.target_srs,
+            crop_ds=project.geopackage_file_path,
+            crop_layer_name=constants.POLYGONS_LAYER_NAME,
+        )
+
+        os.remove(local_path)
+        os.rename(imported_local_path, local_path)
+        self.local_path = local_path
+
+    def _compute_affected_(self, **kwargs):
+        if geo.is_raster(self.local_path):
+            force_compute = kwargs.get('force_compute', False)
+            project = Project(os.getcwd())
+            path, file_name = os.path.split(self.local_path)
+            fname, ext = os.path.splitext(file_name)
+            affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
+            if os.path.exists(affected_local_path) and not force_compute:
+                return affected_local_path
+            else:
+
+                ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
+                          creation_options=constants.GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                          NoDataValue=None,
+                          local_path=self.local_path, mask=project.raster_mask)
+                ds = None
+                return affected_local_path
 
     def interpolate_template(self, template=None, **kwargs):
         """

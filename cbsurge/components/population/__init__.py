@@ -259,6 +259,8 @@ class PopulationVariable(Variable):
 
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
+        self.import_raster()
+        self._compute_affected_(**kwargs)
 
     def resolve(self,  **kwargs):
         with Session() as s:
@@ -282,8 +284,6 @@ class PopulationVariable(Variable):
                 polygons_layer = dst_layer
             else:
                 polygons_layer='polygons'
-
-
             if self.operator:
 
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'

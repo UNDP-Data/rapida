@@ -7,9 +7,11 @@ from exactextract import exact_extract
 from typing import Iterable
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
+from pygments.lexer import combined
+
 from cbsurge.util.proj_are_equal import proj_are_equal
 from osgeo_utils.gdal_calc import Calc
-
+import pandas as pd
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -215,13 +217,13 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
 
         return combined_results
 
-
-
 def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
                 vars_ops:Iterable[tuple[str, str]]=None):
     with gdal.OpenEx(polygon_ds, gdal.OF_READONLY|gdal.OF_VECTOR) as polyds:
         poly_lyr = polyds.GetLayerByName(polygon_layer)
         poly_srs = poly_lyr.GetSpatialRef()
+        extracted_data = {}
+
         for n, src_raster in enumerate(src_rasters):
             with gdal.OpenEx(src_raster, gdal.OF_RASTER|gdal.OF_READONLY) as srcds:
                 src_srs = srcds.GetSpatialRef()
@@ -229,4 +231,18 @@ def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
                 var_name, operation = vars_ops[n]
                 df = exact_extract(src_raster, poly_lyr, ops=[operation], include_geom=not n, output='pandas')
                 df.rename(columns={operation: var_name}, inplace=True)
-                print(df.columns)
+                if n == 0:
+                    df['tempid'] = range(1, len(df) + 1)
+                    extracted_data['tempid'] = df['tempid']
+                    extracted_data['geometry'] = df['geometry']
+
+                extracted_data[var_name] = df[var_name]
+        combined = pd.concat(extracted_data, axis=1)
+
+        egdf = geopandas.read_file(polygon_ds, layer=polygon_layer)
+        for e in vars_ops:
+            vname = e[0]
+            if vname in egdf.columns.tolist():
+                egdf.drop(columns=[vname], inplace=True)
+        combined = egdf.merge(combined, on='geometry', how='inner')
+        return combined

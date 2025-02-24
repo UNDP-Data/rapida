@@ -220,7 +220,6 @@ class PopulationVariable(Variable):
     def compute(self, **kwargs):
 
         logger.debug(f'Computing {self.name}')
-        overwrite = kwargs.get('force_compute', None)
 
         if not self.dep_vars:
             logger.debug(f'Going to download {self.name} from source files')
@@ -241,7 +240,7 @@ class PopulationVariable(Variable):
             _, file_name = os.path.split(src_path)
             local_path = os.path.join(self._source_folder_, file_name)
             logger.info(f'Going to compute {self.name} from {len(downloaded_files)} source files')
-            computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=overwrite)
+            computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=True)
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
         else:
@@ -255,12 +254,12 @@ class PopulationVariable(Variable):
             creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
 
             ds = Calc(calc=self.sources, outfile=computed_file,  projectionCheck=True, format='GTiff',
-                      creation_options=creation_options.split(' '), quiet=False, overwrite=overwrite,  **sources)
+                      creation_options=creation_options.split(' '), quiet=False, overwrite=True,  **sources)
 
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
         self.import_raster()
-        self._compute_affected_(**kwargs)
+        self._compute_affected_()
 
     def resolve(self,  **kwargs):
         with Session() as s:
@@ -291,37 +290,22 @@ class PopulationVariable(Variable):
                 # raster variable, run zonal stats
                 src_rasters = [self.local_path]
                 var_ops = [(self.name, self.operator)]
-                # if project.raster_mask is not None:
-                #     with gdal.OpenEx(project.geopackage_file_path) as mds, gdal.OpenEx(self.local_path) as vards:
-                #
-                #         l = mds.GetLayerByName('polygons')
-                #         mask_srs = l.GetSpatialRef()
-                #         xmin, xmax, ymin, ymax = l.GetExtent()
-                #         prj_srs = vards.GetSpatialRef()
-                #         if not proj_are_equal(mask_srs, prj_srs):
-                #             creation_options = dict(TILED='YES', COMPRESS='ZSTD', BIGTIFF='IF_SAFER', BLOCKXSIZE=256,
-                #                                     BLOCKYSIZE=256)
-                #             warp_options = gdal.WarpOptions(
-                #                 format='GTiff',xRes=100, yRes=100,targetAlignedPixels=True,
-                #                 creationOptions=creation_options,
-                #                 outputBounds=(xmin, ymin, xmax, ymax),
-                #                 outputBoundsSRS=mask_srs,
-                #                 dstSRS=mask_srs,
-                #             )
-                #             _, name = os.path.split(self.local_path)
-                #             dst_path = f'/vsimem/{name}'
-                #             rds = gdal.Warp(destNameOrDestDS=dst_path, srcDSOrSrcDSTab=vards,
-                #                             options=warp_options)
-                #
-                #
-                #
-                #             src_rasters.append(dst_path)
-                #             var_ops.append((f'{self.name}_affected', self.operator))
-                # print(src_rasters)
-                gdf = zonal_stats(src_rasters=src_rasters,
-                                      polygon_ds=project.geopackage_file_path,
-                                      polygon_layer=polygons_layer, vars_ops=var_ops
-                                      )
+                if project.raster_mask is not None:
+                    path, file_name = os.path.split(self.local_path)
+                    fname, ext = os.path.splitext(file_name)
+                    affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
+
+                    src_rasters.append(affected_local_path)
+                    var_ops.append((f'{self.name}_affected', self.operator))
+
+                # gdf = zonal_stats(src_rasters=src_rasters,
+                #                       polygon_ds=project.geopackage_file_path,
+                #                       polygon_layer=polygons_layer, vars_ops=var_ops
+                #                       )
+                gdf = zst(src_rasters=src_rasters,
+                                  polygon_ds=project.geopackage_file_path,
+                                  polygon_layer=polygons_layer, vars_ops=var_ops
+                                  )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
                 year = kwargs.get('year')

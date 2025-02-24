@@ -277,23 +277,18 @@ class Variable(BaseModel):
         os.rename(imported_local_path, local_path)
         self.local_path = local_path
 
-    def _compute_affected_(self, **kwargs):
+    def _compute_affected_(self):
         if geo.is_raster(self.local_path):
-            force_compute = kwargs.get('force_compute', False)
             project = Project(os.getcwd())
             path, file_name = os.path.split(self.local_path)
             fname, ext = os.path.splitext(file_name)
             affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
-            if os.path.exists(affected_local_path) and not force_compute:
-                return affected_local_path
-            else:
-
-                ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
-                          creation_options=constants.GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
-                          NoDataValue=None,
-                          local_path=self.local_path, mask=project.raster_mask)
-                ds = None
-                return affected_local_path
+            ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
+                      creation_options=constants.GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                      NoDataValue=None,
+                      local_path=self.local_path, mask=project.raster_mask)
+            ds = None
+            return affected_local_path
 
     def interpolate_template(self, template=None, **kwargs):
         """

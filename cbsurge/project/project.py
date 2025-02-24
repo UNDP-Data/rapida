@@ -124,8 +124,13 @@ class Project:
                     '''
                     align raster uses gdalwarp to (1) reproject if there is a need and (2)
                     crop the source with "polygons" layer
-                    additionally it can take ANY keyword args tha gdalwarp takes.
-                    in this case we are removing completely the mask
+                    additionally it can take ANY keyword args that gdalwarp takes.
+                    The imported raster mask will have 0 as NODATA in order to avoid
+                    operating over nodata pixels when computing affected version of the variable
+                    
+                    This function could eventually have an a     priori step to make sure the original nodata
+                    value is set to zero in case the mask comes with nodata value
+                    
                     '''
 
                     geo.import_raster(target_srs=self.target_srs,
@@ -133,13 +138,15 @@ class Project:
                                       crop_ds=self.geopackage_file_path,
                                       crop_layer_name=constants.POLYGONS_LAYER_NAME,
                                       return_handle=False,
-                                      outputType=gdal.GDT_Byte, srcNodata=None, dstNodata=0,
+                                      outputType=gdal.GDT_Byte,
+                                      srcNodata=None, dstNodata=0, # this is gdalwarp specific kwrd
                                       targetAlignedPixels=True,
 
                                       )
                     '''
                     the vector mask will be created now through polygonization
-                    
+                    it assumes the maks has pixels with value=1 and 0 NODATA. The pixels with value=1
+                    are converted to polygons. Additionally are simplified and smoothed.
                     '''
                     geo.polygonize_raster_mask(
                         raster_ds=raster_mask_local_path,
@@ -165,7 +172,8 @@ class Project:
                     geo.rasterize_vector_mask(
                         src_dataset=self.geopackage_file_path,
                         src_layer=vector_mask_layer,
-                        dst_dataset=raster_mask_local_path
+                        dst_dataset=raster_mask_local_path,
+                        nodata_value=0
 
                     )
 

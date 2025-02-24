@@ -142,18 +142,19 @@ def import_vector(src_dataset=None, src_layer=0, dst_dataset=None, dst_layer=Non
 def rasterize_vector_mask(src_dataset=None, src_layer=0,
                           xres = constants.DEFAULT_MASK_RESOLUTION_METERS,
                           yres= constants.DEFAULT_MASK_RESOLUTION_METERS,
-                          dst_dataset=None
+                          dst_dataset=None, nodata_value=None
                           ):
 
 
     rasterize_options = gdal.RasterizeOptions(
         format='GTiff', outputType=gdal.GDT_Byte,
         creationOptions=constants.GTIFF_CREATION_OPTIONS,
-        noData=None, initValues=0,
+        noData=nodata_value, initValues=nodata_value,
         burnValues=1, layers=[src_layer],
         xRes=xres,
         yRes=yres,
         targetAlignedPixels=True,
+
 
     )
     rds = gdal.Rasterize(destNameOrDestDS=dst_dataset, srcDS=src_dataset, options=rasterize_options)

@@ -11,13 +11,16 @@ from collections import deque
 from typing import List
 from typing import Optional, Union
 
+from shapely import wkb
+from shapely.ops import transform
+from pyproj import Transformer
 import shapely
 from osgeo import gdal, ogr, osr
 from pyarrow import compute as pc
+import pyarrow as pa
 from pydantic import BaseModel, FilePath
 from pyogrio import read_info
 from rich.progress import Progress
-from sqlalchemy.testing.plugin.plugin_base import options
 from sympy.parsing.sympy_parser import parse_expr
 
 from cbsurge.az import blobstorage
@@ -112,15 +115,22 @@ class Variable(BaseModel):
         """
         assert dataset_url, 'Dataset URL is required'
         dataset_info = read_info(dataset_url)
+        admin_info = read_info(geopackage_path)
         assert dataset_info, f'Could not read info from {dataset_url}. Please check the URL or the dataset format'
         layer_name = dataset_info['layer_name']
+
         srs_epsg_code = int(dataset_info['crs'].split(':')[-1])
         src_srs = osr.SpatialReference()
         src_srs.ImportFromEPSG(srs_epsg_code)
         src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
+        destination_srs = osr.SpatialReference()
+        destination_srs.ImportFromEPSG(54009)
+        destination_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        transformer = Transformer.from_crs(4326, "ESRI:54009", always_xy=True)
         ndownloaded = 0
         failed = []
+        written_geometries = set()
         try:
             with gdal.OpenEx(geopackage_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as project_dataset:
                 admin_layer = project_dataset.GetLayerByName('polygons')
@@ -128,7 +138,7 @@ class Variable(BaseModel):
                 tr = osr.CoordinateTransformation(admin_srs, src_srs)
                 destination_layer = project_dataset.CreateLayer(
                     layer_name,
-                    srs=src_srs,
+                    srs=destination_srs,
                     geom_type=ogr.wkbMultiLineString,
                     options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                 )
@@ -141,9 +151,7 @@ class Variable(BaseModel):
                     with Progress() as progress:
                         for feature in all_features:
                             au_geom = feature.GetGeometryRef()
-
                             au_geom.Transform(tr)
-
                             au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
                             props = feature.items()
                             au_name = props['name'] if 'name' in props else feature.GetFID()
@@ -155,7 +163,6 @@ class Variable(BaseModel):
                                 signal_event=stop,
                                 name=au_name,
                                 progress=progress
-
                             )
                             jobs.append(job)
                         njobs = len(jobs)
@@ -173,8 +180,31 @@ class Variable(BaseModel):
                                     if batches is None:
                                         logger.debug(f'{au_name} was processed')
                                         raise meta
-
                                     for batch in batches:
+                                        new_geoms = []
+                                        mask = []
+                                        geom_idx = batch.schema.get_field_index('wkb_geometry')
+
+                                        geom_array = batch.column(geom_idx)
+                                        for geom in geom_array:
+                                            shapely_geom = wkb.loads(geom.as_py())
+                                            reprojected_geom = transform(transformer.transform, shapely_geom)
+                                            geom_wkb = reprojected_geom.wkb
+                                            if geom_wkb not in written_geometries:
+                                                written_geometries.add(geom_wkb)
+                                                new_geoms.append(pa.scalar(geom_wkb))
+                                                mask.append(True)
+                                            else:
+                                                mask.append(False)
+                                            if not new_geoms:
+                                                logger.info(f'No new geometries found for {au_name}')
+                                                continue
+                                        new_geom_array = pa.array(new_geoms)
+                                        filtered_columns = [
+                                            new_geom_array if i == geom_idx else batch.column(i).filter(pa.array(mask))
+                                            for i in range(batch.num_columns)
+                                        ]
+                                        batch = pa.RecordBatch.from_arrays(filtered_columns, schema=batch.schema)
 
                                         if nfields == 0:
                                             logger.info('Creating fields')
@@ -198,7 +228,7 @@ class Variable(BaseModel):
                                             logger.info('skipping batch')
                                             continue
 
-                                        batch = batch.rename_columns({"wkb_geometry": "geometry"})  # Example
+                                        batch = batch.rename_columns({"wkb_geometry": "geometry"})
 
                                         try:
                                             destination_layer.WritePyArrow(batch)
@@ -219,7 +249,7 @@ class Variable(BaseModel):
                                     s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                     time.sleep(s)
                                     continue
-
+                            #
                             except Exception as e:
                                 failed.append(f'Downloading {au_name} failed: {e.__class__.__name__}("{e}")')
                                 ndownloaded += 1

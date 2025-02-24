@@ -4,7 +4,6 @@ from typing import List
 from pathlib import Path
 
 import geopandas as gpd
-import numpy as np
 
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
@@ -13,17 +12,12 @@ from cbsurge.util.http_get_json import http_get_json
 import httpx
 import logging
 
-
-
 from cbsurge.core.component import Component
-
 
 
 logger = logging.getLogger(__name__)
 
 class ElectricityComponent(Component, ABC):
-
-    dataset_url = 'https://geohub.data.undp.org/api/datasets/310aadaa61ea23811e6ecd75905aaf29'
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -90,87 +84,55 @@ class ElectricityComponent(Component, ABC):
 class ElectricityVariable(Variable):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        #project = Project(path=os.getcwd())
 
     def download(self, **kwargs):
-        print(kwargs)
-        url = self.ge
-        print(self.source)
-        # TODO: download data within polygons layer in geopackage
-        self.download_geodata_by_admin(dataset_url=url, geopackage_path=self.geopackage_path)
-
+        project = Project(path=os.getcwd())
+        geopackage_path = project.geopackage_file_path
+        self.download_geodata_by_admin(dataset_url=self.source, geopackage_path=geopackage_path)
 
     def evaluate(self, **kwargs):
         pass
 
     def compute(self, **kwargs):
+        logger.debug(f'Computing variable "{self.name}"')
+        project = Project(path=os.getcwd())
+        # if layer 'grid' does not exist, run the download
+        layers = gpd.list_layers(project.geopackage_file_path)
+        layer_names = layers.name.tolist()
+        if 'grid' not in layer_names:
+            self.download()
+        project = Project(path=os.getcwd())
+        compute_grid_variable(variable_name=self.name, geopackage_path=project.geopackage_file_path)
+
+    def resolve(self, **kwargs):
         pass
 
 
-
-ADMIN_DATASET = '/home/thuha/Desktop/UNDP/geo-cb-surge/data/kenya_adm2.geojson'
-GRID_DATASET = '/home/thuha/Desktop/UNDP/geo-cb-surge/data/kenya_grid.fgb'
-CLIP_ADMIN_PATH = '/home/thuha/Desktop/UNDP/geo-cb-surge/data/napak_moroto.fgb'
-CLIP_GRID_PATH_V1 = '/home/thuha/Desktop/UNDP/geo-cb-surge/data/napak_moroto_grid_v1.fgb'
-CLIP_GRID_PATH_V2 = '/home/thuha/Desktop/UNDP/geo-cb-surge/data/napak_moroto_grid_v2.fgb'
-
-
-def clip_v1():
-    admin_dataset = gpd.read_file(ADMIN_DATASET)
-    grid_dataset = gpd.read_file(GRID_DATASET)
-    napak_moroto_admin = admin_dataset[admin_dataset['name'].isin(['Napak', 'Moroto'])]
-    napak_moroto_admin.to_file(CLIP_ADMIN_PATH, driver="FlatGeobuf")
-    grid_dataset = grid_dataset.to_crs(napak_moroto_admin.crs)
-    clipped_grid = grid_dataset.clip(mask=napak_moroto_admin.geometry, keep_geom_type=True, )
-    clipped_grid.to_file(CLIP_GRID_PATH_V1, driver="FlatGeobuf")
-
-def clip_v2():
-    admin_dataset = gpd.read_file(ADMIN_DATASET)
-    grid_dataset = gpd.read_file(GRID_DATASET)
-    filtered_gdf = admin_dataset[admin_dataset['name'].isin(['Napak', 'Moroto'])]
-    filtered_gdf.to_file(CLIP_ADMIN_PATH, driver="FlatGeobuf")
-    grid_dataset = grid_dataset.to_crs(filtered_gdf.crs)
-    clipped_grid = gpd.overlay(grid_dataset, filtered_gdf, how='intersection')
-    clipped_grid.to_file(CLIP_GRID_PATH_V2, driver="FlatGeobuf")
-
-
-def compute_grid_length(output_path, output_crs='ESRI:54009'):
+def compute_grid_variable(variable_name, geopackage_path):
     """
-    Creates a FlatGeobuf file of admin units with total line length per unit.
-    For each of the admin units, calculate the total length of the lines
-    within the admin unit boundaries. Lines intersecting multiple units are split
-    at the boundaries.
+    Computes the total grid length based on the geopackage 'grid` layer for each of the admin polygons in `polygons` layer in the project geopackage
+
+    Future: TODO: Implement the mask so that based on the passed mask, to compute the length based on it
 
     Parameters:
-    - output_path (str): Path for the output FlatGeobuf file.
-    - output_crs (str): Projected CRS for accurate length calculation (default: EPSG:54009).
+    - geopackage_path
     """
-
-    # Load datasets and reproject to output CRS
-    grid_dataset_df = gpd.read_file(GRID_DATASET).to_crs(output_crs)
-    admin_dataset_df = gpd.read_file(ADMIN_DATASET).to_crs(output_crs)
-
-    # Spatial join: split lines at admin boundaries
-    split_lines = gpd.overlay(grid_dataset_df, admin_dataset_df, how='intersection')
-
-    # Calculate length for each split line
-    # split_lines['electricity_grid_length'] = np.divide(split_lines.geometry.length, 1000)  # in km
-    split_lines['electricity_grid_length'] = split_lines.geometry.length
-
-    # Aggregate total length per admin unit
-    length_per_admin = split_lines.groupby('name', as_index=False)['electricity_grid_length'].sum()
-
-    # Merge total lengths back with admin dataset
-    admin_with_length = admin_dataset_df.merge(length_per_admin, on='name', how='left')
-    admin_with_length['electricity_grid_length'] = admin_with_length['electricity_grid_length'].fillna(0)
-
-    # Save result to FlatGeobuf
-    admin_with_length.to_file(output_path, driver='FlatGeobuf')
+    grid_layer_df = gpd.read_file(geopackage_path, layer='grid')
+    admin_layer_df = gpd.read_file(geopackage_path, layer='polygons')
+    split_lines = gpd.overlay(grid_layer_df, admin_layer_df, how='intersection')
+    split_lines[variable_name] = split_lines.geometry.length
+    length_per_admin = split_lines.groupby('name', as_index=False)[variable_name].sum()
+    admin_with_length = admin_layer_df.merge(length_per_admin, on='name', how='left')
+    admin_with_length[variable_name] = admin_with_length[variable_name].fillna(0)
+    admin_with_length.to_file(geopackage_path, driver='GPKG', layer='polygons')
 
 
 
 if __name__ == "__main__":
-
-    compute_grid_length(
-        output_path='/home/thuha/Desktop/UNDP/geo-cb-surge/data/kenya_electricity_adm2.fgb'
+    va = ElectricityVariable(
+        name='electricity_grid_length',
+        component='builtenv.electricity',
+        source='geohub:https://geohub.data.undp.org/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
+        title='Electricity Grid Length',
     )
+    va.compute()

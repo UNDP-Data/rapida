@@ -11,13 +11,15 @@ import click
 
 @click.group
 @click.pass_context
-def cli(ctx=None):
+def cli(ctx):
     """UNDP Crisis Bureau Rapida tool.
 
     This command line tool is designed to assess various geospatial variables
     representing exposure and vulnerability aspects of geospatial risk induced
     by natural hazards.
     """
+    logger = setup_logger(name='rapida', make_root=False)
+
 
 cli.add_command(admin)
 cli.add_command(init)
@@ -32,5 +34,5 @@ cli.add_command(publish)
 
 if __name__ == '__main__':
 
-    logger = setup_logger('rapida')
+
     cli()

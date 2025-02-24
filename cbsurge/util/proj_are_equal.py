@@ -18,7 +18,7 @@ def proj_are_equal(src_srs: osr.SpatialReference = None, dst_srs: osr.SpatialRef
     try:
         proj_are_equal = int(src_srs.GetAuthorityCode(None)) == int(dst_srs.GetAuthorityCode(None))
     except Exception as evpe:
-        logger.error(
+        logger.debug(
             f'Failed to compare src and dst projections using {auth_code_func_name}. Trying using {is_same_func_name}')
         try:
             proj_are_equal = bool(src_srs.IsSame(dst_srs))

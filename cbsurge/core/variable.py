@@ -10,11 +10,8 @@ from abc import abstractmethod
 from collections import deque
 from typing import List
 from typing import Optional, Union
-
-from fontTools.misc.cython import returns
 from osgeo_utils.gdal_calc import Calc
 from cbsurge import constants
-
 from cbsurge.util import geo
 import shapely
 from osgeo import gdal, ogr, osr

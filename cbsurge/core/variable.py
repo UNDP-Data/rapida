@@ -11,6 +11,7 @@ from collections import deque
 from typing import List
 from typing import Optional, Union
 
+import numpy
 from shapely import wkb
 from shapely.ops import transform
 from pyproj import Transformer
@@ -27,7 +28,6 @@ from cbsurge.az import blobstorage
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
 from cbsurge.util.downloader import downloader
-from cbsurge.util.read_bbox import read_bbox
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -115,19 +115,11 @@ class Variable(BaseModel):
         """
         assert dataset_url, 'Dataset URL is required'
         dataset_info = read_info(dataset_url)
-        admin_info = read_info(geopackage_path)
         assert dataset_info, f'Could not read info from {dataset_url}. Please check the URL or the dataset format'
         layer_name = dataset_info['layer_name']
-
-        srs_epsg_code = int(dataset_info['crs'].split(':')[-1])
         src_srs = osr.SpatialReference()
-        src_srs.ImportFromEPSG(srs_epsg_code)
+        src_srs.SetFromUserInput(dataset_info['crs'])
         src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-
-        destination_srs = osr.SpatialReference()
-        destination_srs.ImportFromEPSG(54009)
-        destination_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-        transformer = Transformer.from_crs(4326, "ESRI:54009", always_xy=True)
         ndownloaded = 0
         failed = []
         written_geometries = set()
@@ -135,10 +127,12 @@ class Variable(BaseModel):
             with gdal.OpenEx(geopackage_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as project_dataset:
                 admin_layer = project_dataset.GetLayerByName('polygons')
                 admin_srs = admin_layer.GetSpatialRef()
+                admin_srs_string = f"{admin_srs.GetAuthorityName(None)}:{admin_srs.GetAuthorityCode(None)}"
+                transformer = Transformer.from_crs(dataset_info['crs'], admin_srs_string, always_xy=True)
                 tr = osr.CoordinateTransformation(admin_srs, src_srs)
                 destination_layer = project_dataset.CreateLayer(
                     layer_name,
-                    srs=destination_srs,
+                    srs=admin_srs,
                     geom_type=ogr.wkbMultiLineString,
                     options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                 )
@@ -181,30 +175,28 @@ class Variable(BaseModel):
                                         logger.debug(f'{au_name} was processed')
                                         raise meta
                                     for batch in batches:
-                                        new_geoms = []
-                                        mask = []
-                                        geom_idx = batch.schema.get_field_index('wkb_geometry')
-
-                                        geom_array = batch.column(geom_idx)
-                                        for geom in geom_array:
-                                            shapely_geom = wkb.loads(geom.as_py())
-                                            reprojected_geom = transform(transformer.transform, shapely_geom)
-                                            geom_wkb = reprojected_geom.wkb
-                                            if geom_wkb not in written_geometries:
-                                                written_geometries.add(geom_wkb)
-                                                new_geoms.append(pa.scalar(geom_wkb))
-                                                mask.append(True)
-                                            else:
-                                                mask.append(False)
-                                            if not new_geoms:
-                                                logger.info(f'No new geometries found for {au_name}')
+                                        new_geometries = []
+                                        mask = numpy.zeros(batch.num_rows, dtype=bool)
+                                        for i, record in enumerate(batch.to_pylist()):
+                                            geom = record.get("wkb_geometry", None)
+                                            fid = record.get("OGC_FID", None)
+                                            if geom is None:
+                                                print("Empty geometry")
                                                 continue
-                                        new_geom_array = pa.array(new_geoms)
-                                        filtered_columns = [
-                                            new_geom_array if i == geom_idx else batch.column(i).filter(pa.array(mask))
-                                            for i in range(batch.num_columns)
-                                        ]
-                                        batch = pa.RecordBatch.from_arrays(filtered_columns, schema=batch.schema)
+
+                                            if fid in written_geometries:
+                                                mask[i] = True
+                                            else:
+                                                shapely_geom = wkb.loads(geom)
+                                                reprojected_geom = transform(transformer.transform, shapely_geom)
+                                                geom_wkb = reprojected_geom.wkb
+                                                written_geometries.add(fid)
+                                                new_geometries.append(geom_wkb)
+                                        if mask[mask].size > 0:
+                                            batch = batch.filter(~mask)
+
+                                        batch = batch.drop_columns(['wkb_geometry'])
+                                        batch = batch.append_column('wkb_geometry', pa.array(new_geometries))
 
                                         if nfields == 0:
                                             logger.info('Creating fields')
@@ -217,12 +209,6 @@ class Variable(BaseModel):
 
                                             nfields = destination_layer.GetLayerDefn().GetFieldCount()
                                             destination_layer.SyncToDisk()
-
-                                        lengths = pc.binary_length(batch.column("wkb_geometry"))
-                                        mask = pc.greater(lengths, 0)
-                                        should_filter = pc.any(pc.invert(mask)).as_py()
-                                        if should_filter:
-                                            batch = batch.filter(mask)
 
                                         if batch.num_rows == 0:
                                             logger.info('skipping batch')
@@ -251,6 +237,8 @@ class Variable(BaseModel):
                                     continue
                             #
                             except Exception as e:
+                                # import traceback
+                                # traceback.print_exc(e)
                                 failed.append(f'Downloading {au_name} failed: {e.__class__.__name__}("{e}")')
                                 ndownloaded += 1
                                 progress.update(total_task,

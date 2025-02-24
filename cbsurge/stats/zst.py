@@ -238,11 +238,12 @@ def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
 
                 extracted_data[var_name] = df[var_name]
         combined = pd.concat(extracted_data, axis=1)
-
+        combined.drop(columns='tempid', inplace=True)
         egdf = geopandas.read_file(polygon_ds, layer=polygon_layer)
         for e in vars_ops:
             vname = e[0]
             if vname in egdf.columns.tolist():
                 egdf.drop(columns=[vname], inplace=True)
         combined = egdf.merge(combined, on='geometry', how='inner')
+
         return combined

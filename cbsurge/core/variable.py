@@ -55,6 +55,7 @@ class Variable(BaseModel):
 
         try:
             parsed_expr = parse_expr(self.sources)
+
             self.dep_vars = [s.name for s in parsed_expr.free_symbols]
 
         except (SyntaxError, AttributeError):

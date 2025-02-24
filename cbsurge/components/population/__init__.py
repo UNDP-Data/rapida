@@ -284,7 +284,6 @@ class PopulationVariable(Variable):
             else:
                 polygons_layer='polygons'
             if self.operator:
-
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
                 logger.info(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
@@ -298,10 +297,6 @@ class PopulationVariable(Variable):
                     src_rasters.append(affected_local_path)
                     var_ops.append((f'{self.name}_affected', self.operator))
 
-                # gdf = zonal_stats(src_rasters=src_rasters,
-                #                       polygon_ds=project.geopackage_file_path,
-                #                       polygon_layer=polygons_layer, vars_ops=var_ops
-                #                       )
                 gdf = zst(src_rasters=src_rasters,
                                   polygon_ds=project.geopackage_file_path,
                                   polygon_layer=polygons_layer, vars_ops=var_ops
@@ -314,27 +309,20 @@ class PopulationVariable(Variable):
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                     gdf.loc[gdf['iso3'] == country, self.name] *= coeff
-
-                #gdf.rename(columns={self.name: f'{self.name}_{target_year}'}, inplace=True)
-
-                # assert 'year' in kwargs, f'Need year kword to compute pop coeff'
-                # assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
-                # assert 'country' in kwargs, f'Need country kword to compute pop coeff'
-                # year = kwargs.get('year')
-                # target_year = kwargs.get('target_year')
-                # country = kwargs.get('country')
-                # logger.info(f'Computing pop for {target_year} with base year {year}')
-                # coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
-                # gdf[self.name] *= coeff
-
-
-
+                    gdf.loc[gdf['iso3'] == country, f'{self.name}_affected'] *= coeff
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
                 gdf = geopandas.read_file(filename=project.geopackage_file_path,layer=dst_layer)
                 expr = f'{self.name}={self.sources}'
-                logger.debug(expr)
+                gdf.eval(expr, inplace=True)
+                # affected
+                affected_sources = ''
+                for vname in self.dep_vars:
+                    v = affected_sources or self.sources
+                    affected_sources = v.replace(vname, f'{vname}_affected')
+
+                expr = f'{self.name}_affected={affected_sources}'
                 gdf.eval(expr, inplace=True)
 
 

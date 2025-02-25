@@ -113,7 +113,7 @@ class Project:
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                                  promote_to_multi=True)
 
-                    self.save()
+                self.save()
 
             if mask is not None:
                 logger.debug(f'Got mask {mask}')

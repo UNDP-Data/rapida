@@ -165,7 +165,9 @@ class Project:
                         dst_layer=vector_mask_layer,
                         target_srs=self.target_srs,
                         clip_dataset=self.geopackage_file_path,
-                        clip_layer=constants.POLYGONS_LAYER_NAME
+                        clip_layer=constants.POLYGONS_LAYER_NAME,
+                        access_mode='append'
+
                     )
 
                     # rasterize the imported mask

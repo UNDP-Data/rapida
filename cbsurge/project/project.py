@@ -90,7 +90,8 @@ class Project:
                 gdf = geopandas.read_file(self.geopackage_file_path, layer=constants.POLYGONS_LAYER_NAME )
                 proj_bounds = tuple(map(float,gdf.total_bounds))
                 cols = gdf.columns.tolist()
-                if not ('h3id' in cols and 'undp_admin_level' in cols):
+
+                if not 'iso3' in cols:
                     logger.info(f'going to add country code into "iso3" column')
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
@@ -108,11 +109,13 @@ class Project:
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
 
-                    self._cfg_['countries'] = tuple(set(joined['iso3']))
+                    countries = tuple(set(joined['iso3']))
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                                  promote_to_multi=True)
-
+                else:
+                    countries = tuple(set(gdf['iso3']))
+                self._cfg_['countries'] = countries
                 self.save()
 
             if mask is not None:

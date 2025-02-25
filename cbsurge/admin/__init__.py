@@ -35,9 +35,9 @@ def save(geojson_dict=None, dst_path=None, layer_name=None):
             ds = None
 
 
-@click.group()
+@click.group(short_help=f'fetch administrative boundaries at various levels from OSM/OCHA')
 def admin():
-    """Fetch administrative boundaries at various levels from OSM or OCHA"""
+
     pass
 
 

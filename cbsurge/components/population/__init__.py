@@ -11,14 +11,18 @@ from cbsurge.session import Session
 from cbsurge.core.variable import Variable
 from cbsurge.az import blobstorage
 from osgeo_utils.gdal_calc import Calc
-from osgeo import gdal
+from osgeo import gdal, osr
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
-from cbsurge.stats.zst import zonal_stats, sumup
+from cbsurge.stats.zst import zonal_stats, sumup, zst
 import geopandas
 from cbsurge.components.population.pop_coefficient import get_pop_coeff
+from cbsurge.util.proj_are_equal import proj_are_equal
+
+
+
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('rapida')
 gdal.UseExceptions()
 @click.group()
 def population():
@@ -168,7 +172,6 @@ class PopulationComponent(Component):
                                            component=self.component_name,
                                            **var_data)
 
-
                     #assess
                     v(year=self.base_year,
                       country=country,
@@ -177,7 +180,7 @@ class PopulationComponent(Component):
                       )
                     if multinational:
                         sources[v.local_path] = var_name
-                    if variable_task and progress:
+                    if progress and variable_task:
                         progress.update(variable_task, advance=1, description=f'Assessed {var_name} in {country}')
                     #if progress and variable_task: progress.remove_task(variable_task)
 
@@ -194,14 +197,14 @@ class PopulationComponent(Component):
                     allowProjectionDifference=False,
                 )
 
-                with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options):
-
+                with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options) as vrtds:
+                    vrtds.FlushCache()
                     v = PopulationVariable(
                         name=var_name,
                         component=self.component_name,
-                       title=f'Multinational {vname}',
-                       local_path=vrt_path,
-                       operator=operator,
+                        title=f'Multinational {vname}',
+                        local_path=vrt_path,
+                        operator=operator,
 
                     )
 
@@ -217,7 +220,6 @@ class PopulationVariable(Variable):
     def compute(self, **kwargs):
 
         logger.debug(f'Computing {self.name}')
-        overwrite = kwargs.get('force_compute', None)
 
         if not self.dep_vars:
             logger.debug(f'Going to download {self.name} from source files')
@@ -238,7 +240,7 @@ class PopulationVariable(Variable):
             _, file_name = os.path.split(src_path)
             local_path = os.path.join(self._source_folder_, file_name)
             logger.info(f'Going to compute {self.name} from {len(downloaded_files)} source files')
-            computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=overwrite)
+            computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=True)
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
         else:
@@ -252,10 +254,12 @@ class PopulationVariable(Variable):
             creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
 
             ds = Calc(calc=self.sources, outfile=computed_file,  projectionCheck=True, format='GTiff',
-                      creation_options=creation_options.split(' '), quiet=False, overwrite=overwrite,  **sources)
+                      creation_options=creation_options.split(' '), quiet=False, overwrite=True,  **sources)
 
             assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
             self.local_path = computed_file
+        self.import_raster()
+        self._compute_affected_()
 
     def resolve(self,  **kwargs):
         with Session() as s:
@@ -279,17 +283,24 @@ class PopulationVariable(Variable):
                 polygons_layer = dst_layer
             else:
                 polygons_layer='polygons'
-
-
             if self.operator:
-
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.debug(f'Evaluating variable {self.name} using zonal stats')
+                logger.info(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
-                gdf = zonal_stats(src_rasters=[self.local_path],
-                                      polygon_ds=project.geopackage_file_path,
-                                      polygon_layer=polygons_layer, vars_ops=[(self.name, self.operator)]
-                                      )
+                src_rasters = [self.local_path]
+                var_ops = [(self.name, self.operator)]
+                if project.raster_mask is not None:
+                    path, file_name = os.path.split(self.local_path)
+                    fname, ext = os.path.splitext(file_name)
+                    affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
+
+                    src_rasters.append(affected_local_path)
+                    var_ops.append((f'{self.name}_affected', self.operator))
+
+                gdf = zst(src_rasters=src_rasters,
+                                  polygon_ds=project.geopackage_file_path,
+                                  polygon_layer=polygons_layer, vars_ops=var_ops
+                                  )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
                 year = kwargs.get('year')
@@ -298,29 +309,20 @@ class PopulationVariable(Variable):
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                     gdf.loc[gdf['iso3'] == country, self.name] *= coeff
-                #gdf.rename(columns={self.name: f'{self.name}_{target_year}'}, inplace=True)
-
-                #print(gdf.columns.tolist())
-
-
-                # assert 'year' in kwargs, f'Need year kword to compute pop coeff'
-                # assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
-                # assert 'country' in kwargs, f'Need country kword to compute pop coeff'
-                # year = kwargs.get('year')
-                # target_year = kwargs.get('target_year')
-                # country = kwargs.get('country')
-                # logger.info(f'Computing pop for {target_year} with base year {year}')
-                # coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
-                # gdf[self.name] *= coeff
-
-
-
+                    gdf.loc[gdf['iso3'] == country, f'{self.name}_affected'] *= coeff
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
                 gdf = geopandas.read_file(filename=project.geopackage_file_path,layer=dst_layer)
                 expr = f'{self.name}={self.sources}'
-                logger.debug(expr)
+                gdf.eval(expr, inplace=True)
+                # affected
+                affected_sources = ''
+                for vname in self.dep_vars:
+                    v = affected_sources or self.sources
+                    affected_sources = v.replace(vname, f'{vname}_affected')
+
+                expr = f'{self.name}_affected={affected_sources}'
                 gdf.eval(expr, inplace=True)
 
 

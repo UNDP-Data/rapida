@@ -10,30 +10,40 @@ from abc import abstractmethod
 from collections import deque
 from typing import List
 from typing import Optional, Union
-from osgeo_utils.gdal_calc import Calc
-from cbsurge import constants
-from cbsurge.util import geo
+from urllib.parse import urlencode
 
 import numpy
-from shapely import wkb
-from shapely.ops import transform
-from pyproj import Transformer
+import pyarrow as pa
 import shapely
 from osgeo import gdal, ogr, osr
-from pyarrow import compute as pc
-import pyarrow as pa
+from osgeo_utils.gdal_calc import Calc
 from pydantic import BaseModel, FilePath
 from pyogrio import read_info
+from pyproj import Transformer
 from rich.progress import Progress
+from shapely import wkb
+from shapely.ops import transform
 from sympy.parsing.sympy_parser import parse_expr
 
+from cbsurge import constants
 from cbsurge.az import blobstorage
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
+from cbsurge.util import geo
 from cbsurge.util.downloader import downloader
-from urllib.parse import urlencode
+
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
+
+OGR_TYPES_MAPPING = {
+    'LineString': ogr.wkbLineString,
+    'MultiLineString': ogr.wkbMultiLineString,
+    'Point': ogr.wkbPoint,
+    'Polygon': ogr.wkbPolygon,
+    'MultiPolygon': ogr.wkbMultiPolygon,
+    'GeometryCollection': ogr.wkbGeometryCollection,
+    'MultiPoint': ogr.wkbMultiPoint,
+}
 
 class Variable(BaseModel):
     name: str
@@ -141,7 +151,7 @@ class Variable(BaseModel):
                 destination_layer = project_dataset.CreateLayer(
                     layer_name,
                     srs=admin_srs,
-                    geom_type=ogr.wkbMultiLineString,
+                    geom_type=OGR_TYPES_MAPPING.get(dataset_info['geometry_type'], ogr.wkbUnknown),
                     options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                 )
 
@@ -245,8 +255,6 @@ class Variable(BaseModel):
                                     continue
                             #
                             except Exception as e:
-                                # import traceback
-                                # traceback.print_exc(e)
                                 failed.append(f'Downloading {au_name} failed: {e.__class__.__name__}("{e}")')
                                 ndownloaded += 1
                                 progress.update(total_task,

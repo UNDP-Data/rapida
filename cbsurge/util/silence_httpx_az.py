@@ -11,3 +11,5 @@ def silence_httpx_az():
     requests_logger.setLevel(logging.WARNING)
     msal_logger = logging.getLogger('msal')
     msal_logger.setLevel(logging.WARNING)
+    pyogrio_logger = logging.getLogger('pyogrio')
+    pyogrio_logger.setLevel(logging.WARNING)

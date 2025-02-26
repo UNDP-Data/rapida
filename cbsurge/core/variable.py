@@ -1,25 +1,14 @@
-import asyncio
-import concurrent
 import logging
 import os.path
-import random
-import threading
-import time
 from abc import abstractmethod
-from collections import deque
 from typing import List
 from typing import Optional, Union
-import shapely
-from osgeo import gdal, ogr, osr
-from pyarrow import compute as pc
+
+from osgeo import gdal
 from pydantic import BaseModel, FilePath
-from pyogrio import read_info
-from rich.progress import Progress
 from sympy.parsing.sympy_parser import parse_expr
 
-from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
-from cbsurge.util.downloader import downloader
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()

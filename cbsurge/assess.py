@@ -3,16 +3,11 @@ import logging
 import os
 import importlib
 import sys
-import typing
-from collections import OrderedDict
 import click
 from rich.progress import Progress
 from cbsurge.session import Session
 from cbsurge.project import Project
-import inspect
 from cbsurge.util.setup_logger import setup_logger
-logger = logging.getLogger('rapida')
-
 
 
 def import_class(fqcn: str):
@@ -56,9 +51,11 @@ def import_class(fqcn: str):
 def assess(ctx, components=None,  variables=None, year=None, force_compute=False, debug=False):
     """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
-    # logger = logging.getLogger('rapida')
+
     if debug:
-        logger.setLevel(logging.DEBUG)
+        logger = setup_logger(level=logging.DEBUG)
+    else:
+        logger = setup_logger()
     try:
         current_folder = os.getcwd()
         project = Project(path=current_folder)

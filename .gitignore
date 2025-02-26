@@ -170,3 +170,5 @@ Pipfile.lock
 data/
 token_cache.json
 ap/
+
+rapida.json

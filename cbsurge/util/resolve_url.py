@@ -13,6 +13,8 @@ def resolve_geohub_url(dataset_url: str, link_name: str = None):
         - `geohub:/api/datasets/{dataset_id}` (recommended)
         - `https:{geohub_hostname}/api/datasets/{dataset_id}` (not recommended)
 
+    if datasset_url is not following the formats, it returns provided dataset_url back.
+
     If link_name is not provided or a provided link_name does not exist, it returns `dataset.properties.url`.
 
     Prior to use this function, it requires to initialize ~/.cbsurge/config.json by `rapida init` command.
@@ -39,7 +41,8 @@ def resolve_geohub_url(dataset_url: str, link_name: str = None):
         elif source_url.startswith(geohub_endpoint):
             pass
         else:
-            raise RuntimeError(f"Unsupported dataset URL: {source_url}")
+            logger.info(f"Unsupported dataset URL: {source_url}. It returns original dataset URL provided.")
+            return dataset_url
 
     try:
         timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)

@@ -35,13 +35,13 @@ class RwiComponent(Component):
                     logger.error(f'variable "{var_name}" is invalid. Valid options are "{", ".join(self.variables)}"')
                     return
 
-        progress = kwargs.get('progress', None)
         project = Project(path=os.getcwd())
 
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
             nvars = len(variables)
 
+            progress = kwargs.get('progress', None)
             if progress:
                 variable_task = progress.add_task(
                     description=f'[red]Going to process {nvars} variables', total=nvars)
@@ -75,7 +75,7 @@ class RwiVariable(Variable):
         download_geodata_by_admin(
             dataset_url=fgb_url,
             geopackage_path=geopackage_path,
-            **kwargs
+            progress=kwargs.get('progress', None)
         )
 
     def compute(self, **kwargs):

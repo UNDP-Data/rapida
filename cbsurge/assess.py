@@ -80,7 +80,13 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
                             click.echo(assess.get_help(ctx))
                             progress.remove_task(components_task)
                             sys.exit(1)
-                        fqcn = f'{__package__}.components.{component_name}.{component_name.capitalize()}Component'
+
+                        component_parts = component_name.split('.')
+                        class_name = f"{component_name.capitalize()}Component"
+                        if len(component_parts) > 1:
+                            class_name = f"{component_parts[-1].capitalize()}Component"
+
+                        fqcn = f'{__package__}.components.{component_name}.{class_name}'
                         cls = import_class(fqcn=fqcn)
                         component = cls()
                         component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)

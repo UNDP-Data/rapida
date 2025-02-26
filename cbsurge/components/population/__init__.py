@@ -5,15 +5,14 @@ from typing import List
 import logging
 import pycountry
 from pyogrio import write_dataframe
-from cbsurge import constants
+from cbsurge.constants import POLYGONS_LAYER_NAME,GTIFF_CREATION_OPTIONS
 from cbsurge.util import geo
-import cbsurge.constants
 from cbsurge.core.component import Component
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.core.variable import Variable
 from osgeo_utils.gdal_calc import Calc
-from osgeo import gdal, osr
+from osgeo import gdal
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
 from cbsurge.stats.zst import sumup, zst
@@ -25,6 +24,9 @@ import re
 
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger('rapida')
+
+
+
 gdal.UseExceptions()
 @click.group()
 def population():
@@ -141,7 +143,7 @@ class PopulationComponent(Component):
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
-        logger.debug(f'Assessing component "{self.component_name}" ')
+
         if not variables:
             variables = self.variables
         else:
@@ -153,15 +155,14 @@ class PopulationComponent(Component):
 
         progress = kwargs.get('progress', None)
         project = Project(path=os.getcwd())
-
+        logger.debug(f'Assessing component "{self.component_name}" in  {", ".join(project.countries)}')
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
-            nvars = len(variables)
-
-
-            if progress:
-                variable_task = progress.add_task(
-                    description=f'[red]Going to process {nvars} variables', total=nvars)
+            #nvars = len(variables)
+            # if progress:
+            #     vars_word = 'variables:' if nvars > 1 else 'variable'
+            #     variables_task = progress.add_task(
+            #         description=f'[red]Going to assess  {vars_word} {", ".join(variables)}', total=nvars)
 
             for var_name in variables:
                 var_data = variables_data[var_name]
@@ -171,42 +172,12 @@ class PopulationComponent(Component):
                     component=self.component_name,
                     **var_data
                 )
-
                 #assess
                 v(year=self.base_year,**kwargs)
+                # if progress and variables_task:
+                #     progress.update(variables_task, advance=1, description=f'[red]Assessed {var_name} ')
+            #if progress and variable_task: progress.remove_task(variable_task)
 
-                if progress and variable_task:
-                    progress.update(variable_task, advance=1, description=f'Assessed {var_name} ')
-                    #if progress and variable_task: progress.remove_task(variable_task)
-
-            # if multinational:
-            #     vname = set(sources.values()).pop()
-            #     operator = set(operators).pop()
-            #     input_files = list(sources.keys())
-            #     vrt_path = os.path.join(project.data_folder,self.component_name, vname, f'{vname}.vrt')
-            #
-            #
-            #     vrt_options = gdal.BuildVRTOptions(
-            #         resolution='highest',
-            #         resampleAlg='nearest',
-            #         allowProjectionDifference=False,
-            #     )
-            #
-            #     with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options) as vrtds:
-            #         vrtds.FlushCache()
-            #         v = PopulationVariable(
-            #             name=var_name,
-            #             component=self.component_name,
-            #             title=f'Multinational {vname}',
-            #             local_path=vrt_path,
-            #             operator=operator,
-            #
-            #         )
-            #         v._compute_affected_()
-            #         v.evaluate(multinational=multinational, year=self.base_year, **kwargs)
-            #
-            #         logger.info(f'{var_name} was assessed in multi-country mode {set(project.countries)}')
-            #
 
 
 
@@ -215,51 +186,67 @@ class PopulationVariable(Variable):
 
     def compute(self, **kwargs):
 
-        logger.debug(f'Computing {self.name}')
+
+
+        var_path = os.path.join(self._source_folder_, f'{self.name}.tif')
+        project = Project(os.getcwd())
+        logger.debug(f'Computing {self.name} in {project.countries}')
 
         if not self.dep_vars:
-            logger.debug(f'Going to download {self.name} from source files')
-
-            # interpolate templates
-            source_blobs = list()
-            for source_template in self.sources:
-                source_file_path = self.interpolate_template(template=source_template, **kwargs)
-                source_blobs.append(source_file_path)
-            if not os.path.exists(self._source_folder_):
-                os.makedirs(self._source_folder_)
-            downloaded_files = asyncio.run(
-                blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
-                                           progress=kwargs.get('progress', None))
+            sources = list()
+            for country in project.countries:
+                # interpolate templates
+                source_blobs = list()
+                for source_template in self.sources:
+                    source_file_path = self.interpolate_template(template=source_template, country=country, **kwargs)
+                    source_blobs.append(source_file_path)
+                if not os.path.exists(self._source_folder_):
+                    os.makedirs(self._source_folder_)
+                downloaded_files = asyncio.run(
+                    blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
+                                               progress=kwargs.get('progress', None))
+                )
+                assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
+                src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
+                _, file_name = os.path.split(src_path)
+                local_path = os.path.join(self._source_folder_, file_name)
+                logger.debug(f'Going to compute {self.name} from {len(downloaded_files)} source files in {country}')
+                computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=True)
+                assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
+                sources.append(computed_file)
+            # build a VRT
+            vrt_options = gdal.BuildVRTOptions(
+                resolution='highest',
+                resampleAlg='nearest',
+                allowProjectionDifference=False,
             )
-            assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
-            src_path = self.interpolate_template(template=self.source, **kwargs)
-            _, file_name = os.path.split(src_path)
-            local_path = os.path.join(self._source_folder_, file_name)
-            logger.info(f'Going to compute {self.name} from {len(downloaded_files)} source files')
-            computed_file = sumup(src_rasters=downloaded_files,dst_raster=local_path, overwrite=True)
-            assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
-            self.local_path = computed_file
+            vrt_path = var_path.replace('.tif', '.vrt')
+            vrtds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options)
+            #translate to tiff
+            ds = gdal.Translate(destName=var_path, srcDS=vrtds, options=['-q'])
+            vrtds = None
+            ds = None
+
+
         else:
-            logger.info(f'Going to compute {self.name}={self.sources}')
-            src_path = self.interpolate_template(template=self.source, **kwargs)
-            _, file_name = os.path.split(src_path)
-            computed_file = os.path.join(self._source_folder_, file_name)
+            logger.debug(f'Going to compute {self.name}={self.sources}')
             if not os.path.exists(self._source_folder_):
                 os.makedirs(self._source_folder_)
-            sources = self.resolve(**kwargs)
-            creation_options = cbsurge.constants.GTIFF_CREATION_OPTIONS
+            sources = self.resolve( **kwargs)
+            ds = Calc(calc=self.sources, outfile=var_path,  projectionCheck=True, format='GTiff',
+                      creation_options=GTIFF_CREATION_OPTIONS, quiet=True, overwrite=True,  **sources)
+            ds = None
+            assert os.path.exists(var_path), f'The computed file: {var_path} does not exists'
 
-            ds = Calc(calc=self.sources, outfile=computed_file,  projectionCheck=True, format='GTiff',
-                      creation_options=creation_options.split(' '), quiet=False, overwrite=True,  **sources)
 
-            assert os.path.exists(computed_file), f'The computed file: {computed_file} does not exists'
-            self.local_path = computed_file
-        self.import_raster()
+        # import and compute affected version
+        imported_file_path = self.import_raster(source=var_path)
+        assert imported_file_path == var_path, f'var_path differs from {imported_file_path}'
+        self.local_path = var_path
         self._compute_affected_()
 
     def resolve(self,  **kwargs):
         with Session() as s:
-            # project = Project(path=os.getcwd())
             sources = dict()
             for var_name in self.dep_vars:
                 var_dict = s.get_variable(component=self.component, variable=var_name)
@@ -270,7 +257,9 @@ class PopulationVariable(Variable):
 
 
     def evaluate(self, **kwargs):
+
         dst_layer = f'stats.{self.component}'
+        #progress = kwargs.get('progress', None)
         with Session() as s:
             project = Project(path=os.getcwd())
             layers = geopandas.list_layers(project.geopackage_file_path)
@@ -281,7 +270,8 @@ class PopulationVariable(Variable):
                 polygons_layer='polygons'
             if self.operator:
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
-                logger.info(f'Evaluating variable {self.name} using zonal stats')
+                logger.debug(f'Evaluating variable {self.name} using zonal stats')
+
                 # raster variable, run zonal stats
                 src_rasters = [self.local_path]
                 var_ops = [(self.name, self.operator)]
@@ -344,9 +334,9 @@ class PopulationVariable(Variable):
     def download(self, **kwargs):
 
         """Download variable"""
-        logger.info(f'Downloading {self.name} ')
+        logger.debug(f'Downloading {self.name} ')
         project=Project(os.getcwd())
-
+        progress = kwargs.get('progress', None)
         self.local_path = os.path.join(self._source_folder_, f'{self.name}.tif')
         if os.path.exists(self.local_path):
             assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
@@ -359,8 +349,13 @@ class PopulationVariable(Variable):
             local_path = os.path.join(self._source_folder_, file_name)
             if not os.path.exists(self._source_folder_):
                 os.makedirs(self._source_folder_)
-            logger.info(f'Going to download {src_path} to {local_path}')
-            downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=local_path))
+            logger.debug(f'Going to download {src_path} to {local_path}')
+            downloaded_file = asyncio.run(
+                blobstorage.download_blob(
+                    src_path=src_path,
+                    dst_path=local_path,
+                    progress=progress)
+            )
             sources.append(downloaded_file)
 
         vrt_options = gdal.BuildVRTOptions(
@@ -368,13 +363,16 @@ class PopulationVariable(Variable):
             resampleAlg='nearest',
             allowProjectionDifference=False,
         )
+
         vrt_path = self.local_path.replace('.tif', '.vrt')
-        ds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options)
-        ds = gdal.Translate(destName=self.local_path,srcDS=ds )
+        vrtds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options)
+        ds = gdal.Translate(destName=self.local_path,srcDS=vrtds )
+        vrtds = None
+        ds = None
         imported_file_path = self.import_raster(source=self.local_path, )
         assert imported_file_path == self.local_path, f'The local_path differs from {imported_file_path}'
         self._compute_affected_()
-        ds = None
+
 
     def import_raster(self, source=None, **kwargs):
 
@@ -388,7 +386,7 @@ class PopulationVariable(Variable):
             dst=imported_local_path,
             target_srs=project.target_srs,
             crop_ds=project.geopackage_file_path,
-            crop_layer_name=constants.POLYGONS_LAYER_NAME,
+            crop_layer_name=POLYGONS_LAYER_NAME,
             **kwargs
         )
 
@@ -402,7 +400,7 @@ class PopulationVariable(Variable):
             project = Project(os.getcwd())
             affected_local_path = self.affected_path
             ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
-                      creation_options=constants.GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                      creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
                       NoDataValue=None,
                       local_path=self.local_path, mask=project.raster_mask)
             ds = None

@@ -60,7 +60,9 @@ jupyter = [
     "jupyterlab_widgets",
     "ipywidgets",
     "leafmap",
-    "mapclassify"
+    "mapclassify",
+    "xarray",
+    "localtileserver"
 ]
 
 [project.scripts]

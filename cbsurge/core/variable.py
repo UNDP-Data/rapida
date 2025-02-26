@@ -61,11 +61,6 @@ class Variable(BaseModel):
         self._source_folder_ = os.path.join(project.data_folder, self.component, self.name)
 
 
-    # def _update_(self, **kwargs):
-    #     args = self.__dict__.copy()
-    #     args.update(kwargs)
-    #     return args
-
     def __str__(self):
         """
         String representation of the class.
@@ -87,20 +82,37 @@ class Variable(BaseModel):
     def download_from_azure(self, **kwargs):
 
         """Download variable"""
-        logger.debug(f'Downloading {self.name}')
-        src_path = self.interpolate_template(template=self.source, **kwargs)
-        _, file_name = os.path.split(src_path)
-        self.local_path = os.path.join(self._source_folder_, file_name)
+        logger.info(f'Downloading {self.name} ')
+        project=Project(os.getcwd())
+
+        self.local_path = os.path.join(self._source_folder_, f'{self.name}.tif')
         if os.path.exists(self.local_path):
-            self._compute_affected_()
+            assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
             return self.local_path
-        if not os.path.exists(self._source_folder_):
-            os.makedirs(self._source_folder_)
-        logger.info(f'Going to download {self.name} from {src_path}')
-        downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=self.local_path))
-        self.import_raster()
-        assert downloaded_file == self.local_path, f'The local_path differs from {downloaded_file}'
+        sources = list()
+
+        for country in project.countries:
+            src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
+            _, file_name = os.path.split(src_path)
+            local_path = os.path.join(self._source_folder_, file_name)
+            if not os.path.exists(self._source_folder_):
+                os.makedirs(self._source_folder_)
+            logger.info(f'Going to download {src_path} to {local_path}')
+            downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=local_path))
+            sources.append(downloaded_file)
+
+        vrt_options = gdal.BuildVRTOptions(
+            resolution='highest',
+            resampleAlg='nearest',
+            allowProjectionDifference=False,
+        )
+        vrt_path = self.local_path.replace('.tif', '.vrt')
+        ds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options)
+        ds = gdal.Translate(destName=self.local_path,srcDS=ds )
+        imported_file_path = self.import_raster(source=self.local_path, )
+        assert imported_file_path == self.local_path, f'The local_path differs from {imported_file_path}'
         self._compute_affected_()
+        ds = None
 
     def download_geodata_by_admin(self, dataset_url, admin_path=None, country_col_name='iso3', admin_col_name="undp_admin_level", out_path=None,
                                 batch_size=5000, NWORKERS=4):
@@ -219,68 +231,69 @@ class Variable(BaseModel):
             logger.error(f'Error downloading {dataset_url} with error {e}')
 
     def __call__(self,  **kwargs):
-            """
-            Assess a variable. Essentially this means a series of steps in a specific order:
-                - download
-                - preprocess
-                - analysis/zonal stats
+        """
+        Assess a variable. Essentially this means a series of steps in a specific order:
+            - download
+            - preprocess
+            - analysis/zonal stats
 
 
 
-            :param kwargs:
-            :return:
-            """
-            logger.debug(f'Assessing variable {self.name} in {kwargs["country"]}')
+        :param kwargs:
+        :return:
+        """
+        logger.debug(f'Assessing variable {self.name}')
 
-            force_compute = kwargs.get('force_compute', False)
-            if not self.dep_vars: #simple variable,
+        force_compute = kwargs.get('force_compute', False)
+        print(self.dep_vars, self.operator)
+        if not self.dep_vars: #simple variable,
+            if not force_compute:
+                # logger.debug(f'Downloading {self.name} source')
+                self.download_from_azure(**kwargs)
+            else:
+                # logger.debug(f'Computing {self.name} using gdal_calc from sources')
+                self.compute(**kwargs)
+        else:
+            if self.operator:
                 if not force_compute:
-                    # logger.debug(f'Downloading {self.name} source')
+                    # logger.debug(f'Downloading {self.name} from  source')
                     self.download_from_azure(**kwargs)
                 else:
-                    # logger.debug(f'Computing {self.name} using gdal_calc from sources')
+                    # logger.debug(f'Computing {self.name}={self.sources} using GDAL')
                     self.compute(**kwargs)
             else:
-                if self.operator:
-                    if not force_compute:
-                        # logger.debug(f'Downloading {self.name} from  source')
-                        self.download_from_azure(**kwargs)
-                    else:
-                        # logger.debug(f'Computing {self.name}={self.sources} using GDAL')
-                        self.compute(**kwargs)
-                else:
-                    #logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
-                    sources = self.resolve(**kwargs)
-            multinational = kwargs.get('multinational', False)
-            if not multinational:
-                return self.evaluate(**kwargs)
+                #logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
+                sources = self.resolve(**kwargs)
+
+        return self.evaluate(**kwargs)
 
 
-    def import_raster(self):
-        local_path = self.local_path
+    def import_raster(self, source=None, **kwargs):
+
         project = Project(os.getcwd())
-        path, file_name = os.path.split(local_path)
+        path, file_name = os.path.split(source)
         fname, ext = os.path.splitext(file_name)
         imported_local_path = os.path.join(path, f'{fname}_imported{ext}')
 
         geo.import_raster(
-            source=local_path,
+            source=source,
             dst=imported_local_path,
             target_srs=project.target_srs,
             crop_ds=project.geopackage_file_path,
             crop_layer_name=constants.POLYGONS_LAYER_NAME,
+            **kwargs
+
         )
 
-        os.remove(local_path)
-        os.rename(imported_local_path, local_path)
-        self.local_path = local_path
+        os.remove(source)
+        os.rename(imported_local_path, source)
+        return source
 
     def _compute_affected_(self):
         if geo.is_raster(self.local_path):
+
             project = Project(os.getcwd())
-            path, file_name = os.path.split(self.local_path)
-            fname, ext = os.path.splitext(file_name)
-            affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
+            affected_local_path = self.affected_path
             ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
                       creation_options=constants.GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
                       NoDataValue=None,
@@ -303,4 +316,8 @@ class Variable(BaseModel):
             return template.format(**kwargs)
         else:
             return template
-
+    @property
+    def affected_path(self):
+        path, file_name = os.path.split(self.local_path)
+        fname, ext = os.path.splitext(file_name)
+        return os.path.join(path, f'{fname}_affected{ext}')

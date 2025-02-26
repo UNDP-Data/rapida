@@ -5,6 +5,8 @@ from typing import List
 import logging
 import pycountry
 from pyogrio import write_dataframe, read_info
+
+import cbsurge.constants
 from cbsurge.core.component import Component
 from cbsurge.project import Project
 from cbsurge.session import Session
@@ -155,62 +157,56 @@ class PopulationComponent(Component):
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
             nvars = len(variables)
-            multinational = len(project.countries) > 1
-            sources = dict()
-            operators = list()
-            for country in project.countries:
-                if progress:
-                    variable_task = progress.add_task(
-                        description=f'[red]Going to process {nvars} variables', total=nvars)
-
-                for var_name in variables:
-                    var_data = variables_data[var_name]
-                    if multinational:
-                        operators.append(var_data['operator'])
-                    #create instance
-                    v = PopulationVariable(name=var_name,
-                                           component=self.component_name,
-                                           **var_data)
-
-                    #assess
-                    v(year=self.base_year,
-                      country=country,
-                      multinational=multinational,
-                      **kwargs
-                      )
-                    if multinational:
-                        sources[v.local_path] = var_name
-                    if progress and variable_task:
-                        progress.update(variable_task, advance=1, description=f'Assessed {var_name} in {country}')
-                    #if progress and variable_task: progress.remove_task(variable_task)
-
-            if multinational:
-                vname = set(sources.values()).pop()
-                operator = set(operators).pop()
-                input_files = list(sources.keys())
-                vrt_path = os.path.join(project.data_folder,self.component_name, vname, f'{vname}.vrt')
 
 
-                vrt_options = gdal.BuildVRTOptions(
-                    resolution='highest',
-                    resampleAlg='nearest',
-                    allowProjectionDifference=False,
+            if progress:
+                variable_task = progress.add_task(
+                    description=f'[red]Going to process {nvars} variables', total=nvars)
+
+            for var_name in variables:
+                var_data = variables_data[var_name]
+                #create instance
+                v = PopulationVariable(
+                    name=var_name,
+                    component=self.component_name,
+                    **var_data
                 )
 
-                with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options) as vrtds:
-                    vrtds.FlushCache()
-                    v = PopulationVariable(
-                        name=var_name,
-                        component=self.component_name,
-                        title=f'Multinational {vname}',
-                        local_path=vrt_path,
-                        operator=operator,
+                #assess
+                v(year=self.base_year,**kwargs)
 
-                    )
+                if progress and variable_task:
+                    progress.update(variable_task, advance=1, description=f'Assessed {var_name} ')
+                    #if progress and variable_task: progress.remove_task(variable_task)
 
-                    v.evaluate(multinational=multinational, year=self.base_year, **kwargs)
-                    logger.info(f'{var_name} was assessed in multi-country mode {set(project.countries)}')
-
+            # if multinational:
+            #     vname = set(sources.values()).pop()
+            #     operator = set(operators).pop()
+            #     input_files = list(sources.keys())
+            #     vrt_path = os.path.join(project.data_folder,self.component_name, vname, f'{vname}.vrt')
+            #
+            #
+            #     vrt_options = gdal.BuildVRTOptions(
+            #         resolution='highest',
+            #         resampleAlg='nearest',
+            #         allowProjectionDifference=False,
+            #     )
+            #
+            #     with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=input_files, options=vrt_options) as vrtds:
+            #         vrtds.FlushCache()
+            #         v = PopulationVariable(
+            #             name=var_name,
+            #             component=self.component_name,
+            #             title=f'Multinational {vname}',
+            #             local_path=vrt_path,
+            #             operator=operator,
+            #
+            #         )
+            #         v._compute_affected_()
+            #         v.evaluate(multinational=multinational, year=self.base_year, **kwargs)
+            #
+            #         logger.info(f'{var_name} was assessed in multi-country mode {set(project.countries)}')
+            #
 
 
 
@@ -251,7 +247,7 @@ class PopulationVariable(Variable):
             if not os.path.exists(self._source_folder_):
                 os.makedirs(self._source_folder_)
             sources = self.resolve(**kwargs)
-            creation_options = 'TILED=YES COMPRESS=ZSTD BIGTIFF=IF_SAFER BLOCKXSIZE=256 BLOCKYSIZE=256 PREDICTOR=2'
+            creation_options = cbsurge.constants.GTIFF_CREATION_OPTIONS
 
             ds = Calc(calc=self.sources, outfile=computed_file,  projectionCheck=True, format='GTiff',
                       creation_options=creation_options.split(' '), quiet=False, overwrite=True,  **sources)

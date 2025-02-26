@@ -90,7 +90,6 @@ class Project:
                 gdf = geopandas.read_file(self.geopackage_file_path, layer=constants.POLYGONS_LAYER_NAME )
                 proj_bounds = tuple(map(float,gdf.total_bounds))
                 cols = gdf.columns.tolist()
-
                 if not 'iso3' in cols:
                     logger.info(f'going to add country code into "iso3" column')
                     geo_srs = osr.SpatialReference()
@@ -109,13 +108,13 @@ class Project:
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
 
-                    countries = tuple(set(joined['iso3']))
+                    self.countries = tuple(set(joined['iso3']))
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                                  promote_to_multi=True)
                 else:
-                    countries = tuple(set(gdf['iso3']))
-                self._cfg_['countries'] = countries
+                    self.countries = tuple(set(gdf['iso3']))
+                self._cfg_['countries'] = self.countries
                 self.save()
 
             if mask is not None:
@@ -175,10 +174,11 @@ class Project:
 
                     # rasterize the imported mask
                     geo.rasterize_vector_mask(
-                        src_dataset=self.geopackage_file_path,
-                        src_layer=vector_mask_layer,
+                        vector_mask_ds=self.geopackage_file_path,
+                        vector_mask_layer=vector_mask_layer,
                         dst_dataset=raster_mask_local_path,
-                        nodata_value=0
+                        nodata_value=0,
+                        outputBounds=proj_bounds
 
                     )
 

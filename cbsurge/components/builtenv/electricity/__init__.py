@@ -9,6 +9,7 @@ from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.util.http_get_json import http_get_json
+from cbsurge.util.download_geodata import download_geodata_by_admin
 import httpx
 import logging
 
@@ -88,43 +89,45 @@ class ElectricityVariable(Variable):
     def download(self, **kwargs):
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
-        self.download_geodata_by_admin(dataset_url=self.source, geopackage_path=geopackage_path)
+        download_geodata_by_admin(
+            dataset_url=self.source,
+            geopackage_path=geopackage_path,
+        )
 
     def evaluate(self, **kwargs):
+        logger.debug(f'Evaluating variable variable "{self.name}"')
+        destination_layer = f'stats.{self.component}'
+        project = Project(path=os.getcwd())
+        if destination_layer in gpd.list_layers(project.geopackage_file_path):
+            polygons_layer = destination_layer
+        else:
+            polygons_layer = 'polygons'
+        mask_df = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
+        if self.name in mask_df.columns:
+            mask_df.drop(columns=[self.name], inplace=True)
+        grid_layer_df = gpd.read_file(project.geopackage_file_path, layer='grid')
+        masked_grid_df = gpd.overlay(grid_layer_df, mask_df, how='intersection')
+
+        # write split lines to local path
+        self.local_path = os.path.join(project.data_folder, self.name)
+        masked_grid_df.to_file(f'{self.local_path}.fgb', driver='FlatGeobuf', layer='masked_grid')
+
+        masked_grid_df[self.name] = masked_grid_df.geometry.length
+        length_per_unit = masked_grid_df.groupby('name', as_index=False)[self.name].sum()
+
+        admin_with_length = mask_df.merge(length_per_unit, on='name', how='left')
+        admin_with_length[self.name] = admin_with_length[self.name].fillna(0)
+        admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=polygons_layer)
+
+
+    def _compute_affected(self):
         pass
 
     def compute(self, **kwargs):
-        logger.debug(f'Computing variable "{self.name}"')
-        project = Project(path=os.getcwd())
-        # if layer 'grid' does not exist, run the download
-        layers = gpd.list_layers(project.geopackage_file_path)
-        layer_names = layers.name.tolist()
-        if 'grid' not in layer_names:
-            self.download()
-        project = Project(path=os.getcwd())
-        compute_grid_variable(variable_name=self.name, geopackage_path=project.geopackage_file_path)
+        pass
 
     def resolve(self, **kwargs):
         pass
-
-
-def compute_grid_variable(variable_name, geopackage_path):
-    """
-    Computes the total grid length based on the geopackage 'grid` layer for each of the admin polygons in `polygons` layer in the project geopackage
-
-    Future: TODO: Implement the mask so that based on the passed mask, to compute the length based on it
-
-    Parameters:
-    - geopackage_path
-    """
-    grid_layer_df = gpd.read_file(geopackage_path, layer='grid')
-    admin_layer_df = gpd.read_file(geopackage_path, layer='polygons')
-    split_lines = gpd.overlay(grid_layer_df, admin_layer_df, how='intersection')
-    split_lines[variable_name] = split_lines.geometry.length
-    length_per_admin = split_lines.groupby('name', as_index=False)[variable_name].sum()
-    admin_with_length = admin_layer_df.merge(length_per_admin, on='name', how='left')
-    admin_with_length[variable_name] = admin_with_length[variable_name].fillna(0)
-    admin_with_length.to_file(geopackage_path, driver='GPKG', layer='polygons')
 
 
 

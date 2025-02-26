@@ -6,6 +6,7 @@ from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
+from cbsurge.util.download_geodata import download_geodata_by_admin
 from cbsurge.util.resolve_url import resolve_geohub_url
 
 
@@ -71,7 +72,11 @@ class RwiVariable(Variable):
         geopackage_path = project.geopackage_file_path
         fgb_url = self.source
         logger.info(f'Downloading {fgb_url} to {geopackage_path}')
-        pass
+        download_geodata_by_admin(
+            dataset_url=fgb_url,
+            geopackage_path=geopackage_path,
+            **kwargs
+        )
 
     def compute(self, **kwargs):
         pass

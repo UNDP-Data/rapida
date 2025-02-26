@@ -32,7 +32,7 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
-def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4):
+def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4, **kwargs):
     """
     Download a geospatial vector file with admin units as mask
 
@@ -40,6 +40,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
     :param dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
     :param batch_size: int, defaults to 5000, the number of features to download in one batch
     :param NWORKERS, int, defaults to 4. The number of threads to use for parallel download.
+    :param kwargs: additional arguments to pass to the downloader function. for example, rich progress instance can be fetched through `kwargs.get('progress', None)`
     """
     assert dataset_url, 'Dataset URL is required'
     dataset_info = read_info(dataset_url)
@@ -70,7 +71,10 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
             jobs = deque()
             results = deque()
             with concurrent.futures.ThreadPoolExecutor(max_workers=NWORKERS) as executor:
-                with Progress() as progress:
+                progress = kwargs.get('progress', None)
+                if progress is None:
+                    progress = Progress()
+
                     for feature in all_features:
                         au_geom = feature.GetGeometryRef()
                         au_geom.Transform(tr)

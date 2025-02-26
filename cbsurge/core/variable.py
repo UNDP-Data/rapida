@@ -70,6 +70,14 @@ class Variable(BaseModel):
     def evaluate(self, **kwargs):
         pass
 
+    @abstractmethod
+    def download(self, **kwargs):
+        pass
+
+    @abstractmethod
+    def resolve(self, **kwargs):
+        pass
+
     def __call__(self,  **kwargs):
         """
         Assess a variable. Essentially this means a series of steps in a specific order:

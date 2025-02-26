@@ -9,3 +9,5 @@ def silence_httpx_az():
     httpx_logger.setLevel(logging.WARNING)
     requests_logger = logging.getLogger('requests')
     requests_logger.setLevel(logging.WARNING)
+    msal_logger = logging.getLogger('msal')
+    msal_logger.setLevel(logging.WARNING)

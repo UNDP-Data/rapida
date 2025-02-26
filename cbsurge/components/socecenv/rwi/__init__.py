@@ -1,19 +1,18 @@
 import os
-from abc import ABC
+import logging
 from typing import List
 from pathlib import Path
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
-from cbsurge.util.http_get_json import http_get_json
-import httpx
-import logging
+from cbsurge.util.resolve_url import resolve_geohub_url
 
 
 logger = logging.getLogger(__name__)
 
-class RwiComponent(Component, ABC):
+
+class RwiComponent(Component):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -48,11 +47,7 @@ class RwiComponent(Component, ABC):
 
             for var_name in variables:
                 var_data = variables_data[var_name]
-
-                if var_data['source'] and var_data['source'].startswith('geohub:'):
-                    geohub_endpoint = ses.get_config_value_by_key('geohub_endpoint')
-                    var_data['source'] = var_data['source'].replace('geohub:', geohub_endpoint)
-                    var_data['source'] = self.get_url(var_data['source'])
+                var_data['source'] = resolve_geohub_url(var_data['source'], 'flatgeobuf')
 
                 # create instance
                 v = RwiVariable(name=var_name,
@@ -64,16 +59,6 @@ class RwiComponent(Component, ABC):
                 if variable_task and progress:
                     progress.update(variable_task, advance=1, description=f'Assessed {var_name}')
 
-    def get_url(self, dataset_url):
-        try:
-            timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-            data = http_get_json(url=dataset_url, timeout=timeout)
-            for link in data['properties']['links']:
-                if link['rel'] == 'flatgeobuf':
-                    return link['href']
-        except Exception as e:
-            logger.error(f'Failed to get electricity grid from  {dataset_url}. {e}')
-            raise
 
 
 
@@ -88,11 +73,11 @@ class RwiVariable(Variable):
         logger.info(f'Downloading {fgb_url} to {geopackage_path}')
         pass
 
-    def evaluate(self, **kwargs):
-        pass
-
     def compute(self, **kwargs):
         pass
 
     def resolve(self, **kwargs):
+        pass
+
+    def evaluate(self, **kwargs):
         pass

@@ -194,12 +194,9 @@ class Variable(BaseModel):
             - preprocess
             - analysis/zonal stats
 
-
-
         :param kwargs:
         :return:
         """
-        logger.debug(f'Assessing variable {self.name}')
 
         force_compute = kwargs.get('force_compute', False)
         if not self.dep_vars: #simple variable,

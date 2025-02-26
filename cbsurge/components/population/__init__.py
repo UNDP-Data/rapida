@@ -4,24 +4,24 @@ import os
 from typing import List
 import logging
 import pycountry
-from pyogrio import write_dataframe, read_info
-
+from pyogrio import write_dataframe
+from cbsurge import constants
+from cbsurge.util import geo
 import cbsurge.constants
 from cbsurge.core.component import Component
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.core.variable import Variable
-from cbsurge.az import blobstorage
 from osgeo_utils.gdal_calc import Calc
 from osgeo import gdal, osr
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
-from cbsurge.stats.zst import zonal_stats, sumup, zst
+from cbsurge.stats.zst import sumup, zst
 import geopandas
 from cbsurge.components.population.pop_coefficient import get_pop_coeff
-from cbsurge.util.proj_are_equal import proj_are_equal
-
-
+from cbsurge.az import blobstorage
+from urllib.parse import urlencode
+import re
 
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger('rapida')
@@ -341,4 +341,93 @@ class PopulationVariable(Variable):
 
                 gdal.Unlink(fpath)
 
+    def download(self, **kwargs):
 
+        """Download variable"""
+        logger.info(f'Downloading {self.name} ')
+        project=Project(os.getcwd())
+
+        self.local_path = os.path.join(self._source_folder_, f'{self.name}.tif')
+        if os.path.exists(self.local_path):
+            assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
+            return self.local_path
+        sources = list()
+
+        for country in project.countries:
+            src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
+            _, file_name = os.path.split(src_path)
+            local_path = os.path.join(self._source_folder_, file_name)
+            if not os.path.exists(self._source_folder_):
+                os.makedirs(self._source_folder_)
+            logger.info(f'Going to download {src_path} to {local_path}')
+            downloaded_file = asyncio.run(blobstorage.download_blob(src_path=src_path,dst_path=local_path))
+            sources.append(downloaded_file)
+
+        vrt_options = gdal.BuildVRTOptions(
+            resolution='highest',
+            resampleAlg='nearest',
+            allowProjectionDifference=False,
+        )
+        vrt_path = self.local_path.replace('.tif', '.vrt')
+        ds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options)
+        ds = gdal.Translate(destName=self.local_path,srcDS=ds )
+        imported_file_path = self.import_raster(source=self.local_path, )
+        assert imported_file_path == self.local_path, f'The local_path differs from {imported_file_path}'
+        self._compute_affected_()
+        ds = None
+
+    def import_raster(self, source=None, **kwargs):
+
+        project = Project(os.getcwd())
+        path, file_name = os.path.split(source)
+        fname, ext = os.path.splitext(file_name)
+        imported_local_path = os.path.join(path, f'{fname}_imported{ext}')
+
+        geo.import_raster(
+            source=source,
+            dst=imported_local_path,
+            target_srs=project.target_srs,
+            crop_ds=project.geopackage_file_path,
+            crop_layer_name=constants.POLYGONS_LAYER_NAME,
+            **kwargs
+        )
+
+        os.remove(source)
+        os.rename(imported_local_path, source)
+        return source
+
+    def _compute_affected_(self):
+        if geo.is_raster(self.local_path):
+
+            project = Project(os.getcwd())
+            affected_local_path = self.affected_path
+            ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
+                      creation_options=constants.GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                      NoDataValue=None,
+                      local_path=self.local_path, mask=project.raster_mask)
+            ds = None
+            return affected_local_path
+
+    def interpolate_template(self, template=None, **kwargs):
+        """
+        Interpolate values from kwargs into template
+        """
+        kwargs['country_lower'] = kwargs['country'].lower()
+        template_vars = set(re.findall(self._extractor_, template))
+
+        if template_vars:
+            for template_var in template_vars:
+                if not template_var in kwargs:
+                    assert hasattr(self,template_var), f'"{template_var}"  is required to generate source files'
+
+            return template.format(**kwargs)
+        else:
+            return template
+    @property
+    def affected_path(self):
+        path, file_name = os.path.split(self.local_path)
+        fname, ext = os.path.splitext(file_name)
+        return os.path.join(path, f'{fname}_affected{ext}')
+
+    def alter(self, **kwargs):
+        return f'vrt://{self.local_path}?{urlencode(kwargs)}'

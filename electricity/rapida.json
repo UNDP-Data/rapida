@@ -1,0 +1,11 @@
+{
+    "name": "electricity",
+    "path": "/home/thuha/Desktop/UNDP/geo-cb-surge/electricity",
+    "config_file": "/home/thuha/Desktop/UNDP/geo-cb-surge/electricity/rapida.json",
+    "create_command": "/home/thuha/.local/share/virtualenvs/geo-cb-surge-4j6_ZU4z/bin/rapida create --polygons /home/thuha/Desktop/UNDP/geo-cb-surge/data/kigali_admin.gpkg --name electricity",
+    "created_on": "2025-02-24T19:57:32.705887",
+    "user": "thuha",
+    "countries": [
+        "RWA"
+    ]
+}

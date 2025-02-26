@@ -68,14 +68,15 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
                 with Session() as session:
                     all_components = session.get_components()
                     components = components or all_components
-                    components_task = progress.add_task(
-                        description=f'[green]Assessing {"".join(components)} ', total=len(components))
+                    comp_word = 'components' if len(components)> 1 else 'component'
+                    # components_task = progress.add_task(
+                    #     description=f'[green]Assessing [red]{"".join(components)}[green] {comp_word}', total=len(components))
                     for component_name in components:
                         if not component_name in all_components:
                             msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
                             logger.error(msg)
                             click.echo(assess.get_help(ctx))
-                            progress.remove_task(components_task)
+                            #progress.remove_task(components_task)
                             sys.exit(1)
 
                         component_parts = component_name.split('.')
@@ -87,9 +88,10 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
                         cls = import_class(fqcn=fqcn)
                         component = cls()
                         component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)
-                        progress.update(components_task,description=f'Assessed {component_name}', advance=1)
 
-                    #progress.remove_task(components_task)
+                        #progress.update(components_task,  advance=1, )
+
+
         else:
             logger.info(f'"{current_folder}" is not a valid rapida project folder')
 

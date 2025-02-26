@@ -32,7 +32,7 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
-def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4):
+def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4, progress=None):
     """
     Download a geospatial vector file with admin units as mask
 
@@ -40,6 +40,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
     :param dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
     :param batch_size: int, defaults to 5000, the number of features to download in one batch
     :param NWORKERS, int, defaults to 4. The number of threads to use for parallel download.
+    :param progress: rich progress instance can be fetched through `kwargs.get('progress', None)`
     """
     assert dataset_url, 'Dataset URL is required'
     dataset_info = read_info(dataset_url)
@@ -70,109 +71,111 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
             jobs = deque()
             results = deque()
             with concurrent.futures.ThreadPoolExecutor(max_workers=NWORKERS) as executor:
-                with Progress() as progress:
-                    for feature in all_features:
-                        au_geom = feature.GetGeometryRef()
-                        au_geom.Transform(tr)
-                        au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
-                        # props = feature.items()
+                if progress is None:
+                    progress = Progress()
 
-                        job = dict(
-                            src_path=dataset_url,
-                            mask=au_poly,
-                            batch_size=batch_size,
-                            signal_event=stop,
-                            name=feature.GetFID(),
-                            progress=progress
-                        )
-                        jobs.append(job)
-                    njobs = len(jobs)
-                    total_task = progress.add_task(
-                        description=f'[red]Going to download data covering  {njobs} admin units', total=njobs)
-                    nworkers = njobs if njobs < NWORKERS else NWORKERS
-                    [executor.submit(downloader, jobs, results, stop) for i in range(nworkers)]
-                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
+                for feature in all_features:
+                    au_geom = feature.GetGeometryRef()
+                    au_geom.Transform(tr)
+                    au_poly = shapely.wkb.loads(bytes(au_geom.ExportToIsoWkb()))
+                    # props = feature.items()
 
-                    while True:
+                    job = dict(
+                        src_path=dataset_url,
+                        mask=au_poly,
+                        batch_size=batch_size,
+                        signal_event=stop,
+                        name=feature.GetFID(),
+                        progress=progress
+                    )
+                    jobs.append(job)
+                njobs = len(jobs)
+                total_task = progress.add_task(
+                    description=f'[red]Going to download data covering  {njobs} admin units', total=njobs)
+                nworkers = njobs if njobs < NWORKERS else NWORKERS
+                [executor.submit(downloader, jobs, results, stop) for i in range(nworkers)]
+                nfields = destination_layer.GetLayerDefn().GetFieldCount()
+
+                while True:
+                    try:
                         try:
-                            try:
-                                au_name, meta, batches = results.pop()
-                                logger.info(au_name)
-                                if batches is None:
-                                    logger.debug(f'{au_name} was processed')
-                                    raise meta
-                                for batch in batches:
-                                    new_geometries = []
-                                    mask = numpy.zeros(batch.num_rows, dtype=bool)
-                                    for i, record in enumerate(batch.to_pylist()):
-                                        geom = record.get("wkb_geometry", None)
-                                        fid = record.get("OGC_FID", None)
-                                        if geom is None:
-                                            print("Empty geometry")
-                                            continue
+                            au_name, meta, batches = results.pop()
 
-                                        if fid in written_geometries:
-                                            mask[i] = True
-                                        else:
-                                            shapely_geom = wkb.loads(geom)
-                                            reprojected_geom = transform(transformer.transform, shapely_geom)
-                                            geom_wkb = reprojected_geom.wkb
-                                            written_geometries.add(fid)
-                                            new_geometries.append(geom_wkb)
-                                    if mask[mask].size > 0:
-                                        batch = batch.filter(~mask)
-
-                                    batch = batch.drop_columns(['wkb_geometry'])
-                                    batch = batch.append_column('wkb_geometry', pa.array(new_geometries))
-
-                                    if nfields == 0:
-                                        logger.info('Creating fields')
-                                        for name in batch.schema.names:
-                                            if 'wkb' in name or 'geometry' in name: continue
-                                            field = batch.schema.field(name)
-                                            field_type = ARROWTYPE2OGRTYPE[field.type]
-                                            if destination_layer.GetLayerDefn().GetFieldIndex(name) == -1:
-                                                destination_layer.CreateField(ogr.FieldDefn(name, field_type))
-
-                                        nfields = destination_layer.GetLayerDefn().GetFieldCount()
-                                        destination_layer.SyncToDisk()
-
-                                    if batch.num_rows == 0:
-                                        logger.info('skipping batch')
+                            if batches is None:
+                                logger.debug(f'{au_name} was processed')
+                                raise meta
+                            for batch in batches:
+                                new_geometries = []
+                                mask = numpy.zeros(batch.num_rows, dtype=bool)
+                                for i, record in enumerate(batch.to_pylist()):
+                                    geom = record.get("wkb_geometry", None)
+                                    fid = record.get("OGC_FID", None)
+                                    if geom is None:
+                                        print("Empty geometry")
                                         continue
 
-                                    batch = batch.rename_columns({"wkb_geometry": "geometry"})
+                                    if fid in written_geometries:
+                                        mask[i] = True
+                                    else:
+                                        shapely_geom = wkb.loads(geom)
+                                        reprojected_geom = transform(transformer.transform, shapely_geom)
+                                        geom_wkb = reprojected_geom.wkb
+                                        written_geometries.add(fid)
+                                        new_geometries.append(geom_wkb)
+                                if mask[mask].size > 0:
+                                    batch = batch.filter(~mask)
 
-                                    try:
-                                        destination_layer.WritePyArrow(batch)
-                                    except Exception as e:
-                                        print(batch.column_names)
-                                        logger.info(
-                                            f'writing batch with {batch.num_rows} rows from {au_name} failed with error {e} and will be ignored')
+                                batch = batch.drop_columns(['wkb_geometry'])
+                                batch = batch.append_column('wkb_geometry', pa.array(new_geometries))
 
-                                destination_layer.SyncToDisk()
-                                ndownloaded += 1
-                                progress.update(total_task,
-                                                description=f'[red]Downloaded geo file from {ndownloaded} out of {njobs} admin units',
-                                                advance=1)
-                            except IndexError as ie:
-                                if not jobs and progress.finished:
-                                    stop.set()
-                                    break
-                                s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
-                                time.sleep(s)
-                                continue
-                        #
-                        except Exception as e:
-                            failed.append(f'Downloading {au_name} failed: {e.__class__.__name__}("{e}")')
+                                if nfields == 0:
+                                    logger.info('Creating fields')
+                                    for name in batch.schema.names:
+                                        if 'wkb' in name or 'geometry' in name: continue
+                                        field = batch.schema.field(name)
+                                        field_type = ARROWTYPE2OGRTYPE[field.type]
+                                        if destination_layer.GetLayerDefn().GetFieldIndex(name) == -1:
+                                            destination_layer.CreateField(ogr.FieldDefn(name, field_type))
+
+                                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
+                                    destination_layer.SyncToDisk()
+
+                                if batch.num_rows == 0:
+                                    logger.info('skipping batch')
+                                    continue
+
+                                batch = batch.rename_columns({"wkb_geometry": "geometry"})
+
+                                try:
+                                    destination_layer.WritePyArrow(batch)
+                                except Exception as e:
+                                    print(batch.column_names)
+                                    logger.info(
+                                        f'writing batch with {batch.num_rows} rows from {au_name} failed with error {e} and will be ignored')
+
+                            destination_layer.SyncToDisk()
                             ndownloaded += 1
                             progress.update(total_task,
-                                            description=f'[red]Downloaded geospatial data from {ndownloaded} out of {njobs} admin units',
+                                            description=f'[red]Downloaded geo file from {ndownloaded} out of {njobs} admin units',
                                             advance=1)
-                        except KeyboardInterrupt:
-                            logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')
-                            stop.set()
-                            break
+                        except IndexError as ie:
+                            if not jobs and (progress.finished or ndownloaded == len(all_features)):
+                                stop.set()
+                                break
+                            s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
+                            time.sleep(s)
+                            continue
+                    #
+                    except Exception as e:
+                        failed.append(f'Downloading {au_name} failed: {e.__class__.__name__}("{e}")')
+                        ndownloaded += 1
+                        progress.update(total_task,
+                                        description=f'[red]Downloaded geospatial data from {ndownloaded} out of {njobs} admin units',
+                                        advance=1)
+                    except KeyboardInterrupt:
+                        logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')
+                        stop.set()
+                        break
 
         if failed:
             for msg in failed:

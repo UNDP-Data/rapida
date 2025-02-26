@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 
-async def download(blob_client:BlobClient = None, dst_path:str=None):
+async def download(blob_client:BlobClient = None, dst_path:str=None, progress=None, task=None):
 
     if not await blob_client.exists():
         raise ValueError(f"Blob {blob_client.blob_name} does not exist")
@@ -29,7 +29,8 @@ async def download(blob_client:BlobClient = None, dst_path:str=None):
         async with aiofiles.open(dst_path, "wb") as f:
             async for chunk in blob.chunks():
                 await f.write(chunk)
-
+        if progress and task:
+            progress.update(task, advance=1)
     except Exception as e:
         logger.error(f"Failed to download the blob from {blob_client.blob_name}: {e}")
         raise
@@ -166,7 +167,7 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, 
                             blob_client = cc.get_blob_client(blob=rel_src_blob_path)
                             dst_path = os.path.join(dst_folder, src_blob_name)
                             task = asyncio.create_task(
-                                download(blob_client=blob_client, dst_path=dst_path),
+                                download(blob_client=blob_client, dst_path=dst_path,progress=progress, task=download_task),
                                 name=src_blob_name
                             )
                             download_tasks[src_blob_name] = task
@@ -182,9 +183,6 @@ async def download_blobs(src_blobs:Iterable[str] = None, dst_folder:str = None, 
                                 downloaded_file_path = await done_task
                                 assert os.path.exists(downloaded_file_path), f'{downloaded_file_path} does not exist'
                                 downloaded_files.append(downloaded_file_path)
-
-                                progress.update(download_task, advance=1)
-
                             except Exception as e:
                                 logger.error(f'Failed to download  {downloaded_file_name}. {e}')
                                 failed_tasks.append((downloaded_file_name, e))

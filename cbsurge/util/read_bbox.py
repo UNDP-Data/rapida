@@ -1,11 +1,12 @@
 import logging
 import time
+
 from pyogrio import open_arrow
 
 logger = logging.getLogger(__name__)
 
 def read_bbox(src_path=None, bbox=None, mask=None, batch_size=None, signal_event=None, name=None, ntries=3, progress=None):
-    task = progress.add_task(description=f'[green]Downloading in {name}...', start=False, total=None)
+    task = progress.add_task(description=f'[green]Downloading data in {name}...', start=False, total=None)
     try:
         for attempt in range(ntries):
             logger.debug(f'Attempt no {attempt} at {name}')
@@ -17,12 +18,12 @@ def read_bbox(src_path=None, bbox=None, mask=None, batch_size=None, signal_event
                     nb = 0
                     for b in reader :
                         if signal_event.is_set():
-                            logger.info(f'Cancelling extraction in {name}')
+                            logger.info(f'Cancelling data extraction in {name}')
                             return name, meta, batches
                         if b.num_rows > 0:
                             batches.append(b)
                             nb+=b.num_rows
-                            progress.update(task, description=f'[green]Downloaded {nb} in {name}', advance=nb, completed=None)
+                            progress.update(task, description=f'[green]Downloaded {nb} data in {name}', advance=nb, completed=None)
                     return name, meta, batches
             except Exception as e:
                 if attempt < ntries-1:

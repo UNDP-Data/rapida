@@ -27,8 +27,7 @@ class Session(object):
         constructor
         """
         self.config = self.get_config()
-        if self.config is not None:
-            logger.debug(f"rapida config was loaded")
+
 
 
     def __enter__(self):

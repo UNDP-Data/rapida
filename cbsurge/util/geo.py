@@ -1,3 +1,5 @@
+import pyogrio.core
+
 from cbsurge import constants
 from osgeo import gdal, ogr, osr
 from cbsurge.util.proj_are_equal import proj_are_equal
@@ -53,8 +55,11 @@ def import_raster(source=None, dst=None, target_srs=None,
     assert is_vector(crop_ds), f'{crop_ds} is not a vector dataset'
 
     should_crop = crop_ds is not None and crop_layer_name not in ('', None)
-
-
+    if should_crop:
+        info = pyogrio.core.read_info(crop_ds, layer=crop_layer_name)
+        out_bounds = list(map(float, info['total_bounds']))
+    else:
+        out_bounds = None
     warp_options = dict(
         format='GTiff',
         xRes=x_res,
@@ -63,7 +68,9 @@ def import_raster(source=None, dst=None, target_srs=None,
         cutlineDSName=crop_ds,
         cutlineLayer=crop_layer_name,
         cropToCutline=should_crop,
-        targetAlignedPixels=True
+        targetAlignedPixels=True,
+        outputBounds=out_bounds
+
     )
     warp_options.update(kwargs)
 
@@ -72,7 +79,7 @@ def import_raster(source=None, dst=None, target_srs=None,
         prj_equal = proj_are_equal(src_srs, target_srs)
         if not prj_equal:
             # reproject raster mask to target projection
-            logger.debug(f'Reprojecting {src_ds} {target_srs}')
+            logger.debug(f'Reprojecting {source} to {target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}')
             warp_options.update(dict(dstSRS=target_srs))
         rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
         assert os.path.exists(dst), f'Failed to align {source}'
@@ -139,22 +146,32 @@ def import_vector(src_dataset=None, src_layer=0, dst_dataset=None, dst_layer=Non
 
 
 
-def rasterize_vector_mask(src_dataset=None, src_layer=0,
+def rasterize_vector_mask(vector_mask_ds=None, vector_mask_layer=None,
                           xres = constants.DEFAULT_MASK_RESOLUTION_METERS,
                           yres= constants.DEFAULT_MASK_RESOLUTION_METERS,
-                          dst_dataset=None, nodata_value=None
+                          dst_dataset=None, nodata_value=None, **kwargs
                           ):
-
 
     rasterize_options = gdal.RasterizeOptions(
         format='GTiff', outputType=gdal.GDT_Byte,
         creationOptions=constants.GTIFF_CREATION_OPTIONS,
         noData=nodata_value, initValues=nodata_value,
-        burnValues=1, layers=[src_layer],
+        burnValues=1, layers=[vector_mask_layer],
         xRes=xres,
         yRes=yres,
         targetAlignedPixels=True,
+        **kwargs
 
 
     )
-    rds = gdal.Rasterize(destNameOrDestDS=dst_dataset, srcDS=src_dataset, options=rasterize_options)
+    # rasterize_dict = dict(
+    #         format='GTiff', outputType=gdal.GDT_Byte,
+    #         creationOptions=constants.GTIFF_CREATION_OPTIONS,
+    #         noData=nodata_value, initValues=nodata_value,
+    #         burnValues=1, layers=[vector_mask_layer],
+    #         xRes=xres,
+    #         yRes=yres,
+    #         targetAlignedPixels=True,
+    # )
+
+    rds = gdal.Rasterize(destNameOrDestDS=dst_dataset, srcDS=vector_mask_ds, options=rasterize_options)

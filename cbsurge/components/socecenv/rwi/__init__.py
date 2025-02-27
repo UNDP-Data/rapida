@@ -91,7 +91,7 @@ class RwiVariable(Variable):
                 progress=kwargs.get('progress', None)
             )
 
-        if geo.is_raster(self.local_path):
+        if project.raster_mask is not None and geo.is_raster(self.local_path):
             affected_local_path = self.affected_path
             if force_compute == True or not os.path.exists(affected_local_path):
                 self.clip_raster_with_mask(

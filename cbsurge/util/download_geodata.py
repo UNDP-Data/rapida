@@ -14,7 +14,14 @@ from pyproj import Transformer
 from rich.progress import Progress
 from shapely import wkb
 from shapely.ops import transform
+import os
+import rasterio
+from rasterio.mask import mask
+from rasterio.transform import array_bounds
+from rasterio.warp import calculate_default_transform, reproject, Resampling
+import geopandas as gpd
 
+from cbsurge import constants
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.util.downloader import downloader
 
@@ -182,3 +189,101 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
                 logger.error(msg)
     except Exception as e:
         logger.error(f'Error downloading {dataset_url} with error {e}')
+
+
+def download_raster(
+        dataset_url: str,
+        geopackage_path: str,
+        output_filename: str,
+        mask_layer_name: str = None,
+        progress=None
+):
+    """
+    download raster data clipped by the project area
+
+    :param dataset_url: raster dataset url
+    :param geopackage_path: project geopackage path. It should contain `polygons` layer unless set layer name as mask_layer_name
+    :param output_filename: output filename to save the downloaded raster file
+    :param mask_layer_name: mask layer name. If not specified, it clips the raster by `polygons` layer.
+    :param progress: rich progress instance
+    :return: output file path is returned
+    """
+    download_task = None
+    if progress:
+        download_task = progress.add_task(
+            description=f'[red]Going to download data covering the project area', total=None)
+
+    mask_layer = constants.POLYGONS_LAYER_NAME
+    if mask_layer_name:
+        mask_layer = mask_layer_name
+    gdf = gpd.read_file(geopackage_path, layer=mask_layer)
+    polygons_crs = gdf.crs
+
+    with rasterio.open(dataset_url) as raster:
+        # reproject polygons to the same CRS of raster
+        gdf_reproj = gdf.to_crs(raster.crs)
+        geoms = gdf_reproj.geometry.values.tolist()
+
+        if progress is not None and download_task is not None:
+            progress.update(download_task, description=f'[red] Downloading by identified {len(geoms)} polygons.')
+
+        # crop raster by polygons layer
+        out_image, out_transform = mask(raster, geoms, crop=True)
+        out_meta = raster.meta.copy()
+
+        if progress is not None and download_task is not None:
+            progress.update(download_task, description=f'[red] clipped the data by project area.')
+
+    if progress is not None and download_task is not None:
+        progress.update(download_task, description=f'[red] transforming projection {out_meta["crs"]} -> {polygons_crs.name}')
+
+    # compute bounds for cropped raster
+    bounds = array_bounds(out_image.shape[1], out_image.shape[2], out_transform)
+
+    # Prepare reproject from COG（raster.crs）to polygons_crs
+    dst_transform, dst_width, dst_height = calculate_default_transform(
+        out_meta["crs"],
+        polygons_crs,
+        out_image.shape[2],
+        out_image.shape[1],
+        *bounds
+    )
+
+    # generate reprojected raster
+    dst_image = numpy.empty((out_image.shape[0], dst_height, dst_width), dtype=out_image.dtype)
+    for i in range(out_image.shape[0]):
+        reproject(
+            source=out_image[i],
+            destination=dst_image[i],
+            src_transform=out_transform,
+            src_crs=out_meta["crs"],
+            dst_transform=dst_transform,
+            dst_crs=polygons_crs,
+            resampling=Resampling.nearest
+        )
+
+    # metadata for reprojected raster
+    out_meta.update({
+        "driver": "COG",
+        "height": dst_height,
+        "width": dst_width,
+        "transform": dst_transform,
+        "crs": polygons_crs,
+        "compress": 'zstd',
+        "predictor": 2
+    })
+
+    if progress is not None and download_task is not None:
+        progress.update(download_task, description=f'[blue] storing transformed data.')
+
+    output_dir = os.path.dirname(geopackage_path)
+    output_path = os.path.join(output_dir, output_filename)
+    with rasterio.open(output_path, "w", **out_meta) as dest:
+        dest.write(dst_image)
+        if progress is not None and download_task is not None:
+            progress.update(download_task, description=f'[blue] stored data at {output_path} successfully.')
+
+    if progress and download_task:
+        progress.remove_task(download_task)
+
+    return output_path

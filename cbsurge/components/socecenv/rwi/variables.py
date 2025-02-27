@@ -14,7 +14,17 @@ def generate_variables():
     #dependencies
     variables['rwi_mean'] = dict(
         title='Mean of relative wealth index',
-        source='geohub:/api/datasets/019a4692967f6412fb70808ee325d0e3',
+        source='geohub:/api/datasets/fcde6ab53a79657a27906b3248a1979d',
         operator="mean"
+    )
+    variables['rwi_min'] = dict(
+        title='Minimum of relative wealth index',
+        source='geohub:/api/datasets/fcde6ab53a79657a27906b3248a1979d',
+        operator="min"
+    )
+    variables['rwi_max'] = dict(
+        title='Maximum of relative wealth index',
+        source='geohub:/api/datasets/fcde6ab53a79657a27906b3248a1979d',
+        operator="max"
     )
     return variables

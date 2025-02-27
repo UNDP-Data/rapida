@@ -32,6 +32,172 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
+
+def download_vector(
+        src_dataset_url=None,src_layer=0,
+        dst_dataset_path=None,dst_layer_name=None,
+        polygons_dataset_path=None,polygons_layer_name=None,
+        batch_size=5000,NWORKERS=4,progress=None
+):
+    """
+    Download a remote vector dataset locally in a parallel manner using a third layer polygons
+    as mask.
+    :param src_dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
+    :param: src_layer, str or int, default=0, the layer to be  read
+    :param dst_dataset_path: str, local OGR dataset
+    :param dst_layer_name: str, the name of src_layer in the dst_dataset that will be read
+    :param polygons_dataset_path: str, OGR dataset with polygons layer
+    :param polygons_layer_name: str, name of the layer  containing polygons
+    :param batch_size: int, max number of features to download in one batch
+    :param NWORKERS: int, default=4, number of
+    :param progress:
+    :return:
+    """
+    assert src_dataset_url not in ('', None), f'src_dataset_url={src_dataset_url} is invalid'
+    src_dataset_info = read_info(src_dataset_url)
+    assert src_dataset_info, f'Could not read info from {src_dataset_url}. Please check the URL or the dataset format'
+    src_layer = src_layer or src_dataset_info['layer_name']
+    src_crs = src_dataset_info['crs']
+    src_srs = osr.SpatialReference()
+    src_srs.SetFromUserInput(src_crs)
+    src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    downloaded = 0
+    failed = []
+    written_features = set()
+    try:
+        with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
+            with gdal.OpenEx(polygons_dataset_path, gdal.OF_VECTOR | gdal.OF_READONLY) as poly_ds:
+                polygons_layer = poly_ds.GetLayerByName(polygons_layer_name)
+                target_srs = polygons_layer.GetSpatialRef()
+                target_crs = f"{target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}"
+                transformer = Transformer.from_crs(src_crs, target_crs, always_xy=True)
+                target2src_tr = osr.CoordinateTransformation(target_srs, src_srs)
+                destination_layer = dst_ds.CreateLayer(
+                    dst_layer_name,
+                    srs=target_srs,
+                    geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                    options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+                )
+                polygons = [e for e in polygons_layer]
+                stop = threading.Event()
+                jobs = deque()
+                results = deque()
+                with concurrent.futures.ThreadPoolExecutor(max_workers=NWORKERS) as executor:
+                    if progress is None:
+                        progress = Progress()
+
+                    for polygon_feature in polygons:
+                        polygon = polygon_feature.GetGeometryRef()
+                        polygon.Transform(target2src_tr)
+                        shapely_polygon = shapely.wkb.loads(bytes(polygon.ExportToIsoWkb()))
+                        props = polygon_feature.items()
+                        poly_id = props['name'] or polygon_feature.GetFID()
+
+                        job = dict(
+                            src_path=src_dataset_url,
+                            src_layer=src_layer,
+                            mask=shapely_polygon,
+                            batch_size=batch_size,
+                            signal_event=stop,
+                            name=poly_id,
+                            progress=progress
+                        )
+                        jobs.append(job)
+                    njobs = len(jobs)
+                    total_task = progress.add_task(
+                        description=f'[red]Going to download data covering  {njobs} polygons', total=njobs)
+                    nworkers = njobs if njobs < NWORKERS else NWORKERS
+                    [executor.submit(downloader, jobs, results, stop) for i in range(nworkers)]
+                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
+
+                    while True:
+                        try:
+                            try:
+                                poly_id, meta, batches = results.pop()
+
+                                if batches is None: # an error was encountered
+                                    logger.debug(f'{poly_id} was processed')
+                                    raise meta
+                                for batch in batches:
+                                    new_geometries = []
+                                    mask = numpy.zeros(batch.num_rows, dtype=bool)
+                                    for i, record in enumerate(batch.to_pylist()):
+                                        geom = record.get("wkb_geometry", None)
+                                        fid = record.get("OGC_FID", None)
+                                        if geom is None:
+                                            logger.info("Empty geometry")
+                                            continue
+
+                                        if fid in written_features:
+                                            mask[i] = True
+                                        else:
+                                            shapely_geom = wkb.loads(geom)
+                                            reprojected_geom = transform(transformer.transform, shapely_geom)
+                                            geom_wkb = reprojected_geom.wkb
+                                            written_features.add(fid)
+                                            new_geometries.append(geom_wkb)
+                                    if mask[mask].size > 0:
+                                        batch = batch.filter(~mask)
+
+                                    batch = batch.drop_columns(['wkb_geometry'])
+                                    batch = batch.append_column('wkb_geometry', pa.array(new_geometries))
+
+                                    if nfields == 0:
+                                        logger.info('Creating fields')
+                                        for name in batch.schema.names:
+                                            if 'wkb' in name or 'geometry' in name: continue
+                                            field = batch.schema.field(name)
+                                            field_type = ARROWTYPE2OGRTYPE[field.type]
+                                            if destination_layer.GetLayerDefn().GetFieldIndex(name) == -1:
+                                                destination_layer.CreateField(ogr.FieldDefn(name, field_type))
+
+                                        nfields = destination_layer.GetLayerDefn().GetFieldCount()
+                                        destination_layer.SyncToDisk()
+
+                                    if batch.num_rows == 0:
+                                        logger.info('skipping batch')
+                                        continue
+
+                                    batch = batch.rename_columns({"wkb_geometry": "geometry"})
+
+                                    try:
+                                        destination_layer.WritePyArrow(batch)
+                                    except Exception as e:
+                                        logger.info(
+                                            f'writing batch with {batch.num_rows} rows from {poly_id} failed with error {e} and will be ignored')
+
+                                destination_layer.SyncToDisk()
+                                downloaded += 1
+                                progress.update(total_task,
+                                                description=f'[red]Downloaded  features covering {poly_id} ',
+                                                advance=1)
+                            except IndexError as ie:
+                                if not jobs and (progress.finished or downloaded == len(polygons)):
+                                    stop.set()
+                                    break
+                                s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
+                                time.sleep(s)
+                                continue
+                        #
+                        except Exception as e:
+                            failed.append(f'Downloading {poly_id} failed: {e.__class__.__name__}("{e}")')
+                            downloaded += 1
+                            progress.update(total_task,
+                                            description=f'[red]Handled {poly_id}',
+                                            advance=1)
+                        except KeyboardInterrupt:
+                            logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')
+                            stop.set()
+                            break
+        if failed:
+            for msg in failed:
+                logger.error(msg)
+    except Exception as e:
+        logger.error(f'Error downloading {src_dataset_url} with error {e}')
+
+
+
+
 def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4, progress=None):
     """
     Download a geospatial vector file with admin units as mask

@@ -41,11 +41,6 @@ class RwiComponent(Component):
             variables_data = ses.get_component(self.component_name)
             nvars = len(variables)
 
-            progress = kwargs.get('progress', None)
-            if progress:
-                variable_task = progress.add_task(
-                    description=f'[red]Going to process {nvars} variables', total=nvars)
-
             for var_name in variables:
                 var_data = variables_data[var_name]
                 var_data['source'] = resolve_geohub_url(var_data['source'], 'flatgeobuf')
@@ -57,11 +52,6 @@ class RwiComponent(Component):
                 # assess
                 v(**kwargs)
 
-                if variable_task and progress:
-                    progress.update(variable_task, advance=1, description=f'Assessed {var_name}')
-
-
-
 
 class RwiVariable(Variable):
     def __init__(self, **kwargs):
@@ -71,7 +61,7 @@ class RwiVariable(Variable):
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
         fgb_url = self.source
-        logger.info(f'Downloading {fgb_url} to {geopackage_path}')
+
         download_geodata_by_admin(
             dataset_url=fgb_url,
             geopackage_path=geopackage_path,

@@ -100,7 +100,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
                     try:
                         try:
                             au_name, meta, batches = results.pop()
-                            logger.info(au_name)
+
                             if batches is None:
                                 logger.debug(f'{au_name} was processed')
                                 raise meta

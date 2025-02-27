@@ -18,9 +18,7 @@ def generate_variables():
     #dependencies
     variables['electricity_grid_length'] = dict(
         title='Total length of electricity grid',
-        source='geohub:/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
-        operator="sum"
-    )
+        source='geohub:/api/datasets/310aadaa61ea23811e6ecd75905aaf29')
     return variables
 
 

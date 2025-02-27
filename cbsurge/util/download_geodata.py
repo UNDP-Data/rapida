@@ -32,7 +32,7 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
-def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4, progress=None):
+def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000, NWORKERS=4, progress=None, **kwargs):
     """
     Download a geospatial vector file with admin units as mask
 
@@ -45,7 +45,10 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
     assert dataset_url, 'Dataset URL is required'
     dataset_info = read_info(dataset_url)
     assert dataset_info, f'Could not read info from {dataset_url}. Please check the URL or the dataset format'
-    layer_name = dataset_info['layer_name']
+
+    layer_name = kwargs.get('layer_name', None)
+    if not layer_name:
+        layer_name = dataset_info['layer_name']
     src_srs = osr.SpatialReference()
     src_srs.SetFromUserInput(dataset_info['crs'])
     src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)

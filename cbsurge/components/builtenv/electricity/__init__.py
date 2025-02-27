@@ -92,6 +92,7 @@ class ElectricityVariable(Variable):
         download_geodata_by_admin(
             dataset_url=self.source,
             geopackage_path=geopackage_path,
+            layer_name=self.component
         )
 
     def evaluate(self, **kwargs):
@@ -102,11 +103,11 @@ class ElectricityVariable(Variable):
             polygons_layer = destination_layer
         else:
             polygons_layer = 'polygons'
-        mask_df = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
-        if self.name in mask_df.columns:
-            mask_df.drop(columns=[self.name], inplace=True)
-        grid_layer_df = gpd.read_file(project.geopackage_file_path, layer='grid')
-        masked_grid_df = gpd.overlay(grid_layer_df, mask_df, how='intersection')
+        polygons_df = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
+        if self.name in polygons_df.columns:
+            polygons_df.drop(columns=[self.name], inplace=True)
+        grid_layer_df = gpd.read_file(project.geopackage_file_path, layer=self.component)
+        masked_grid_df = gpd.overlay(grid_layer_df, polygons_df, how='intersection')
 
         # write split lines to local path
         self.local_path = os.path.join(project.data_folder, self.name)
@@ -115,9 +116,9 @@ class ElectricityVariable(Variable):
         masked_grid_df[self.name] = masked_grid_df.geometry.length
         length_per_unit = masked_grid_df.groupby('name', as_index=False)[self.name].sum()
 
-        admin_with_length = mask_df.merge(length_per_unit, on='name', how='left')
+        admin_with_length = polygons_df.merge(length_per_unit, on='name', how='left')
         admin_with_length[self.name] = admin_with_length[self.name].fillna(0)
-        admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=polygons_layer)
+        admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='a')
 
 
     def _compute_affected(self):

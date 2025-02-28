@@ -201,6 +201,15 @@ class Project:
         if os.path.exists(mask_file):
             return mask_file
     @property
+    def vector_mask(self):
+        mask_layer_name = 'mask'
+        layer_list = geopandas.list_layers(self.geopackage_file_path)['name'].tolist()
+        if mask_layer_name in layer_list:
+            return mask_layer_name
+        else:
+            return None
+
+    @property
     def data_folder(self):
         return os.path.join(self.path, self.data_folder_name)
 

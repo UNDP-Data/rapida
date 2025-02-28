@@ -4,6 +4,7 @@ from typing import List
 from pathlib import Path
 
 import geopandas as gpd
+import numpy as np
 
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
@@ -86,6 +87,10 @@ class ElectricityVariable(Variable):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    @property
+    def affected_layer_name(self):
+        return f'{self.name}_affected'
+
     def download(self, **kwargs):
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
@@ -96,29 +101,60 @@ class ElectricityVariable(Variable):
         )
 
     def evaluate(self, **kwargs):
+
+
         logger.debug(f'Evaluating variable variable "{self.name}"')
         destination_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
+
         if destination_layer in gpd.list_layers(project.geopackage_file_path):
             polygons_layer = destination_layer
         else:
             polygons_layer = 'polygons'
         polygons_df = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
-        if self.name in polygons_df.columns:
+
+        if self.name in polygons_df.columns: # remove the variable column if it exists
             polygons_df.drop(columns=[self.name], inplace=True)
+
         grid_layer_df = gpd.read_file(project.geopackage_file_path, layer=self.component)
-        masked_grid_df = gpd.overlay(grid_layer_df, polygons_df, how='intersection')
+
+        electricity_grid_df = gpd.overlay(grid_layer_df, polygons_df, how='intersection')
 
         # write split lines to local path
         self.local_path = os.path.join(project.data_folder, self.name)
-        masked_grid_df.to_file(f'{self.local_path}.fgb', driver='FlatGeobuf', layer='masked_grid')
+        electricity_grid_df.to_file(f'{self.local_path}.fgb', driver='FlatGeobuf', layer='masked_grid')
 
-        masked_grid_df[self.name] = masked_grid_df.geometry.length
-        length_per_unit = masked_grid_df.groupby('name', as_index=False)[self.name].sum()
+        electricity_grid_df[self.name] = electricity_grid_df.geometry.length
+        length_per_unit = electricity_grid_df.groupby('name', as_index=False)[self.name].sum()
 
         admin_with_length = polygons_df.merge(length_per_unit, on='name', how='left')
         admin_with_length[self.name] = admin_with_length[self.name].fillna(0)
-        admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='a')
+        admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
+
+
+
+        if project.vector_mask is not None:  # mask the grid layer
+            mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
+            grid_layer_df_affected = gpd.overlay(grid_layer_df, mask_df, how='intersection')
+            grid_layer_df_affected.to_file(project.geopackage_file_path, driver='GPKG', layer=self.affected_layer_name, mode='w')
+            grid_layer_df_affected[f'{self.name}_affected'] = grid_layer_df_affected.geometry.length
+
+            # drop the affected column if it exists
+            if self.affected_layer_name in polygons_df.columns:
+                polygons_df.drop(columns=[self.affected_layer_name], inplace=True)
+            # overlay the affected with the admin
+            masked_electricity_grid_df = gpd.overlay(grid_layer_df_affected, polygons_df, how='intersection')
+            masked_electricity_grid_df[self.affected_layer_name] = masked_electricity_grid_df.geometry.length
+            affected_length_per_unit = masked_electricity_grid_df.groupby('name', as_index=False)[f'{self.name}_affected'].sum()
+            admin_with_length = admin_with_length.merge(affected_length_per_unit, on='name', how='left')
+            admin_with_length[f'{self.name}_affected'] = admin_with_length[f'{self.name}_affected'].fillna(0)
+
+            # compute percentage of affected
+            admin_with_length[f'{self.name}_affected_percent'] = np.divide(admin_with_length[f'{self.name}_affected'], admin_with_length[self.name])
+            admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
+
+
+
 
 
     def _compute_affected(self):

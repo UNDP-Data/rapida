@@ -1,10 +1,10 @@
 import concurrent.futures
 import logging
 import random
-import threading
 import time
 from collections import deque
-import tempfile
+import concurrent.futures
+import threading
 import numpy
 import pyarrow as pa
 import shapely
@@ -17,8 +17,8 @@ from shapely.ops import transform, unary_union
 from shapely.geometry import box
 import os
 import rasterio
-from rasterio.merge import merge
-from rasterio.warp import calculate_default_transform, reproject, Resampling
+from rasterio.windows import from_bounds, Window
+from rasterio.warp import calculate_default_transform, reproject, Resampling, transform_bounds
 import geopandas as gpd
 
 from cbsurge import constants
@@ -198,6 +198,7 @@ def download_raster(
         mask_layer_name: str = None,
         progress: Progress=None,
         chunk_size: tuple[int, int]=(4096, 4096),
+        num_workers=4
 ):
     """
     download raster data clipped by the project area
@@ -207,6 +208,8 @@ def download_raster(
     :param output_filename: output filename to save the downloaded raster file
     :param mask_layer_name: mask layer name. If not specified, it clips the raster by `polygons` layer.
     :param progress: rich progress instance
+    :param chunk_size: A tuple (chunk_width, chunk_height) in pixels.
+    :param num_workers: Number of concurrent threads.
     :return: output file path is returned
     """
     download_task = None
@@ -232,7 +235,6 @@ def download_raster(
 
         # Create a single unioned geometry from all polygons for efficiency
         union_geom = unary_union(geoms)
-        # Compute the bounding box of the unioned polygon
         minx, miny, maxx, maxy = union_geom.bounds
 
         # Compute the overall window in pixel coordinates that covers the unioned bounds
@@ -242,142 +244,125 @@ def download_raster(
         chunk_width = chunk_size[0]
         chunk_height = chunk_size[1]
 
-        temp_files = []  # List to hold temporary file paths for each chunk
+        # Get integer bounds of the overall window
+        col_off = int(overall_window.col_off)
+        row_off = int(overall_window.row_off)
+        win_width = int(overall_window.width)
+        win_height = int(overall_window.height)
 
-        # Create a temporary directory for storing chunk files
-        with tempfile.TemporaryDirectory(dir=output_dir) as tmpdir:
-            # Get integer bounds of the overall window
-            col_off = int(overall_window.col_off)
-            row_off = int(overall_window.row_off)
-            win_width = int(overall_window.width)
-            win_height = int(overall_window.height)
+        # Loop over the overall window in chunks
+        rows = range(row_off, row_off + win_height, chunk_height)
+        cols = range(col_off, col_off + win_width, chunk_width)
 
-            # Loop over the overall window in chunks
-            rows = range(row_off, row_off + win_height, chunk_height)
-            cols = range(col_off, col_off + win_width, chunk_width)
+        total_chunks = len(rows) * len(cols)
+        if progress and download_task is not None:
+            progress.update(download_task, description=f'[red] Downloading {total_chunks} chunks')
 
-            total_chunks = len(rows) * len(cols)
-            if progress and download_task is not None:
-                progress.update(download_task, description=f'[red] Downloading {total_chunks} chunks')
-
-            for row in rows:
-                for col in cols:
-                    # Define a window (chunk) with proper size limits
-                    w = rasterio.windows.Window(
-                        col, row,
-                        min(chunk_width, col_off + win_width - col),
-                        min(chunk_height, row_off + win_height - row)
-                    )
-                    # Compute the spatial bounds of the window
-                    w_bounds = rasterio.windows.bounds(w, transform=src.transform)
-                    # Create a shapely box for the window bounds
-                    window_box = box(*w_bounds)
-                    # Skip this window if it does not intersect the unioned polygon
-                    if not window_box.intersects(union_geom):
-                        continue
-
-                    # Read the chunk data from the source raster
-                    data = src.read(window=w)
-                    # Get the transform for this window
-                    w_transform = src.window_transform(w)
-
-                    # Create a boolean mask for pixels inside the polygon(s)
-                    mask_arr = rasterio.features.geometry_mask(
-                        geoms,
-                        out_shape=(int(w.height), int(w.width)),
-                        transform=w_transform,
-                        invert=True
-                    )
-                    # Determine nodata value; if not set, default to 0
-                    nodata = src.nodata if src.nodata is not None else 0
-                    # Apply the mask: set pixels outside the polygon(s) to nodata
-                    data = numpy.where(mask_arr, data, nodata)
-
-                    # Prepare metadata for the chunk
-                    chunk_meta = src.meta.copy()
-                    chunk_meta.update({
-                        "height": int(w.height),
-                        "width": int(w.width),
-                        "transform": w_transform
-                    })
-
-                    # Write the chunk to a temporary file
-                    chunk_filename = os.path.join(tmpdir, f"chunk_{row}_{col}.tif")
-                    with rasterio.open(chunk_filename, "w", **chunk_meta) as dst:
-                        dst.write(data)
-                    temp_files.append(chunk_filename)
-
-                    if progress and download_task is not None:
-                        progress.update(download_task,
-                                        description=f'[red] Downloaded chunk at row {row}, col {col}: ({len(temp_files)} / {total_chunks})')
-
-            # Merge all chunk files into one mosaic
-            src_files_to_mosaic = []
-            for fp in temp_files:
-                src_ds = rasterio.open(fp)
-                src_files_to_mosaic.append(src_ds)
-
-            mosaic, mosaic_transform = merge(src_files_to_mosaic)
-
-            # Update metadata based on the merged mosaic
-            out_meta = src.meta.copy()
-            out_meta.update({
-                "height": mosaic.shape[1],
-                "width": mosaic.shape[2],
-                "transform": mosaic_transform
+            # Pre-calculate the destination metadata by reprojecting the overall bounds.
+            src_bounds = rasterio.windows.bounds(overall_window, transform=src.transform)
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                src.crs, polygons_crs, win_width, win_height, *src_bounds
+            )
+            dst_meta = src.meta.copy()
+            dst_meta.update({
+                "driver": "COG",
+                "crs": polygons_crs,
+                "transform": dst_transform,
+                "width": dst_width,
+                "height": dst_height,
+                "compress": "zstd",
+                "predictor": 2
             })
 
-            # Close all temporary datasets
-            for src_ds in src_files_to_mosaic:
-                src_ds.close()
+        # Open the final output file for writing in target CRS.
+        output_path = os.path.join(output_dir, output_filename)
 
-        if progress and download_task is not None:
-            progress.update(download_task, description=f'[red] Merged all chunks; starting reprojection from {out_meta["crs"]} to {polygons_crs.name}.')
+        with rasterio.open(output_path, "w", **dst_meta) as dst:
+            # Create thread locks for safe reading and writing.
+            read_lock = threading.Lock()
+            write_lock = threading.Lock()
+            logger.info(f"nodata: {src.nodata}")
+            def process(mosaic_window: Window):
+                """
+                Process one chunk:
+                1. Convert mosaic_window (relative to overall_window) to source absolute window.
+                2. Check intersection with the unioned polygon.
+                3. Read source data, apply mask.
+                4. Compute destination window by transforming source window bounds.
+                5. Reproject and write the chunk directly into the output file.
+                """
+                # Convert mosaic_window (which is relative to overall_window) to source coordinates.
+                source_window = Window(
+                    mosaic_window.col_off + overall_window.col_off,
+                    mosaic_window.row_off + overall_window.row_off,
+                    mosaic_window.width,
+                    mosaic_window.height
+                )
+                # Get bounds in source CRS and check intersection.
+                s_bounds = rasterio.windows.bounds(source_window, transform=src.transform)
+                if not box(*s_bounds).intersects(union_geom):
+                    return
 
-        # Compute the spatial bounds of the merged mosaic
-        mosaic_bounds = rasterio.transform.array_bounds(mosaic.shape[1], mosaic.shape[2], mosaic_transform)
+                with read_lock:
+                    data = src.read(window=source_window)
+                src_window_transform = src.window_transform(source_window)
 
-        # Calculate the destination transform and dimensions for the target CRS
-        dst_transform, dst_width, dst_height = calculate_default_transform(
-            out_meta["crs"],
-            polygons_crs,
-            mosaic.shape[2],
-            mosaic.shape[1],
-            *mosaic_bounds
-        )
+                # Create a mask array using the source window dimensions.
+                mask_arr = rasterio.features.geometry_mask(
+                    geoms,
+                    out_shape=(int(source_window.height), int(source_window.width)),
+                    transform=src_window_transform,
+                    invert=True
+                )
 
-        # Reproject the mosaic to the polygon CRS
-        dst_image = numpy.empty((mosaic.shape[0], dst_height, dst_width), dtype=mosaic.dtype)
-        for i in range(mosaic.shape[0]):
-            reproject(
-                source=mosaic[i],
-                destination=dst_image[i],
-                src_transform=mosaic_transform,
-                src_crs=out_meta["crs"],
-                dst_transform=dst_transform,
-                dst_crs=polygons_crs,
-                resampling=Resampling.nearest
-            )
+                data = numpy.where(mask_arr, data, numpy.nan)
 
-        # Update metadata for the reprojected raster
-        out_meta.update({
-            "driver": "COG",
-            "height": dst_height,
-            "width": dst_width,
-            "transform": dst_transform,
-            "crs": polygons_crs,
-            "compress": 'zstd',
-            "predictor": 2
-        })
+                # Compute the bounds of the source window.
+                src_win_bounds = rasterio.windows.bounds(source_window, transform=src.transform)
+                # Transform these bounds to the target CRS.
+                dst_win_bounds = transform_bounds(src.crs, polygons_crs, *src_win_bounds, densify_pts=21)
+                # Compute the destination window in the output file using the target transform.
+                dst_window = rasterio.windows.from_bounds(*dst_win_bounds, transform=dst.transform)
+                # Ensure the window lies within the output dimensions.
+                dst_window = dst_window.intersection(Window(0, 0, dst.width, dst.height))
+                if dst_window.width <= 0 or dst_window.height <= 0:
+                    return
 
-        if progress and download_task is not None:
-            progress.update(download_task, description=f'[red] Storing transformed data.')
+                # Allocate array for the reprojected chunk.
+                dest_data = numpy.empty((data.shape[0], int(dst_window.height), int(dst_window.width)),
+                                        dtype=data.dtype)
+                for i in range(data.shape[0]):
+                    reproject(
+                        source=data[i],
+                        destination=dest_data[i],
+                        src_transform=src_window_transform,
+                        src_crs=src.crs,
+                        dst_transform=rasterio.windows.transform(dst_window, dst.transform),
+                        dst_crs=polygons_crs,
+                        resampling=Resampling.nearest
+                    )
+                with write_lock:
+                    dst.write(dest_data, window=dst_window)
 
-    output_path = os.path.join(output_dir, output_filename)
-    with rasterio.open(output_path, "w", **out_meta) as dest:
-        dest.write(dst_image)
-        if progress is not None and download_task is not None:
-            progress.update(download_task, description=f'[red] stored data at {output_path} successfully.')
+            windows = [
+                Window(
+                    col - col_off,
+                    row - row_off,
+                    min(chunk_width, win_width - (col - col_off)),
+                    min(chunk_height, win_height - (row - row_off))
+                )
+                for row in rows for col in cols
+            ]
+
+            if progress and download_task is not None:
+                progress.update(download_task, description=f'[red]Processing {len(windows)} chunks with {num_workers} threads.')
+
+            # Process windows concurrently.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
+                list(executor.map(process, windows))
+
+            if progress and download_task is not None:
+                progress.update(download_task, description=f'[red]All chunks written to {output_path}.')
 
     if progress and download_task:
         progress.remove_task(download_task)

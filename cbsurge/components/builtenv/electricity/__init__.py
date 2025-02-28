@@ -133,7 +133,7 @@ class ElectricityVariable(Variable):
 
 
 
-        if project.vector_mask is not None:  # mask the grid layer
+        if project.vector_mask is not None:  # if the mask is provided then compute the affected
             mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
             grid_layer_df_affected = gpd.overlay(grid_layer_df, mask_df, how='intersection')
             grid_layer_df_affected.to_file(project.geopackage_file_path, driver='GPKG', layer=self.affected_layer_name, mode='w')
@@ -151,6 +151,16 @@ class ElectricityVariable(Variable):
 
             # compute percentage of affected
             admin_with_length[f'{self.name}_affected_percent'] = np.divide(admin_with_length[f'{self.name}_affected'], admin_with_length[self.name])
+
+            # compute area of admin
+            admin_with_length['area'] = admin_with_length.geometry.area
+
+            # density: affected per unit area of admin unit
+            admin_with_length[f'{self.name}_affected_density'] = np.divide(admin_with_length[f'{self.name}_affected'], admin_with_length['area'])
+
+            # drop the area column
+            admin_with_length.drop(columns=['area'], inplace=True)
+
             admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
 
 

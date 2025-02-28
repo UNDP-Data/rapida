@@ -4,7 +4,7 @@ import os
 import shutil
 from cbsurge.session import Session
 from cbsurge.components.population.variables import generate_variables as gen_pop_vars
-from cbsurge.components.socecenv.rwi.variables import generate_variables as gen_rwi_vars
+from cbsurge.components.rwi.variables import generate_variables as gen_rwi_vars
 
 from cbsurge.util.setup_logger import setup_logger
 
@@ -79,7 +79,7 @@ def setup_prompt(session: Session):
     vars_dict = {
         "variables": {
             "population":  gen_pop_vars(),
-            "socecenv.rwi": gen_rwi_vars(),
+            "rwi": gen_rwi_vars(),
         }
     }
     session.config.update(vars_dict)

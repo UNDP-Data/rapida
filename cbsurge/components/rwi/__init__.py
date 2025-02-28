@@ -27,11 +27,11 @@ class RwiComponent(Component):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # get parent package name for electricity
-        current_dir = Path(__file__).resolve().parent
-        parent_package_name = current_dir.parents[0].name
-
-        self.component_name = f"{parent_package_name}.{ self.__class__.__name__.lower().split('component')[0]}"
+        # # get parent package name for electricity
+        # current_dir = Path(__file__).resolve().parent
+        # parent_package_name = current_dir.parents[0].name
+        #
+        # self.component_name = f"{parent_package_name}.{ self.__class__.__name__.lower().split('component')[0]}"
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 

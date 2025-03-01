@@ -2,7 +2,6 @@ import datetime
 import logging
 import time
 from pyogrio import open_arrow
-from rich.theme import Theme
 
 logger = logging.getLogger(__name__)
 
@@ -98,5 +97,4 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                     raise e
     finally:
         if progress:
-            #progress.theme.styles["bar.complete"] = original_color
             progress.remove_task(task)

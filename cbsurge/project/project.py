@@ -29,6 +29,7 @@ class Project:
     data_folder_name = 'data'
     projection: str = 'ESRI:54009'
     _instance = None
+    polygons_layer_name = constants.POLYGONS_LAYER_NAME
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -82,12 +83,12 @@ class Project:
                     src_dataset=polygons,
                     src_layer=layer_name,
                     dst_dataset=self.geopackage_file_path,
-                    dst_layer=constants.POLYGONS_LAYER_NAME,
+                    dst_layer=self.polygons_layer_name,
                     target_srs=self.target_srs,
                 )
 
 
-                gdf = geopandas.read_file(self.geopackage_file_path, layer=constants.POLYGONS_LAYER_NAME )
+                gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name )
                 proj_bounds = tuple(map(float,gdf.total_bounds))
                 cols = gdf.columns.tolist()
                 if not 'iso3' in cols:
@@ -138,7 +139,7 @@ class Project:
                     geo.import_raster(target_srs=self.target_srs,
                                       source=mask, dst=raster_mask_local_path,
                                       crop_ds=self.geopackage_file_path,
-                                      crop_layer_name=constants.POLYGONS_LAYER_NAME,
+                                      crop_layer_name=self.polygons_layer_name,
                                       return_handle=False,
                                       outputType=gdal.GDT_Byte,
                                       srcNodata=None, dstNodata=0, # this is gdalwarp specific kwrd
@@ -167,7 +168,7 @@ class Project:
                         dst_layer=vector_mask_layer,
                         target_srs=self.target_srs,
                         clip_dataset=self.geopackage_file_path,
-                        clip_layer=constants.POLYGONS_LAYER_NAME,
+                        clip_layer=self.polygons_layer_name,
                         access_mode='append'
 
                     )

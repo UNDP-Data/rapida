@@ -298,24 +298,9 @@ def download_raster(
                     mosaic_window.width,
                     mosaic_window.height
                 )
-                # Get bounds in source CRS and check intersection.
-                s_bounds = rasterio.windows.bounds(source_window, transform=src.transform)
-                if not box(*s_bounds).intersects(union_geom):
-                    return
 
                 with read_lock:
                     data = src.read(window=source_window)
-                src_window_transform = src.window_transform(source_window)
-
-                # Create a mask array using the source window dimensions.
-                mask_arr = rasterio.features.geometry_mask(
-                    geoms,
-                    out_shape=(int(source_window.height), int(source_window.width)),
-                    transform=src_window_transform,
-                    invert=True
-                )
-
-                data = numpy.where(mask_arr, data, numpy.nan)
 
                 # Compute the bounds of the source window.
                 src_win_bounds = rasterio.windows.bounds(source_window, transform=src.transform)
@@ -327,6 +312,31 @@ def download_raster(
                 dst_window = dst_window.intersection(Window(0, 0, dst.width, dst.height))
                 if dst_window.width <= 0 or dst_window.height <= 0:
                     return
+
+                # Get bounds in source CRS and check intersection.
+                s_bounds = rasterio.windows.bounds(source_window, transform=src.transform)
+                if not box(*s_bounds).intersects(union_geom):
+                    # 全バンド (src.count) 分の nan 配列を作成
+                    dest_data = numpy.full(
+                        (src.count, int(dst_window.height), int(dst_window.width)),
+                        numpy.nan,
+                        dtype=src.dtypes[0]
+                    )
+                    with write_lock:
+                        dst.write(dest_data, window=dst_window)
+                    return
+
+                src_window_transform = src.window_transform(source_window)
+
+                # Create a mask array using the source window dimensions.
+                mask_arr = rasterio.features.geometry_mask(
+                    geoms,
+                    out_shape=(int(source_window.height), int(source_window.width)),
+                    transform=src_window_transform,
+                    invert=True
+                )
+
+                data = numpy.where(mask_arr, data, numpy.nan)
 
                 # Allocate array for the reprojected chunk.
                 dest_data = numpy.empty((data.shape[0], int(dst_window.height), int(dst_window.width)),

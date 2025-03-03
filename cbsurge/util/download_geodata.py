@@ -16,7 +16,7 @@ from rich.progress import Progress
 from shapely import wkb
 from shapely.ops import transform
 from cbsurge.constants import ARROWTYPE2OGRTYPE
-from cbsurge.util.downloader import downloader, download_worker
+from cbsurge.util.downloader import downloader, download_worker, worker
 from rich.progress import TimeElapsedColumn
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ def download_vector(
                     total_task = progress.add_task(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
                     nworkers = njobs if njobs < NWORKERS else NWORKERS
-                    futures = [executor.submit(download_worker, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
+                    futures = [executor.submit(worker, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
 
                     nfields = destination_layer.GetLayerDefn().GetFieldCount()
 

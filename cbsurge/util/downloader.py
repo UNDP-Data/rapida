@@ -27,7 +27,9 @@ def downloader(work=None, result=None, finished=None):
         logger.debug(f'Starting job  {job["name"]}')
         result.append(read_bbox(**job))
 
-def download_worker(jobs:collections.deque[dict]=None, stop:multiprocessing.Event=None, task:int=None):
+
+
+def worker(jobs:collections.deque[dict]=None, stop:multiprocessing.Event=None, task:int=None):
     """
     Worker that manages the streaming of geospatial data from a remote source over spatial partitions represented by
     bounding boxes or polygon geometries
@@ -57,32 +59,20 @@ def download_worker(jobs:collections.deque[dict]=None, stop:multiprocessing.Even
 
 
     logger.debug(f'starting downloader thread {threading.current_thread().name}')
-    progress = None
-    while True:
-        job = None
-        try:
-            job = jobs.pop()
-            if job and not progress:
-                progress = job.get('progress', None)
-        except IndexError as ie:
-            pass
-        if job is None:
-            if stop.is_set():
-                logger.debug(f'Worker was signalled to stop in {threading.current_thread().name}')
-                break
 
-            continue
 
+    while len(jobs) > 0 and not stop.is_set():
+        job = jobs.pop()
         if stop.is_set():
             logger.debug(f'Worker was signalled to stop in {threading.current_thread().name}')
             break
-
+        progress = job.get('progress', None)
         description = None
         try:
             logger.debug(f'Starting to download in  {job["name"]}')
             rname = stream(**job)
-            logger.debug(f'Finished in  {job["name"]}')
-            description = f'[red]Downloaded features covering {job["name"]}'
+            logger.debug(f'Finished in  {rname}')
+            description = f'[red]Downloaded features covering {rname}'
 
         except Exception as e:
             with StringIO() as eio:
@@ -95,8 +85,5 @@ def download_worker(jobs:collections.deque[dict]=None, stop:multiprocessing.Even
             description = f'[red]Failed to download features covering {job["name"]}'
         finally:
             if progress and task:
-                progress.update(task, description=description,advance=1)
-            if len(jobs) == 0:
-                logger.debug(f'No more jobs. Worker running in {threading.current_thread().name} is finishing.')
-                return
-            continue
+                progress.update(task, description=description, advance=1)
+    logger.debug(f'No more jobs. Worker running in {threading.current_thread().name} is finishing.')

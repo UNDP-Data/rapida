@@ -158,7 +158,13 @@ class BuildingsVariable(Variable):
                 logger.debug(f'Downloading {self.name} in {country}')
                 source = self.interpolate_template(template=self.source, country=country, **kwargs)
                 source, layer_name = source.split('::')
-                src_dataset_info = pyogrio.read_info(source, layer_name)
+                try:
+                    src_dataset_info = pyogrio.read_info(source, layer_name)
+                except Exception as e:
+                    logger.error(f'Failed to fetch info on buildings in {country}')
+                    if '404' in str(e):
+                        logger.error(f'{source} is not reachable')
+                    raise
                 src_crs = src_dataset_info['crs']
                 src_srs = osr.SpatialReference()
                 src_srs.SetFromUserInput(src_crs)

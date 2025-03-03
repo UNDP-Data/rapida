@@ -5,7 +5,6 @@ import time
 from collections import deque
 import concurrent.futures
 import threading
-import multiprocessing
 import numpy
 import pyarrow as pa
 import shapely
@@ -20,8 +19,6 @@ from shapely.geometry import box
 import os
 import rasterio
 from rasterio.windows import from_bounds, Window
-from rasterio.warp import calculate_default_transform, reproject, Resampling, transform_bounds
-from rasterio.merge import merge
 import geopandas as gpd
 
 from cbsurge import constants
@@ -201,7 +198,8 @@ def download_raster(
         mask_layer_name: str = None,
         progress: Progress=None,
         chunk_size: tuple[int, int]=(4096, 4096),
-        num_workers=4
+        num_workers=4,
+        gdal_cache_max=1024*1024*1024
 ):
     """
     download raster data clipped by the project area
@@ -218,6 +216,7 @@ def download_raster(
     :param progress: rich progress instance
     :param chunk_size: A tuple (chunk_width, chunk_height) in pixels.
     :param num_workers: Number of concurrent threads.
+    :param gdal_cache_max: Max cache size for GDAL
     :return: output file path is returned
     """
     download_task = None
@@ -234,6 +233,7 @@ def download_raster(
     polygons_crs = gdf.crs
 
     with rasterio.open(dataset_url) as src:
+        src_nodata = src.nodata
         # Reproject the project polygons to match the source raster CRS.
         gdf_reproj = gdf.to_crs(src.crs)
         geoms = gdf_reproj.geometry.values.tolist()
@@ -410,62 +410,43 @@ def download_raster(
 
         if progress and download_task is not None:
             progress.update(download_task,
-                            description=f'All chunks were downloaded.',
+                            description=f'[red]All chunks were downloaded.',
                             advance=total_chunks)
+            progress.remove_task(download_task)
 
-        # Merge all temporary files into a single intermediate file.
-        src_files = [rasterio.open(fp) for fp in temp_files_data]
-        mosaic, mosaic_transform = merge(src_files, nodata=numpy.nan)
-        for src_file in src_files:
-            src_file.close()
-        out_meta.update({
-            "transform": mosaic_transform,
-            "width": mosaic.shape[2],
-            "height": mosaic.shape[1]
-        })
-        merged_intermediate_path = os.path.join(tmpdir, output_filename + ".tmp")
-        with rasterio.open(merged_intermediate_path, "w", **out_meta) as dst_merge:
-            dst_merge.write(mosaic)
+        merge_task = None
+        if progress:
+            merge_task = progress.add_task("[green]Merging files...", total=100)
 
-        # After concurrent processing, reproject the intermediate file to the target CRS (geopackage CRS).
-        final_output_path = os.path.join(output_dir, output_filename)
-        with rasterio.open(merged_intermediate_path) as src_int:
-            if progress and download_task is not None:
-                progress.update(download_task,
-                                description=f'Saving to {final_output_path}.', total=None)
+        # Define a callback function for GDAL that updates the Rich progress task.
+        def progress_callback(complete, message, user_data):
+            if progress and merge_task is not None:
+                progress.update(merge_task, completed=int(complete * 100))
+            return 1
 
-            # Calculate the transform and dimensions for the target CRS.
-            dst_transform, dst_width, dst_height = calculate_default_transform(
-                src_int.crs, polygons_crs, src_int.width, src_int.height, *src_int.bounds
+        if progress and merge_task is not None:
+            progress.update(merge_task, description="[green]Creating VRT...")
+        vrt_filename = os.path.join(tmpdir, f"{output_filename}.vrt")
+        with gdal.BuildVRT(vrt_filename, temp_files_data,
+                           resampleAlg='nearest', srcNodata=src_nodata) as vrt:
+            if progress and merge_task is not None:
+                progress.update(merge_task, description=f"[green]Writing COG to {output_filename}...")
+            warp_options = gdal.WarpOptions(
+                dstSRS=polygons_crs.to_wkt(),
+                format="COG",
+                creationOptions=["COMPRESS=ZSTD", "PREDICTOR=2","BIGTIFF=IF_SAFER", "BLOCKSIZE=256"],
+                resampleAlg='nearest',
+                srcNodata=src_nodata,
+                callback=progress_callback
             )
-            dst_meta = src_int.meta.copy()
-            dst_meta.update({
-                "driver": "COG",
-                "crs": polygons_crs,
-                "transform": dst_transform,
-                "width": dst_width,
-                "height": dst_height,
-                "compress": "zstd",
-                "predictor": 2
-            })
-            with rasterio.open(final_output_path, "w", **dst_meta) as dst_final:
-                for i in range(1, src_int.count + 1):
-                    reproject(
-                        source=rasterio.band(src_int, i),
-                        destination=rasterio.band(dst_final, i),
-                        src_transform=src_int.transform,
-                        src_crs=src_int.crs,
-                        dst_transform=dst_transform,
-                        dst_crs=polygons_crs,
-                        resampling=Resampling.nearest
-                    )
+            gdal.SetCacheMax(gdal_cache_max)
+            final_output_path = os.path.join(output_dir, output_filename)
+            gdal.Warp(final_output_path, vrt, options=warp_options)
 
-            if progress and download_task is not None:
-                progress.update(download_task,
-                                description=f'Saved to {final_output_path}.',
-                                total=None)
-
-    if progress and download_task:
-        progress.remove_task(download_task)
+        if progress and merge_task:
+            progress.update(merge_task,
+                            description=f'[red]Saved to {final_output_path}.',
+                            total=None)
+            progress.remove_task(merge_task)
 
     return final_output_path

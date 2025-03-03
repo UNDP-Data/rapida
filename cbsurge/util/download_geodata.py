@@ -268,7 +268,7 @@ def download_raster(
         ]
         total_chunks = len(windows)
         if progress and download_task is not None:
-            progress.update(download_task, description=f'Downloading {total_chunks} chunks')
+            progress.update(download_task, total=total_chunks, description=f'Downloading {total_chunks} chunks')
 
         # Prepare metadata for the intermediate output file (in source CRS).
         out_transform = rasterio.windows.transform(overall_window, src.transform)
@@ -335,9 +335,13 @@ def download_raster(
                     # Write the data to the intermediate file at the mosaic_window location.
                     dst.write(data, window=mosaic_window)
 
+                    if progress and download_task is not None:
+                        progress.update(download_task, advance=1)
+
             if progress and download_task is not None:
                 progress.update(download_task,
-                                description=f'Processing {total_chunks} chunks with {num_workers} threads.')
+                                description=f'Processing {total_chunks} chunks with {num_workers} threads.',
+                                total=None)
 
             # Process windows concurrently.
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
@@ -345,11 +349,16 @@ def download_raster(
 
             if progress and download_task is not None:
                 progress.update(download_task,
-                                description=f'All chunks written to intermediate file {intermediate_path}.')
+                                description=f'All chunks were downloaded.',
+                                advance=total_chunks)
 
         # After concurrent processing, reproject the intermediate file to the target CRS (geopackage CRS).
         final_output_path = os.path.join(output_dir, output_filename)
         with rasterio.open(intermediate_path) as src_int:
+            if progress and download_task is not None:
+                progress.update(download_task,
+                                description=f'Saving to {final_output_path}.', total=None)
+
             # Calculate the transform and dimensions for the target CRS.
             dst_transform, dst_width, dst_height = calculate_default_transform(
                 src_int.crs, polygons_crs, src_int.width, src_int.height, *src_int.bounds
@@ -375,7 +384,12 @@ def download_raster(
                         dst_crs=polygons_crs,
                         resampling=Resampling.nearest
                     )
-        # Optionally remove the intermediate file.
+
+            if progress and download_task is not None:
+                progress.update(download_task,
+                                description=f'Saved to {final_output_path}.',
+                                total=None)
+
         os.remove(intermediate_path)
 
     if progress and download_task:

@@ -5,6 +5,7 @@ import time
 from collections import deque
 import concurrent.futures
 import threading
+import multiprocessing
 import numpy
 import pyarrow as pa
 import shapely
@@ -283,6 +284,11 @@ def download_raster(
             "predictor": 2
         })
 
+        if progress and download_task is not None:
+            progress.update(download_task,
+                            description=f'Processing {total_chunks} chunks with {num_workers} threads.',
+                            total=None)
+
         # Define the intermediate output file path.
         intermediate_path = os.path.join(output_dir, output_filename + ".tmp")
         # Open the intermediate file for writing in the source CRS.
@@ -291,13 +297,20 @@ def download_raster(
             read_lock = threading.Lock()
             write_lock = threading.Lock()
 
-            def process(mosaic_window: Window):
+            chunk_progress = {}
+            cancel_event = threading.Event()
+
+            def process(mosaic_window: Window, task_id):
                 """
                 Process one chunk:
                   1. Convert mosaic_window (relative to overall_window) to a source absolute window.
                   2. Check intersection with the unioned polygon.
                   3. Read source data, apply mask, and write directly into the intermediate file.
                 """
+                if cancel_event.is_set():
+                    return
+                chunk_progress[task_id] = {"progress": 0, "total": 1}
+
                 # Convert mosaic_window (relative to overall_window) to source coordinates.
                 source_window = Window(
                     mosaic_window.col_off + overall_window.col_off,
@@ -320,6 +333,7 @@ def download_raster(
                     )
                     with write_lock:
                         dst.write(dest_data, window=mosaic_window)
+                    chunk_progress[task_id] = {"progress": 1, "total": 1}
                     return
 
                 src_window_transform = src.window_transform(source_window)
@@ -331,26 +345,60 @@ def download_raster(
                     invert=True
                 )
                 data = numpy.where(mask_arr, data, numpy.nan)
+
                 with write_lock:
                     # Write the data to the intermediate file at the mosaic_window location.
                     dst.write(data, window=mosaic_window)
+                chunk_progress[task_id] = {"progress": 1, "total": 1}
 
-                    if progress and download_task is not None:
-                        progress.update(download_task, advance=1)
 
-            if progress and download_task is not None:
-                progress.update(download_task,
-                                description=f'Processing {total_chunks} chunks with {num_workers} threads.',
-                                total=None)
-
-            # Process windows concurrently.
+            futures = []
+            chunk_task_ids = []
             with concurrent.futures.ThreadPoolExecutor(max_workers=num_workers) as executor:
-                list(executor.map(process, windows))
+                for idx, mosaic_window in enumerate(windows):
+                    t_id = progress.add_task(f"Processing chunk {idx}: {mosaic_window.col_off}, {mosaic_window.row_off}", visible=False, total=None)
+                    chunk_task_ids.append(t_id)
+                    futures.append(executor.submit(process, mosaic_window, t_id))
+                overall_chunks_task = progress.add_task("[green]All chunks progress:", total=len(futures))
+                try:
+                    while any(not f.done() for f in futures):
+                        n_finished = sum(f.done() for f in futures)
+                        progress.update(overall_chunks_task, completed=n_finished, total=len(futures))
+                        for t_id in chunk_task_ids:
+                            if t_id in chunk_progress:
+                                latest = chunk_progress[t_id]["progress"]
+                                total = chunk_progress[t_id]["total"]
+                                progress.update(t_id, visible=latest < total)
+                        time.sleep(0.1)
+                except KeyboardInterrupt:
+                    if progress and download_task is not None:
+                        progress.update(download_task,
+                                        description=f'Cancelling downloading processes...',
+                                        advance=total_chunks)
+                    cancel_event.set()
 
+                for future in futures:
+                    if not future.done():
+                        future.cancel()
+
+                progress.update(overall_chunks_task, completed=len(futures), total=len(futures))
+                for t_id in chunk_task_ids:
+                    progress.remove_task(t_id)
+                progress.remove_task(overall_chunks_task)
+
+        if cancel_event.is_set():
+            if os.path.exists(intermediate_path):
+                os.remove(intermediate_path)
             if progress and download_task is not None:
                 progress.update(download_task,
-                                description=f'All chunks were downloaded.',
+                                description=f'Download cancelled by user.',
                                 advance=total_chunks)
+            raise KeyboardInterrupt("Download cancelled by user.")
+
+        if progress and download_task is not None:
+            progress.update(download_task,
+                            description=f'All chunks were downloaded.',
+                            advance=total_chunks)
 
         # After concurrent processing, reproject the intermediate file to the target CRS (geopackage CRS).
         final_output_path = os.path.join(output_dir, output_filename)

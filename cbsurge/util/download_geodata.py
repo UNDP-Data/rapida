@@ -206,8 +206,7 @@ def download_raster(
     This function performs two steps:
       1. During concurrent processing, it writes chunks to a single intermediate file
          in the source dataset's coordinate system.
-      2. After concurrent processing is complete, it reprojects the intermediate file
-         to the same coordinate system as the geopackage.
+      2. After concurrent processing is complete, creates a VRT including all intermediate files to merge them to a single file
 
     :param dataset_url: raster dataset url
     :param geopackage_path: project geopackage path. It should contain `polygons` layer unless set layer name as mask_layer_name
@@ -225,7 +224,6 @@ def download_raster(
             description='Downloading data covering the project area', total=None)
 
     output_dir = os.path.dirname(geopackage_path)
-    # Use default mask layer name if not provided.
     mask_layer = constants.POLYGONS_LAYER_NAME
     if mask_layer_name:
         mask_layer = mask_layer_name

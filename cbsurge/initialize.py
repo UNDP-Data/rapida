@@ -80,7 +80,7 @@ def setup_prompt(session: Session):
     vars_dict = {
         "variables": {
             "population":  gen_pop_vars(),
-            "buildings": gen_bldgs_vars()
+            "buildings": gen_bldgs_vars(),
             "rwi": gen_rwi_vars(),
         }
     }

@@ -1,5 +1,4 @@
 import concurrent.futures
-
 from cbsurge.util.proj_are_equal import proj_are_equal
 import logging
 import random
@@ -16,8 +15,11 @@ from rich.progress import Progress
 from shapely import wkb
 from shapely.ops import transform
 from cbsurge.constants import ARROWTYPE2OGRTYPE
-from cbsurge.util.downloader import downloader, download_worker, worker
+from cbsurge.util.downloader import downloader
+from cbsurge.util.worker import worker
+from cbsurge.util.read_bbox import stream
 from rich.progress import TimeElapsedColumn
+import typing
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -32,7 +34,6 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
-import typing
 def download_vector(
         src_dataset_url=None,src_layer_name=None,
         dst_dataset_path=None,dst_layer_name=None, dst_srs=None, overwrite_dst_layer=False,
@@ -74,17 +75,34 @@ def download_vector(
                 if will_reproject :
                     dst_crs = f"{dst_srs.GetAuthorityName(None)}:{dst_srs.GetAuthorityCode(None)}"
                     transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
+                overwrite = 'YES' if overwrite_dst_layer else 'NO'
+                destination_layer = dst_ds.CreateLayer(
+                            dst_layer_name,
+                            srs=dst_srs,
+                            geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                            options=[f'OVERWRITE={overwrite}', 'GEOMETRY_NAME=geometry']
+                )
                 destination_layer = dst_ds.GetLayerByName(dst_layer_name)
-                if destination_layer is not None:
-                    if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
-                        dst_ds.DeleteLayer(destination_layer)
-                else:
-                    destination_layer = dst_ds.CreateLayer(
-                        dst_layer_name,
-                        srs=dst_srs,
-                        geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                        options=['GEOMETRY_NAME=geometry']
-                    )
+                # if destination_layer is not None:
+                #     if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
+                #         for i in range(dst_ds.GetLayerCount()):
+                #             l = dst_ds.GetLayer(i)
+                #             if l.GetName() == dst_layer_name:
+                #                 logger.info(f'Deleting layer {dst_layer_name} from {dst_dataset_path}')
+                #                 dst_ds.DeleteLayer(i)
+                #         destination_layer = dst_ds.CreateLayer(
+                #             dst_layer_name,
+                #             srs=dst_srs,
+                #             geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                #             options=['GEOMETRY_NAME=geometry']
+                #         )
+                # else:
+                #     destination_layer = dst_ds.CreateLayer(
+                #         dst_layer_name,
+                #         srs=dst_srs,
+                #         geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                #         options=['GEOMETRY_NAME=geometry']
+                #     )
 
                 stop = threading.Event()
                 jobs = deque()
@@ -109,7 +127,7 @@ def download_vector(
                     total_task = progress.add_task(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
                     nworkers = njobs if njobs < NWORKERS else NWORKERS
-                    futures = [executor.submit(worker, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
+                    futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
 
                     nfields = destination_layer.GetLayerDefn().GetFieldCount()
 
@@ -185,6 +203,7 @@ def download_vector(
 
     except Exception as e:
         logger.error(f'Error downloading {src_dataset_url} with error {e}')
+        raise
     finally:
         if progress and total_task:
             progress.remove_task(total_task)

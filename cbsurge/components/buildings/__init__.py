@@ -8,7 +8,7 @@ import logging
 import pyogrio
 from osgeo import gdal, osr
 import shapely
-
+from cbsurge.components.buildings.preprocessing import mask_buildings
 from cbsurge.util.proj_are_equal import proj_are_equal
 logger = logging.getLogger(__name__)
 # import click
@@ -137,25 +137,27 @@ class BuildingsComponent(Component):
                 # assess
                 v(**kwargs)
 
-
-
-
-
 class BuildingsVariable(Variable):
 
-    def download(self, **kwargs):
+    def download(self, force_compute=False, progress=None, **kwargs):
         logger.debug(f'Downloading {self.name}')
         project = Project(os.getcwd())
-        progress = kwargs.get('progress', None)
+        if force_compute:
+            overwrite = [i == 0 for i in range(len(project.countries))]
+        else:
+            overwrite = [False for i in range(len(project.countries))]
 
-        # if os.path.exists(self.local_path):
-        #     assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
-        #     return self.local_path
-        sources = list()
+        dst_layers = pyogrio.list_layers(project.geopackage_file_path)
+        if self.component in dst_layers[:,0] and not force_compute :
+            if 'mask' in dst_layers:
+                affected_layer_name = f'{self.component}.affected'
+                assert affected_layer_name in dst_layers, f'layer {affected_layer_name}  does not exist'
+            self.local_path = f'{project.geopackage_file_path}::{self.component}'
+            return
         with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
             lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
-            for country in project.countries:
-                logger.debug(f'Downloading {self.name} in {country}')
+            for ci, country in enumerate(project.countries):
+                logger.info(f'Downloading {self.name} in {country}')
                 source = self.interpolate_template(template=self.source, country=country, **kwargs)
                 source, layer_name = source.split('::')
                 try:
@@ -174,27 +176,50 @@ class BuildingsVariable(Variable):
                 will_reproject = not proj_are_equal(src_srs=src_srs, dst_srs=target_srs)
                 if will_reproject:
                     target2src_tr = osr.CoordinateTransformation(target_srs, src_srs)
-                mask_polgygons = dict()
+                mask_polygons = dict()
                 for feat in lyr:
                     polygon = feat.GetGeometryRef()
                     if will_reproject:
                         polygon.Transform(target2src_tr)
                     shapely_polygon = shapely.wkb.loads(bytes(polygon.ExportToIsoWkb()))
-                    poly_id = feat['name'] or feat.GetFID()
-                    mask_polgygons[poly_id] = shapely_polygon
+                    poly_id = feat['name'] or f'polygon::{feat.GetFID()}'
+                    mask_polygons[poly_id] = shapely_polygon
 
                 download_vector(
                     src_dataset_url=source,
                     src_layer_name=layer_name,
                     dst_dataset_path=project.geopackage_file_path,
                     dst_layer_name=self.component, dst_srs=target_srs,
-                    mask_polygons=mask_polgygons,
-                    progress=progress
+                    mask_polygons=mask_polygons,
+                    progress=progress,
+                    overwrite_dst_layer=overwrite[ci]
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
-    def compute(self, **kwargs):
-        pass
+        self.local_path = f'{project.geopackage_file_path}::{self.component}'
+        self._compute_affected_(progress=progress, force_compute=overwrite[ci])
+        return self.local_path
+
+    def _compute_affected_(self, force_compute=False, progress=None):
+        project = Project(os.getcwd())
+        affected_layer_name = f'{self.component}.affected'
+        mask_buildings(
+            buildings_dataset=project.geopackage_file_path, buildings_layer_name=self.component,
+            mask_ds_path=project.raster_mask,
+            masked_buildings_dataset=project.geopackage_file_path,
+            masked_buildings_layer_name=affected_layer_name,
+            horizontal_chunks=10,
+            vertical_chunks=10,
+            workers=4,
+            progress=progress,
+            overwrite_dst_layer=force_compute
+
+        )
+
+
+    def compute(self, force_compute=True, **kwargs):
+        assert force_compute, f'invalid force_compute={force_compute}'
+        return self.download(force_compute=force_compute, **kwargs)
 
     def evaluate(self, **kwargs):
         pass

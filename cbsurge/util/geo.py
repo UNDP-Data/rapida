@@ -2,8 +2,12 @@ import pyogrio.core
 
 from cbsurge import constants
 from osgeo import gdal, ogr, osr
+from osgeo_utils.gdal_calc import Calc
+import rasterio
 from cbsurge.util.proj_are_equal import proj_are_equal
 import os
+import tempfile
+from rich.progress import Progress
 import logging
 logger = logging.getLogger('rapida')
 gdal.UseExceptions()
@@ -175,3 +179,82 @@ def rasterize_vector_mask(vector_mask_ds=None, vector_mask_layer=None,
     # )
 
     rds = gdal.Rasterize(destNameOrDestDS=dst_dataset, srcDS=vector_mask_ds, options=rasterize_options)
+
+
+def clip_raster_with_mask(source: str,
+                          mask: str,
+                          output_path: str,
+                          mask_value=1,
+                          nodata_value=None,
+                          progress: Progress = None):
+    """
+    Clips the raster data at 'source' using the mask raster at 'mask' and saves the result to 'output_path'.
+
+    :param source: Path to the source raster file.
+    :param mask: Path to the mask raster file (e.g., project.raster_mask).
+    :param output_path: File path to save the clipped raster.
+    :param mask_value: Value to use for mask raster. Default is 1.
+    :param nodata_value: Value to use for nodata raster. If None, nodata from source raster will be used.
+    :return: output file path.
+    """
+
+    mask_task = None
+    if progress:
+        mask_task = progress.add_task(f"[green]Masking {source} by {mask}", total=100)
+
+    # Define a callback function for GDAL that updates the Rich progress task.
+    def progress_callback(complete, message, user_data):
+        if progress and mask_task is not None:
+            progress.update(mask_task, completed=int(complete * 100))
+        return 1
+
+    if nodata_value is not None:
+        src_nodata = nodata_value
+    else:
+        with rasterio.open(source) as src:
+            src_nodata = src.nodata
+
+    with rasterio.open(mask) as mask_src:
+        left, bottom, right, top = mask_src.bounds
+        xRes, yRes = mask_src.res
+
+    # Build a temporary VRT from the source raster to match the mask's grid.
+    with tempfile.NamedTemporaryFile(suffix=".vrt", delete=False) as tmp_vrt_file:
+        vrt_filename = tmp_vrt_file.name
+
+        with gdal.BuildVRT(vrt_filename, [source],
+                           outputBounds=(left, bottom, right, top),
+                           xRes=xRes,
+                           yRes=yRes,
+                           resampleAlg="nearest",
+                           srcNodata=src_nodata
+                           ) as vrt:
+
+            calc_expr = f"(B=={mask_value})*A + (B!={mask_value})*{src_nodata}"
+
+            calc_creation_options = {
+                "COMPRESS": "ZSTD",
+                "PREDICTOR": 2,
+                "BIGTIFF": "IF_SAFER",
+                "BLOCKXSIZE": "256",
+                "BLOCKYSIZE": "256"
+            }
+
+            ds = Calc(
+                calc=calc_expr,
+                outfile=output_path,
+                projectionCheck=True,
+                format='GTiff',
+                creation_options=calc_creation_options,
+                overwrite=True,
+                A=vrt,
+                B=mask,
+                NoDataValue=src_nodata,
+                progress_callback=progress_callback
+            )
+            ds = None
+
+    if progress and mask_task is not None:
+        progress.remove_task(mask_task)
+
+    return output_path

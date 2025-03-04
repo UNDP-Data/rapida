@@ -1,13 +1,8 @@
 import os
 import logging
 from typing import List
-from pathlib import Path
 import geopandas as gpd
 from rich.progress import Progress
-import rasterio
-import rasterio.mask
-import rasterio.features
-from shapely.geometry import shape, mapping
 from cbsurge import constants
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
@@ -27,11 +22,6 @@ class RwiComponent(Component):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # # get parent package name for electricity
-        # current_dir = Path(__file__).resolve().parent
-        # parent_package_name = current_dir.parents[0].name
-        #
-        # self.component_name = f"{parent_package_name}.{ self.__class__.__name__.lower().split('component')[0]}"
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
@@ -94,10 +84,11 @@ class RwiVariable(Variable):
         if project.raster_mask is not None and geo.is_raster(self.local_path):
             affected_local_path = self.affected_path
             if force_compute == True or not os.path.exists(affected_local_path):
-                self.clip_raster_with_mask(
+                geo.clip_raster_with_mask(
                     source=self.local_path,
                     mask=project.raster_mask,
-                    output_path=affected_local_path
+                    output_path=affected_local_path,
+                    progress=kwargs.get('progress', None)
                 )
 
     def compute(self, **kwargs):
@@ -159,44 +150,3 @@ class RwiVariable(Variable):
 
         if progress and evaluate_task:
             progress.remove_task(evaluate_task)
-
-    def clip_raster_with_mask(self, source, mask, output_path):
-        """
-        Clips the raster data at 'source' using the mask raster at 'mask' and saves the result to 'output_path'.
-
-        :param source: Path to the source raster file.
-        :param mask: Path to the mask raster file (e.g., project.raster_mask).
-        :param output_path: File path to save the clipped raster.
-        """
-        # Open the mask raster and read the first band
-        with rasterio.open(mask) as mask_src:
-            mask_data = mask_src.read(1)
-            # Define the mask region as areas where the value is greater than 0 (adjust condition as needed)
-            binary_mask = mask_data > 0
-
-            # Extract polygons from the mask raster based on the binary_mask
-            mask_shapes = []
-            for geom, value in rasterio.features.shapes(mask_data, mask=binary_mask, transform=mask_src.transform):
-                # If the value equals 1, use that region as a mask
-                if value == 1:
-                    mask_shapes.append(shape(geom))
-
-        # Open the main raster and clip it using the extracted polygons
-        with rasterio.open(source) as src:
-            # Convert the polygon geometries to dict format using mapping()
-            out_image, out_transform = rasterio.mask.mask(src, [mapping(geom) for geom in mask_shapes], crop=True)
-            out_meta = src.meta.copy()
-
-        # Update the metadata
-        out_meta.update({
-            "driver": "COG",
-            "height": out_image.shape[1],
-            "width": out_image.shape[2],
-            "transform": out_transform,
-            "compress": 'zstd',
-            "predictor": 2
-        })
-
-        # Save the clipped raster to the output file
-        with rasterio.open(output_path, "w", **out_meta) as dest:
-            dest.write(out_image)

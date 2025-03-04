@@ -219,7 +219,7 @@ def clip_raster_with_mask(source: str,
         xRes, yRes = mask_src.res
 
     # Build a temporary VRT from the source raster to match the mask's grid.
-    with tempfile.NamedTemporaryFile(suffix=".vrt", delete=False) as tmp_vrt_file:
+    with tempfile.NamedTemporaryFile(suffix=".vrt") as tmp_vrt_file:
         vrt_filename = tmp_vrt_file.name
 
         with gdal.BuildVRT(vrt_filename, [source],

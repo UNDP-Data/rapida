@@ -1,12 +1,8 @@
-import asyncio
-import concurrent
+
 import logging
 import os.path
-import random
-import threading
-import time
+import re
 from abc import abstractmethod
-from collections import deque
 from typing import List
 from typing import Optional, Union
 import shapely
@@ -16,7 +12,6 @@ from pydantic import BaseModel, FilePath
 from pyogrio import read_info
 from rich.progress import Progress
 from sympy.parsing.sympy_parser import parse_expr
-
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.project import Project
 from cbsurge.util.downloader import downloader
@@ -130,7 +125,21 @@ class Variable(BaseModel):
             progress._tasks[variable_task].total = 1
             progress.update(variable_task, description=f'[blue]Assessed {self.component}->{self.name}', advance=1)
 
+    def interpolate_template(self, template=None, **kwargs):
+        """
+        Interpolate values from kwargs into template
+        """
+        kwargs['country_lower'] = kwargs['country'].lower()
+        template_vars = set(re.findall(self._extractor_, template))
 
+        if template_vars:
+            for template_var in template_vars:
+                if not template_var in kwargs:
+                    assert hasattr(self,template_var), f'"{template_var}"  is required to generate source files'
+
+            return template.format(**kwargs)
+        else:
+            return template
 
 
 

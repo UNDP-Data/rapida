@@ -2,12 +2,11 @@
 import random
 import threading
 from collections import deque
-from cbsurge.components.builtenv.buildings.fgbgdal import OVERPASS_API_URL, GMOSM_BUILDINGS_ROOT
+from cbsurge.components.buildings.fgbgdal import OVERPASS_API_URL, GMOSM_BUILDINGS_ROOT
 from pyogrio.raw import open_arrow
-from cbsurge.components.builtenv.buildings.pmt import WEB_MERCATOR_TMS
+from cbsurge.components.buildings.pmt import WEB_MERCATOR_TMS
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 import morecantile as m
-from cbsurge import util
 import logging
 import time
 from pyogrio.core import read_info

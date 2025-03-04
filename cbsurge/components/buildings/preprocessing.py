@@ -3,22 +3,22 @@ import logging
 import random
 import threading
 from collections import deque
-
+import time
 import numpy as np
 import pyarrow as pa
 # from pyogrio.raw import open_arrow, read_arrow
 import rasterio
 from osgeo import gdal, ogr, osr
+from osgeo.ogr import wkbPolygon
 from pyogrio import read_dataframe
 from rasterio.windows import Window
 from rich.progress import Progress
-
-from cbsurge import util
+from cbsurge.util.worker import worker as genworker
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.util.gen_blocks import gen_blocks
 from cbsurge.util.generator_length import generator_length
 from cbsurge.util.setup_logger import setup_logger
-
+from rich.progress import TimeElapsedColumn
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -90,8 +90,53 @@ def geoarrow_schema_adapter(schema: pa.Schema) -> pa.Schema:
     return geoarrow_schema
 
 
+def mask_buildings_in_block(buildings_dataset=None, buildings_layer_name=None,
+                            mask_ds=None, block=None, name=None, results=None, progress=None, band=1):
 
-def filter_buildings_in_block(buildings_ds_path=None, mask_ds=None, block=None, block_id=None, band=1):
+    try:
+        if progress:
+            task = progress.add_task(description=f'[green]Filtering buildings data in {name}...', start=False,
+                                     total=None, )
+
+        window = Window(*block)
+        col_start, row_start, col_size, row_size = block
+        ds_mask = mask_ds.read(band, window=window)
+
+        bbox = rasterio.windows.bounds(window=window, transform=mask_ds.transform)
+
+        buildings_gdf = read_dataframe(buildings_dataset, layer=buildings_layer_name,  bbox=bbox, read_geometry=True)
+        if len(buildings_gdf) == 0:
+            logger.debug(f'No buildings exist in {name}-{bbox}')
+            return name
+        buildings_centroids = buildings_gdf.centroid.get_coordinates()
+        point_cols, point_rows = ~mask_ds.transform * (buildings_centroids.x, buildings_centroids.y)
+        point_rows, point_cols = np.floor(point_rows).astype('i4'), np.floor(point_cols).astype('i4')
+        point_rows -= row_start
+        point_cols -= col_start
+        row_mask = (point_rows >= 0) & (point_rows < row_size)
+        col_mask = (point_cols >= 0) & (point_cols < col_size)
+        rc_mask = row_mask & col_mask
+        if rc_mask[rc_mask].size == 0:
+            logger.debug(f'No buildings exist in {name}-{bbox} after applying mask')
+            return name
+        point_rows = point_rows[rc_mask]
+        point_cols = point_cols[rc_mask]
+        buildings_gdf = buildings_gdf[rc_mask]
+        block_mask = ds_mask[point_rows, point_cols] == True
+        masked_buildings_gdf = buildings_gdf[block_mask]
+        if masked_buildings_gdf.size > 0:
+            arrow_object = masked_buildings_gdf.to_arrow(index=False)
+            table = pa.table(arrow_object)
+            results.append((name, table))
+        return name
+    except Exception as e:
+        raise
+    finally:
+        if progress:
+            progress.remove_task(task)
+
+def filter_buildings_in_block(buildings_ds_path=None,  mask_ds=None,
+                            block=None, block_id=None, band=1):
 
     try:
 
@@ -122,9 +167,10 @@ def filter_buildings_in_block(buildings_ds_path=None, mask_ds=None, block=None, 
         mds = ds[rm]
         ao = mds.to_arrow(index=False)
         table = pa.table(ao)
+
         # schema = geoarrow_schema_adapter(table.schema)
         # table = pa.table(table, schema=schema)
-        table = table.rename_columns(names={'geometry':'wkb_geometry'})
+        #table = table.rename_columns(names={'geometry':'wkb_geometry'})
 
         if mds.size == 0:
             return  block_id, None, None
@@ -281,6 +327,124 @@ def filter_buildings(buildings_path=None, mask_path=None, mask_pixel_value=None,
         for msg in failed:
             logger.error(msg)
 
+
+
+def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_path=None,
+                    masked_buildings_dataset=None, masked_buildings_layer_name=None, overwrite_dst_layer=True,
+                    horizontal_chunks=None, vertical_chunks=None, workers=4, progress=None
+                   ):
+    total_task = None
+    if progress:
+        cols = progress.columns
+        progress.columns = [e for e in cols] + [TimeElapsedColumn()]
+    try:
+
+        with rasterio.open(mask_ds_path) as mask_ds:
+            assert mask_ds.count == 1, f'The mask dataset {mask_ds_path} contains more than one band'
+            width = mask_ds.width
+            height = mask_ds.height
+            block_xsize = width // horizontal_chunks
+            block_ysize = height // vertical_chunks
+            blocks = gen_blocks(blockxsize=block_xsize, blockysize=block_ysize, width=width, height=height)
+            nblocks, blocks = generator_length(blocks)
+            stop_event = threading.Event()
+            jobs = deque()
+            results = deque()
+            workers = nblocks if workers > nblocks else workers
+            with gdal.OpenEx(masked_buildings_dataset, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
+                with gdal.OpenEx(buildings_dataset, gdal.OF_VECTOR | gdal.OF_READONLY) as bldgs_ds:
+                    bldgs_layer = bldgs_ds.GetLayerByName(buildings_layer_name)
+                    bldgs_layer_defn = bldgs_layer.GetLayerDefn()
+                    overwrite_txt = 'YES' if overwrite_dst_layer else 'NO'
+                    destination_layer = dst_ds.CreateLayer(
+                        masked_buildings_layer_name,
+                        srs=bldgs_layer.GetSpatialRef(),
+                        geom_type=bldgs_layer_defn.GetGeomType(),
+                        options=[f'OVERWRITE={overwrite_txt}', 'GEOMETRY_NAME=geometry']
+                    )
+                    # Copy fields
+                    for i in range(bldgs_layer_defn.GetFieldCount()):
+                        field_defn = bldgs_layer_defn.GetFieldDefn(i)
+                        destination_layer.CreateField(field_defn)
+                # destination_layer = dst_ds.GetLayerByName(masked_buildings_layer_name)
+                # if destination_layer is not None:
+                #     if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
+                #         for i in range(dst_ds.GetLayerCount()):
+                #             l = dst_ds.GetLayer(i)
+                #             if l.GetName() == masked_buildings_layer_name:
+                #                 logger.info(f'Deleting layer {masked_buildings_layer_name} from {masked_buildings_dataset}')
+                #                 dst_ds.DeleteLayer(i)
+                #         destination_layer = dst_ds.CreateLayer(
+                #             masked_buildings_layer_name,
+                #             srs=mask_srs,
+                #             geom_type=wkbPolygon,
+                #             options=['GEOMETRY_NAME=geometry']
+                #         )
+                # else:
+                #     destination_layer = dst_ds.CreateLayer(
+                #         masked_buildings_layer_name,
+                #         srs=mask_srs,
+                #         geom_type=wkbPolygon,
+                #         options=['GEOMETRY_NAME=geometry']
+                #     )
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+
+                    if progress:
+                        total_task = progress.add_task(
+                            description=f'[red]Going to mask buildings in {nblocks} blocks/chunks',
+                            total=nblocks)
+                    for block_id, block in enumerate(blocks):
+                        job = dict(
+                            buildings_dataset=buildings_dataset,
+                            buildings_layer_name=buildings_layer_name,
+                            mask_ds=mask_ds,
+                            block=block,
+                            name=f'block::{block_id}',
+                            results=results,
+                            progress=progress
+
+                        )
+
+                        jobs.append(job)
+
+
+                    futures = [executor.submit(genworker, job=mask_buildings_in_block, jobs=jobs, stop=stop_event, task=total_task) for i in range(workers)]
+                    while True:
+                        try:
+                            try:
+                                block_id, table = results.pop()
+                                try:
+                                    destination_layer.WritePyArrow(table)
+                                    destination_layer.SyncToDisk()
+                                except Exception as e:
+                                    logger.error(
+                                        f'Failed to write {table.num_rows} features/rows in block id {block_id} because {e}. Skipping')
+
+                            except IndexError as ie:
+                                done = [f.done() for f in futures]
+                                if nblocks == 0 or all(done):
+                                    stop_event.set()
+                                    break
+                                s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
+                                time.sleep(s)
+                                continue
+
+
+                        except KeyboardInterrupt:
+                            logger.info(f'Cancelling. Please wait/allow for a graceful shutdown')
+                            stop_event.set()
+                            raise
+
+
+    except Exception as e:
+        logger.error(f'Error masking {buildings_dataset} with error {e}')
+        raise
+
+    finally:
+        if progress and total_task:
+            progress.remove_task(total_task)
+            progress.columns = cols
 if __name__ == '__main__':
     import time
 

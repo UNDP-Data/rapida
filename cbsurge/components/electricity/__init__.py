@@ -119,7 +119,6 @@ class ElectricityVariable(Variable):
         download_geodata_by_admin(
             dataset_url=self.source,
             geopackage_path=geopackage_path,
-            layer_name=self.component
         )
 
     def grid_density(self, grid_df, polygons_df):

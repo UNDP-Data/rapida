@@ -23,17 +23,6 @@ class Component:
             return ses.get_variables(component=self.component_name)
 
 
-
-    @abstractmethod
-    def download(self, variables: List[str] = None, **kwargs) -> List[str]:
-        """
-        Iterate over variables and download one by one
-        :param variables:
-        :param kwargs:
-        :return:
-        """
-        pass
-
     @abstractmethod
     def __call__(self, **kwargs):
 

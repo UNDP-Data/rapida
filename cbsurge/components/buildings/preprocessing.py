@@ -330,7 +330,7 @@ def filter_buildings(buildings_path=None, mask_path=None, mask_pixel_value=None,
 
 
 def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_path=None,
-                    masked_buildings_dataset=None, masked_buildings_layer_name=None, overwrite_dst_layer=True,
+                    masked_buildings_dataset=None, masked_buildings_layer_name=None,
                     horizontal_chunks=None, vertical_chunks=None, workers=4, progress=None
                    ):
     total_task = None
@@ -355,38 +355,17 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                 with gdal.OpenEx(buildings_dataset, gdal.OF_VECTOR | gdal.OF_READONLY) as bldgs_ds:
                     bldgs_layer = bldgs_ds.GetLayerByName(buildings_layer_name)
                     bldgs_layer_defn = bldgs_layer.GetLayerDefn()
-                    overwrite_txt = 'YES' if overwrite_dst_layer else 'NO'
+
                     destination_layer = dst_ds.CreateLayer(
                         masked_buildings_layer_name,
                         srs=bldgs_layer.GetSpatialRef(),
                         geom_type=bldgs_layer_defn.GetGeomType(),
-                        options=[f'OVERWRITE={overwrite_txt}', 'GEOMETRY_NAME=geometry']
+                        options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                     )
                     # Copy fields
                     for i in range(bldgs_layer_defn.GetFieldCount()):
                         field_defn = bldgs_layer_defn.GetFieldDefn(i)
                         destination_layer.CreateField(field_defn)
-                # destination_layer = dst_ds.GetLayerByName(masked_buildings_layer_name)
-                # if destination_layer is not None:
-                #     if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
-                #         for i in range(dst_ds.GetLayerCount()):
-                #             l = dst_ds.GetLayer(i)
-                #             if l.GetName() == masked_buildings_layer_name:
-                #                 logger.info(f'Deleting layer {masked_buildings_layer_name} from {masked_buildings_dataset}')
-                #                 dst_ds.DeleteLayer(i)
-                #         destination_layer = dst_ds.CreateLayer(
-                #             masked_buildings_layer_name,
-                #             srs=mask_srs,
-                #             geom_type=wkbPolygon,
-                #             options=['GEOMETRY_NAME=geometry']
-                #         )
-                # else:
-                #     destination_layer = dst_ds.CreateLayer(
-                #         masked_buildings_layer_name,
-                #         srs=mask_srs,
-                #         geom_type=wkbPolygon,
-                #         options=['GEOMETRY_NAME=geometry']
-                #     )
 
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
 

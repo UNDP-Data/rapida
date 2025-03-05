@@ -45,7 +45,7 @@ OGR_TYPES_MAPPING = {
 
 def download_vector(
         src_dataset_url=None,src_layer_name=None,
-        dst_dataset_path=None,dst_layer_name=None, dst_srs=None, overwrite_dst_layer=False,
+        dst_dataset_path=None,dst_layer_name=None, dst_srs=None, dst_layer_mode=None,
         mask_polygons:typing.Dict[str,shapely.lib.Geometry]=None,
         batch_size=5000,NWORKERS=4,progress=None,
 
@@ -57,6 +57,8 @@ def download_vector(
     :param: src_layer, str or int, default=0, the layer to be  read
     :param dst_dataset_path: str, local OGR dataset
     :param dst_layer_name: str, the name of src_layer in the dst_dataset that will be read
+    :param dst_srs instance of osr.SpatialReference
+    :param dst_layer_mode, str, default='w', if w layer is created and if it exists deleted, else features are appended to the layer
     :param mask_polygons, dict[
     :param batch_size: int, max number of features to download in one batch
     :param NWORKERS: int, default=4, number of
@@ -84,34 +86,23 @@ def download_vector(
                 if will_reproject :
                     dst_crs = f"{dst_srs.GetAuthorityName(None)}:{dst_srs.GetAuthorityCode(None)}"
                     transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
-                overwrite = 'YES' if overwrite_dst_layer else 'NO'
-                destination_layer = dst_ds.CreateLayer(
+
+                if dst_layer_mode == 'w':
+                    destination_layer = dst_ds.CreateLayer(
+                        dst_layer_name,
+                        srs=dst_srs,
+                        geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                        options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+                    )
+                elif dst_layer_mode == 'a':
+                    destination_layer = dst_ds.GetLayerByName(dst_layer_name)
+                    if destination_layer is None:
+                        destination_layer = dst_ds.CreateLayer(
                             dst_layer_name,
                             srs=dst_srs,
                             geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                            options=[f'OVERWRITE={overwrite}', 'GEOMETRY_NAME=geometry']
-                )
-                #destination_layer = dst_ds.GetLayerByName(dst_layer_name)
-                # if destination_layer is not None:
-                #     if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
-                #         for i in range(dst_ds.GetLayerCount()):
-                #             l = dst_ds.GetLayer(i)
-                #             if l.GetName() == dst_layer_name:
-                #                 logger.info(f'Deleting layer {dst_layer_name} from {dst_dataset_path}')
-                #                 dst_ds.DeleteLayer(i)
-                #         destination_layer = dst_ds.CreateLayer(
-                #             dst_layer_name,
-                #             srs=dst_srs,
-                #             geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                #             options=['GEOMETRY_NAME=geometry']
-                #         )
-                # else:
-                #     destination_layer = dst_ds.CreateLayer(
-                #         dst_layer_name,
-                #         srs=dst_srs,
-                #         geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                #         options=['GEOMETRY_NAME=geometry']
-                #     )
+                            options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+                        )
 
                 stop = threading.Event()
                 jobs = deque()

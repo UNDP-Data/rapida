@@ -5,8 +5,8 @@ logger = logging.getLogger(__name__)
 
 def generate_variables():
     """
-    Generate relative wealth index variables dict
-    :return RWI variables definition
+    Generate roads variables dict
+    :return Roads variables definition
     """
 
     variables = OrderedDict()

@@ -19,6 +19,29 @@ from cbsurge.core.component import Component
 
 logger = logging.getLogger(__name__)
 
+
+def compute_grid_length(grid_df, polygons_df):
+    project = Project(path=os.getcwd())
+    # overlay with the polygons to get only the grid within the polygons
+    electricity_grid_df = gpd.overlay(grid_df, polygons_df, how='intersection')
+    electricity_grid_df['electricity_grid_length'] = electricity_grid_df.geometry.length
+    length_per_unit = electricity_grid_df.groupby('name', as_index=False)['electricity_grid_length'].sum()
+    output_df = polygons_df.merge(length_per_unit, on='name', how='left')
+    output_df['electricity_grid_length'] = output_df['electricity_grid_length'].fillna(0)
+
+    # affected_grid_length
+    if project.vector_mask is not None:
+        mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
+        # overlay with the mask to get only the affected grid
+        electricity_grid_df_affected = gpd.overlay(electricity_grid_df, mask_df, how='intersection')
+        electricity_grid_df_affected['affected_electricity_grid_length'] = electricity_grid_df_affected.geometry.length
+        # overlay the affected with the admin
+        affected_length_per_unit = electricity_grid_df_affected.groupby('name', as_index=False)[
+            'affected_electricity_grid_length'].sum()
+        output_df = output_df.merge(affected_length_per_unit, on='name', how='left')
+    return output_df
+
+
 class ElectricityComponent(Component, ABC):
 
     def __init__(self, **kwargs):
@@ -28,7 +51,7 @@ class ElectricityComponent(Component, ABC):
         current_dir = Path(__file__).resolve().parent
         parent_package_name = current_dir.parents[0].name
 
-        self.component_name = f"{parent_package_name}.{ self.__class__.__name__.lower().split('component')[0]}"
+        self.component_name = f"{ self.__class__.__name__.lower().split('component')[0]}"
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
@@ -40,18 +63,13 @@ class ElectricityComponent(Component, ABC):
                 if not var_name in self.variables:
                     logger.error(f'variable "{var_name}" is invalid. Valid options are "{", ".join(self.variables)}"')
                     return
-
         progress = kwargs.get('progress', None)
-        project = Project(path=os.getcwd())
-
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
             nvars = len(variables)
-
             if progress:
                 variable_task = progress.add_task(
                     description=f'[red]Going to process {nvars} variables', total=nvars)
-
             for var_name in variables:
                 var_data = variables_data[var_name]
 
@@ -88,8 +106,12 @@ class ElectricityVariable(Variable):
         super().__init__(**kwargs)
 
     @property
-    def affected_layer_name(self):
+    def affected_name(self):
         return f'{self.name}_affected'
+
+    @property
+    def percentage(self):
+        return self.__dict__.get('percentage', False)
 
     def download(self, **kwargs):
         project = Project(path=os.getcwd())
@@ -100,68 +122,40 @@ class ElectricityVariable(Variable):
             layer_name=self.component
         )
 
+    def grid_density(self, grid_df, polygons_df):
+        project = Project(path=os.getcwd())
+        length_gdf = compute_grid_length(grid_df=grid_df, polygons_df=polygons_df)
+        length_gdf['area'] = polygons_df.geometry.area
+        length_gdf[self.name] = np.divide(length_gdf['electricity_grid_length'], length_gdf['area'])
+
+        # affected_grid_density
+        if project.vector_mask is not None:
+            length_gdf[f'affected_{self.name}'] = np.divide(length_gdf['affected_electricity_grid_length'], length_gdf['area'])
+        output_gdf = length_gdf.drop(columns=['area'])
+        return output_gdf
+
     def evaluate(self, **kwargs):
-
-
-        logger.debug(f'Evaluating variable variable "{self.name}"')
+        logger.info(f'Evaluating variable "{self.name}"')
         destination_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
+
+        output_df = None
 
         if destination_layer in gpd.list_layers(project.geopackage_file_path):
             polygons_layer = destination_layer
         else:
             polygons_layer = 'polygons'
         polygons_df = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
-
+        grid_df = gpd.read_file(project.geopackage_file_path, layer=self.component)
         if self.name in polygons_df.columns: # remove the variable column if it exists
             polygons_df.drop(columns=[self.name], inplace=True)
 
-        grid_layer_df = gpd.read_file(project.geopackage_file_path, layer=self.component)
+        if self.operator == 'density':
+            output_df = self.grid_density(grid_df, polygons_df)
 
-        electricity_grid_df = gpd.overlay(grid_layer_df, polygons_df, how='intersection')
-
-        # write split lines to local path
-        self.local_path = os.path.join(project.data_folder, self.name)
-        electricity_grid_df.to_file(f'{self.local_path}.fgb', driver='FlatGeobuf', layer='masked_grid')
-
-        electricity_grid_df[self.name] = electricity_grid_df.geometry.length
-        length_per_unit = electricity_grid_df.groupby('name', as_index=False)[self.name].sum()
-
-        admin_with_length = polygons_df.merge(length_per_unit, on='name', how='left')
-        admin_with_length[self.name] = admin_with_length[self.name].fillna(0)
-        admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
-
-
-
-        if project.vector_mask is not None:  # if the mask is provided then compute the affected
-            mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
-            grid_layer_df_affected = gpd.overlay(grid_layer_df, mask_df, how='intersection')
-            grid_layer_df_affected.to_file(project.geopackage_file_path, driver='GPKG', layer=self.affected_layer_name, mode='w')
-            grid_layer_df_affected[f'{self.name}_affected'] = grid_layer_df_affected.geometry.length
-
-            # drop the affected column if it exists
-            if self.affected_layer_name in polygons_df.columns:
-                polygons_df.drop(columns=[self.affected_layer_name], inplace=True)
-            # overlay the affected with the admin
-            masked_electricity_grid_df = gpd.overlay(grid_layer_df_affected, polygons_df, how='intersection')
-            masked_electricity_grid_df[self.affected_layer_name] = masked_electricity_grid_df.geometry.length
-            affected_length_per_unit = masked_electricity_grid_df.groupby('name', as_index=False)[f'{self.name}_affected'].sum()
-            admin_with_length = admin_with_length.merge(affected_length_per_unit, on='name', how='left')
-            admin_with_length[f'{self.name}_affected'] = admin_with_length[f'{self.name}_affected'].fillna(0)
-
-            # compute percentage of affected
-            admin_with_length[f'{self.name}_affected_percent'] = np.divide(admin_with_length[f'{self.name}_affected'], admin_with_length[self.name])
-
-            # compute area of admin
-            admin_with_length['area'] = admin_with_length.geometry.area
-
-            # density: affected per unit area of admin unit
-            admin_with_length[f'{self.name}_affected_density'] = np.divide(admin_with_length[f'{self.name}_affected'], admin_with_length['area'])
-
-            # drop the area column
-            admin_with_length.drop(columns=['area'], inplace=True)
-
-            admin_with_length.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
+        if self.operator == 'length':
+            output_df = compute_grid_length(grid_df, polygons_df)
+        output_df.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
 
 
 

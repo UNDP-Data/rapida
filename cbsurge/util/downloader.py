@@ -1,6 +1,6 @@
+
 import logging
 import threading
-
 from cbsurge.util.read_bbox import read_bbox
 
 logger = logging.getLogger(__name__)
@@ -23,3 +23,5 @@ def downloader(work=None, result=None, finished=None):
             break
         logger.debug(f'Starting job  {job["name"]}')
         result.append(read_bbox(**job))
+
+

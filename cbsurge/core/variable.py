@@ -1,5 +1,7 @@
+
 import logging
 import os.path
+import re
 from abc import abstractmethod
 from typing import List
 from typing import Optional, Union
@@ -7,6 +9,7 @@ from typing import Optional, Union
 from osgeo import gdal
 from pydantic import BaseModel, FilePath
 from sympy.parsing.sympy_parser import parse_expr
+from cbsurge.constants import ARROWTYPE2OGRTYPE
 
 from cbsurge.project import Project
 
@@ -119,7 +122,21 @@ class Variable(BaseModel):
             progress._tasks[variable_task].total = 1
             progress.update(variable_task, description=f'[blue]Assessed {self.component}->{self.name}', advance=1)
 
+    def interpolate_template(self, template=None, **kwargs):
+        """
+        Interpolate values from kwargs into template
+        """
+        kwargs['country_lower'] = kwargs['country'].lower()
+        template_vars = set(re.findall(self._extractor_, template))
 
+        if template_vars:
+            for template_var in template_vars:
+                if not template_var in kwargs:
+                    assert hasattr(self,template_var), f'"{template_var}"  is required to generate source files'
+
+            return template.format(**kwargs)
+        else:
+            return template
 
 
 

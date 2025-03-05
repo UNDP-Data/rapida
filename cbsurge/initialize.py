@@ -82,7 +82,6 @@ def setup_prompt(session: Session):
             "population":  gen_pop_vars(),
             "buildings": gen_bldgs_vars(),
             "rwi": gen_rwi_vars(),
-            "population":  gen_pop_vars(),
             "electricity": gen_electric_vars(),
         }
     }

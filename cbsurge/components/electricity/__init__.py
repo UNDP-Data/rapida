@@ -15,7 +15,7 @@ import httpx
 import logging
 
 from cbsurge.core.component import Component
-
+from cbsurge.util.resolve_url import resolve_geohub_url
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +73,7 @@ class ElectricityComponent(Component, ABC):
             for var_name in variables:
                 var_data = variables_data[var_name]
 
-                if var_data['source'] and var_data['source'].startswith('geohub:'):
-                    geohub_endpoint = ses.get_config_value_by_key('geohub_endpoint')
-                    var_data['source'] = var_data['source'].replace('geohub:', geohub_endpoint)
-                    var_data['source'] = self.get_url(var_data['source'])
-
+                var_data['source'] = resolve_geohub_url(dataset_url=var_data['source'], link_name='flatgeobuf')
                 # create instance
                 v = ElectricityVariable(name=var_name,
                                        component=self.component_name,
@@ -87,18 +83,6 @@ class ElectricityComponent(Component, ABC):
 
                 if variable_task and progress:
                     progress.update(variable_task, advance=1, description=f'Assessed {var_name}')
-
-    def get_url(self, dataset_url):
-        try:
-            timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
-            data = http_get_json(url=dataset_url, timeout=timeout)
-            for link in data['properties']['links']:
-                if link['rel'] == 'flatgeobuf':
-                    return link['href']
-        except Exception as e:
-            logger.error(f'Failed to get electricity grid from  {dataset_url}. {e}')
-            raise
-
 
 
 class ElectricityVariable(Variable):

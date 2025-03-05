@@ -46,7 +46,7 @@ OGR_TYPES_MAPPING = {
 def download_vector(
         src_dataset_url=None,src_layer_name=None,
         dst_dataset_path=None,dst_layer_name=None, dst_srs=None, dst_layer_mode=None,
-        mask_polygons:typing.Dict[str,shapely.lib.Geometry]=None,
+        mask_polygons:typing.Dict[str,shapely.lib.Geometry]=None, add_polyid=False,
         batch_size=5000,NWORKERS=4,progress=None,
 
 ):
@@ -68,12 +68,16 @@ def download_vector(
     assert src_dataset_url not in ('', None), f'src_dataset_url={src_dataset_url} is invalid'
     assert src_layer_name not in ('', None), f'src_layer_name={src_layer_name} is invalid'
 
-    src_dataset_info = read_info(src_dataset_url)
-    assert src_dataset_info, f'Could not read info from {src_dataset_url}. Please check the URL or the dataset format'
-    src_crs = src_dataset_info['crs']
-    src_srs = osr.SpatialReference()
-    src_srs.SetFromUserInput(src_crs)
-    src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+    # src_dataset_info = read_info(src_dataset_url, src_layer_name)
+    #
+    # assert src_dataset_info, f'Could not read info from {src_dataset_url}. Please check the URL or the dataset format'
+    # src_crs = src_dataset_info['crs']
+    # src_srs = osr.SpatialReference()
+    # src_srs.SetFromUserInput(src_crs)
+    # src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+
+
     written_features = set()
     total_task = None
     if progress:
@@ -82,8 +86,13 @@ def download_vector(
     try:
 
         with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
+            with gdal.OpenEx(src_dataset_url, gdal.OF_VECTOR | gdal.OF_READONLY) as src_ds:
+                src_layer = src_ds.GetLayerByName(src_layer_name)
+                src_layer_defn = src_layer.GetLayerDefn()
+                src_srs = src_layer.GetSpatialRef()
                 will_reproject =  not proj_are_equal(src_srs=src_srs, dst_srs=dst_srs)
                 if will_reproject :
+                    src_crs = f"{src_srs.GetAuthorityName(None)}:{src_srs.GetAuthorityCode(None)}"
                     dst_crs = f"{dst_srs.GetAuthorityName(None)}:{dst_srs.GetAuthorityCode(None)}"
                     transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
 
@@ -91,19 +100,32 @@ def download_vector(
                     destination_layer = dst_ds.CreateLayer(
                         dst_layer_name,
                         srs=dst_srs,
-                        geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                        geom_type=src_layer_defn.GetGeomType(),
                         options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                     )
+                    # Copy fields
+                    for i in range(src_layer_defn.GetFieldCount()):
+                        field_defn = src_layer_defn.GetFieldDefn(i)
+                        destination_layer.CreateField(field_defn)
+
                 elif dst_layer_mode == 'a':
                     destination_layer = dst_ds.GetLayerByName(dst_layer_name)
                     if destination_layer is None:
                         destination_layer = dst_ds.CreateLayer(
                             dst_layer_name,
                             srs=dst_srs,
-                            geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
+                            geom_type=src_layer_defn.GetGeomType(),
                             options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
                         )
-
+                field_names = [destination_layer.GetLayerDefn().GetFieldDefn(i).GetName() for i in
+                               range(destination_layer.GetLayerDefn().GetFieldCount())]
+                if add_polyid and not 'polyid' in field_names:
+                    assert all([isinstance(e, str) for e in mask_polygons]), 'mask polygon keys needs to be strings'
+                    poly_field = ogr.FieldDefn('polyid', ogr.OFTString)
+                    destination_layer.CreateField(poly_field)
+                if not 'OGC_FID' in field_names:
+                    ogcid_field = ogr.FieldDefn('OGC_FID', ogr.OFTInteger64)
+                    destination_layer.CreateField(ogcid_field)
                 stop = threading.Event()
                 jobs = deque()
                 results = deque()
@@ -128,9 +150,6 @@ def download_vector(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
                     nworkers = njobs if njobs < NWORKERS else NWORKERS
                     futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
-
-                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
-
                     while True:
                         try:
                             try:
@@ -160,19 +179,6 @@ def download_vector(
 
                                 batch = batch.drop_columns(['wkb_geometry'])
                                 batch = batch.append_column('wkb_geometry', pa.array(new_geometries))
-
-                                if nfields == 0:
-                                    logger.debug('Creating fields')
-                                    for name in batch.schema.names:
-                                        if 'wkb' in name or 'geometry' in name: continue
-                                        field = batch.schema.field(name)
-                                        field_type = ARROWTYPE2OGRTYPE[field.type]
-                                        if destination_layer.GetLayerDefn().GetFieldIndex(name) == -1:
-                                            destination_layer.CreateField(ogr.FieldDefn(name, field_type))
-
-                                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
-                                    destination_layer.SyncToDisk()
-
                                 if batch.num_rows == 0:
                                     logger.debug('Skipping empty batch')
                                     continue

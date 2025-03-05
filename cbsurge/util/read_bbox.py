@@ -41,7 +41,7 @@ def read_bbox(src_path=None, bbox=None, mask=None, batch_size=None, signal_event
             progress.remove_task(task)
 
 def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
-         signal_event=None, name=None, ntries=3, progress=None, results=None):
+         signal_event=None, name=None, ntries=3, progress=None, results=None, add_polyid=False):
     """
     Stream geospatial vector data using leveraging pyogrio/pyarrow API
 
@@ -79,6 +79,8 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                             logger.info(f'Cancelling download in {name}')
                             return name
                         if b.num_rows > 0:
+                            if add_polyid:
+                                b = b.append_column('polyid', name)
                             results.append(b)
                             nb+=b.num_rows
                             if progress:progress.update(task, description=f'[green]Downloaded {nb} features in {name}',

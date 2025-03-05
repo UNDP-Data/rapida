@@ -1,3 +1,5 @@
+from shapely.creation import polygons
+
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.util.download_geodata import download_vector
@@ -10,7 +12,7 @@ from osgeo import gdal, osr
 import shapely
 from cbsurge.components.buildings.preprocessing import mask_buildings
 from cbsurge.util.proj_are_equal import proj_are_equal
-
+import geopandas as gpd
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +199,7 @@ class BuildingsVariable(Variable):
                     dst_layer_mode=mode,
                     mask_polygons=mask_polygons,
                     progress=progress,
+                    add_polyid=True
 
                 )
                 lyr.SetAttributeFilter(None)
@@ -228,7 +231,12 @@ class BuildingsVariable(Variable):
         return self.download(force_compute=force_compute, **kwargs)
 
     def evaluate(self, **kwargs):
+        project = Project(os.getcwd())
         logger.info(f'Evaluating variable {self.name}')
+        dataset_path, layer_name = self.local_path.split('::')
+        buildings_gdf = gpd.read_file(filename=dataset_path,layer=layer_name)
+        polygons_gdf = gpd.read_file(project.geopackage_file_path,layer=project.polygons_layer_name)
+
 
 
     def resolve(self, **kwargs):

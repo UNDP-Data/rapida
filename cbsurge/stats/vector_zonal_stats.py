@@ -6,7 +6,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
-VECTOR_OPERATORS = {
+VECTOR_LINE_OPERATORS = {
     "sum": lambda geoms: sum(geom.length for geom in geoms),
     "max": lambda geoms: max(geom.length for geom in geoms),
     "min": lambda geoms: min(geom.length for geom in geoms),
@@ -30,7 +30,7 @@ def vector_line_zonal_stats(df_polygon,
     """
     df_output = df_polygon.copy()
 
-    selected_operator = VECTOR_OPERATORS.get(operator)
+    selected_operator = VECTOR_LINE_OPERATORS.get(operator)
     assert selected_operator is not None, f"Operator '{operator}' is not supported."
 
     df_line_cloned = df_line.copy()

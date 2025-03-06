@@ -353,10 +353,9 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
             jobs = deque()
             results = deque()
             workers = nblocks if workers > nblocks else workers
-            #with gdal.OpenEx(masked_buildings_dataset, gdal.OF_VECTOR|gdal.OF_UPDATE ) as dst_ds:
             folder_path, _ = os.path.split(masked_buildings_dataset)
-            out_path = os.path.join(folder_path, f'{masked_buildings_layer_name}.gpkg')
-            with ogr.GetDriverByName('GPKG').CreateDataSource(out_path) as dst_ds:
+            out_path = os.path.join(folder_path, f'{masked_buildings_layer_name}.fgb')
+            with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
                 with gdal.OpenEx(buildings_dataset, gdal.OF_VECTOR) as bldgs_ds:
                     bldgs_layer = bldgs_ds.GetLayerByName(buildings_layer_name)
                     bldgs_layer_defn = bldgs_layer.GetLayerDefn()
@@ -365,7 +364,6 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                         masked_buildings_layer_name,
                         srs=bldgs_layer.GetSpatialRef(),
                         geom_type=bldgs_layer_defn.GetGeomType(),
-                        options=['GEOMETRY_NAME=geometry']
                     )
                     # Copy fields
                     for i in range(bldgs_layer_defn.GetFieldCount()):
@@ -395,6 +393,7 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                         try:
                             try:
                                 block_id, table = results.pop()
+                                table = table.rename_columns({'geometry':'wkb_geometry'})
                                 try:
                                     destination_layer.WritePyArrow(table)
                                     destination_layer.SyncToDisk()
@@ -415,10 +414,10 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                             stop_event.set()
                             raise
                         gdal.VectorTranslateOptions()
-            with gdal.config_option(key="OGR2OGR_USE_ARROW_API", value="NO"):
+            #with gdal.config_option(key="OGR2OGR_USE_ARROW_API", value="NO"):
                 # ogr Arrow is used in translate > 3.8 and it has some issue with OGC_FID col
-                with gdal.VectorTranslate(destNameOrDestDS=masked_buildings_dataset,srcDS=out_path, accessMode='append') as ds:
-                    pass
+            with gdal.VectorTranslate(destNameOrDestDS=masked_buildings_dataset,srcDS=out_path, accessMode='append') as ds:
+                pass
             os.remove(out_path)
     except Exception as e:
         logger.error(f'Error masking {buildings_dataset} with error {e}')

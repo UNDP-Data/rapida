@@ -88,6 +88,7 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                             nb+=b.num_rows
                             if progress:progress.update(task, description=f'[green]Downloaded {nb} features in {name}',
                                                         advance=nb, completed=None)
+
                         now = datetime.datetime.now()
                         delta = now-start
                         if delta.total_seconds() > 1800 and n == nb:

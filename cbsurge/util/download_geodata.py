@@ -131,9 +131,9 @@ def download_vector(
                     assert all([isinstance(e, str) for e in mask_polygons]), 'mask polygon keys needs to be strings'
                     poly_field = ogr.FieldDefn('polyid', ogr.OFTString)
                     destination_layer.CreateField(poly_field)
-                if not 'OGC_FID' in field_names:
-                    ogcid_field = ogr.FieldDefn('OGC_FID', ogr.OFTInteger64)
-                    destination_layer.CreateField(ogcid_field)
+                if not 'SRC_FID' in field_names:
+                    srcid_field = ogr.FieldDefn('SRC_FID', ogr.OFTInteger64)
+                    destination_layer.CreateField(srcid_field)
 
 
                 stop = threading.Event()
@@ -194,7 +194,7 @@ def download_vector(
                                     logger.debug('Skipping empty batch')
                                     continue
 
-                                batch = batch.rename_columns({"wkb_geometry": "geometry"})
+                                batch = batch.rename_columns({"wkb_geometry": "geometry", 'OGC_FID':'SRC_FID'})
 
                                 try:
                                     destination_layer.WritePyArrow(batch)
@@ -221,7 +221,7 @@ def download_vector(
         logger.error(f'Error downloading {src_dataset_url} with error {e}')
         raise
     finally:
-        if progress and total_task:
+        if progress is not None and total_task:
             progress.remove_task(total_task)
             progress.columns = cols
         if stop.is_set(): # the download was cancelled, the layer is removed. Should this be?
@@ -230,7 +230,8 @@ def download_vector(
                     l = target_ds.GetLayer(i)
                     if l.GetName() == dst_layer_name:
                         logger.info(f'Layer {dst_layer_name} will be deleted as a result of cancelling')
-                        #target_ds.DeleteLayer(i)
+
+                        target_ds.DeleteLayer(i)
 
 
 

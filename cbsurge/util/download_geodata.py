@@ -82,7 +82,7 @@ def download_vector(
             _dst_layer_name_,
             srs=_dst_srs_,
             geom_type=_src_layer_defn_.GetGeomType(),
-            options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+            options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry', 'FID=FID']
         )
         # Copy fields
         for i in range(_src_layer_defn_.GetFieldCount()):
@@ -230,7 +230,7 @@ def download_vector(
                     l = target_ds.GetLayer(i)
                     if l.GetName() == dst_layer_name:
                         logger.info(f'Layer {dst_layer_name} will be deleted as a result of cancelling')
-                        target_ds.DeleteLayer(i)
+                        #target_ds.DeleteLayer(i)
 
 
 
@@ -352,7 +352,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
                                 try:
                                     destination_layer.WritePyArrow(batch)
                                 except Exception as e:
-                                    print(batch.column_names)
+
                                     logger.info(
                                         f'writing batch with {batch.num_rows} rows from {au_name} failed with error {e} and will be ignored')
 
@@ -361,6 +361,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
                             progress.update(total_task,
                                             description=f'[red]Downloaded geo file from {ndownloaded} out of {njobs} admin units',
                                             advance=1)
+
                         except IndexError as ie:
                             if not jobs and (progress.finished or ndownloaded == len(all_features)):
                                 stop.set()

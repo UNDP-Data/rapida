@@ -371,7 +371,6 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                     for i in range(bldgs_layer_defn.GetFieldCount()):
                         field_defn = bldgs_layer_defn.GetFieldDefn(i)
                         destination_layer.CreateField(field_defn)
-
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
 
                     if progress:
@@ -416,9 +415,10 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                             stop_event.set()
                             raise
                         gdal.VectorTranslateOptions()
-            with gdal.VectorTranslate(destNameOrDestDS=masked_buildings_dataset,srcDS=out_path, accessMode='append',
-                                      layerCreationOptions=['FID=OGC_FID']) as ds:
-                pass
+            with gdal.config_option(key="OGR2OGR_USE_ARROW_API", value="NO"):
+                # ogr Arrow is used in translate > 3.8 and it has some issue with OGC_FID col
+                with gdal.VectorTranslate(destNameOrDestDS=masked_buildings_dataset,srcDS=out_path, accessMode='append') as ds:
+                    pass
             os.remove(out_path)
     except Exception as e:
         logger.error(f'Error masking {buildings_dataset} with error {e}')

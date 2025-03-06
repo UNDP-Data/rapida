@@ -151,8 +151,7 @@ class BuildingsVariable(Variable):
 
         logger.debug(f'Downloading {self.name}')
         project = Project(os.getcwd())
-        # self._compute_affected_(progress=progress)
-        # return
+
         dst_layers = pyogrio.list_layers(project.geopackage_file_path)
         if self.component in dst_layers[:,0]  and not force_compute:
             if 'mask' in dst_layers:

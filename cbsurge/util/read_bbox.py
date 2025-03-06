@@ -56,7 +56,9 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
     :param ntries: int=3, how many times should the stream be restarted in case an error is encountyered
     :param progress:instance of  roch progress bar
     :param results: instance of collections.deque used to place the downloaded features into the main thread
-    :param add_polyid, bool=False,
+    :param add_polyid, bool=False, if True the OGC_FID column from pyarrow GDAL API representing the FID
+                      is added into the returned table. The expectation is the called has ensurted this column exists in the
+                      layer where the table is going to be written
     :return: str, the name of the mask/bbox
     NB. The function shuts itself down if no features are downloaded/read in 1800 seconds
 
@@ -85,9 +87,7 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                             results.append(b)
                             nb+=b.num_rows
                             if progress:progress.update(task, description=f'[green]Downloaded {nb} features in {name}',
-                                                        advance=nb, completed=None, bar_style="green")
-
-                            return name
+                                                        advance=nb, completed=None)
                         now = datetime.datetime.now()
                         delta = now-start
                         if delta.total_seconds() > 1800 and n == nb:

@@ -11,10 +11,15 @@ def generate_variables():
 
     variables = OrderedDict()
 
-    variables[f'roads_length'] = dict(
-        title=f'Total length of roads',
-        source='geohub:/api/datasets/300da70781b7a53808aab824543e6c2b',
-        operator="sum",
-        percentage=True,
-    )
+    for operator in ['sum', 'count']:
+        name = operator
+        if operator == 'sum':
+            name = "length"
+        variables[f'roads_{name}'] = dict(
+            title=f'Total {name} of roads',
+            source='geohub:/api/datasets/300da70781b7a53808aab824543e6c2b',
+            operator=operator,
+            percentage=True,
+        )
+
     return variables

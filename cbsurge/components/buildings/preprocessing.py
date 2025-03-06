@@ -335,6 +335,19 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                     masked_buildings_dataset=None, masked_buildings_layer_name=None,
                     horizontal_chunks=None, vertical_chunks=None, workers=4, progress=None
                    ):
+    """
+    Filter buildings based on a raster mask
+    :param buildings_dataset:
+    :param buildings_layer_name:
+    :param mask_ds_path:
+    :param masked_buildings_dataset:
+    :param masked_buildings_layer_name:
+    :param horizontal_chunks:
+    :param vertical_chunks:
+    :param workers:
+    :param progress:
+    :return:
+    """
     total_task = None
     if progress:
         cols = progress.columns
@@ -388,7 +401,7 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                         )
 
                         jobs.append(job)
-                    futures = [executor.submit(genworker, job=mask_buildings_in_block, jobs=jobs, stop=stop_event, task=total_task) for i in range(workers)]
+                    futures = [executor.submit(genworker, job=mask_buildings_in_block, jobs=jobs, stop=stop_event, task=total_task, id_prop_name='name') for i in range(workers)]
                     while True:
                         try:
                             try:

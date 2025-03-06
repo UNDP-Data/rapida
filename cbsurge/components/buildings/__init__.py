@@ -1,3 +1,4 @@
+import pandas as pd
 from shapely.creation import polygons
 
 from cbsurge.core.component import Component
@@ -187,7 +188,7 @@ class BuildingsVariable(Variable):
                     if will_reproject:
                         polygon.Transform(target2src_tr)
                     shapely_polygon = shapely.wkb.loads(bytes(polygon.ExportToIsoWkb()))
-                    poly_id = feat['name'] or f'polygon::{feat.GetFID()}'
+                    poly_id = feat['h3id'] or feat.GetFID()
                     mask_polygons[poly_id] = shapely_polygon
 
                 download_vector(
@@ -213,7 +214,8 @@ class BuildingsVariable(Variable):
         project = Project(os.getcwd())
         affected_layer_name = f'{self.component}.affected'
         mask_buildings(
-            buildings_dataset=project.geopackage_file_path, buildings_layer_name=self.component,
+            buildings_dataset=project.geopackage_file_path,
+            buildings_layer_name=self.component,
             mask_ds_path=project.raster_mask,
             masked_buildings_dataset=project.geopackage_file_path,
             masked_buildings_layer_name=affected_layer_name,
@@ -231,11 +233,49 @@ class BuildingsVariable(Variable):
         return self.download(force_compute=force_compute, **kwargs)
 
     def evaluate(self, **kwargs):
+        destination_layer = f'stats.{self.component}'
+        affected_var_name = f'{self.name}_affected'
+        affected_var_percentage_name = f'{affected_var_name}_percentage'
         project = Project(os.getcwd())
         logger.info(f'Evaluating variable {self.name}')
         dataset_path, layer_name = self.local_path.split('::')
         buildings_gdf = gpd.read_file(filename=dataset_path,layer=layer_name)
-        polygons_gdf = gpd.read_file(project.geopackage_file_path,layer=project.polygons_layer_name)
+        layers = pyogrio.list_layers(dataset_path)
+        layer_names = layers[:, 0]
+
+        if destination_layer in layer_names:
+            polygons_layer = destination_layer
+        else:
+            polygons_layer = project.polygons_layer_name
+
+        polygons_gdf = gpd.read_file(project.geopackage_file_path,layer=polygons_layer)
+        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+
+        if self.name == 'nbuildings':
+            var_gdf  = buildings_gdf.groupby('polyid').size().reset_index(name=self.name)
+        else:
+            buildings_gdf[self.name] = buildings_gdf.geometry.area
+            var_gdf = buildings_gdf.groupby('polyid')[self.name].sum().reset_index()
+
+        affected_layer_name = f'{self.component}.affected'
+        if affected_layer_name in layer_names:
+            affected_buildings_gdf = gpd.read_file(filename=dataset_path, layer=affected_layer_name)
+            if self.name == 'nbuildings':
+                affected_var_gdf  = affected_buildings_gdf.groupby('polyid').size().reset_index(name=affected_var_name)
+            else:
+                affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
+                affected_var_gdf = affected_buildings_gdf.groupby('polyid')[affected_var_name].sum().reset_index()
+            var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
+            var_gdf.eval(f"{affected_var_percentage_name}={f'{affected_var_name}'}/{self.name}*100", inplace=True)
+
+        for col in [self.name, affected_var_name, affected_var_percentage_name]:
+            if col in polygons_gdf.columns:
+                polygons_gdf.drop(columns=[col], inplace=True)
+
+
+        out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='inner')
+        out_gdf = out_gdf.rename(columns={'polyid':'h3id'})
+        out_gdf.to_file(dataset_path,layer=destination_layer,driver='GPKG', mode='w')
 
 
 

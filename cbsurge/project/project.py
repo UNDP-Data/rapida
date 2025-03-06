@@ -109,7 +109,7 @@ class Project:
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
 
-                    self.countries = tuple(set(joined['iso3']))
+                    self.countries = tuple(sorted(set(joined['iso3'])))
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                                  promote_to_multi=True)

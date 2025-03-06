@@ -33,7 +33,8 @@ import typing
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
-OGR_TYPES_MAPPING = {
+
+OGR_GEOM_TYPES_MAPPING = {
     'LineString': ogr.wkbLineString,
     'MultiLineString': ogr.wkbMultiLineString,
     'Point': ogr.wkbPoint,
@@ -43,6 +44,15 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
+PYTHON2OGR = {
+    str: ogr.OFTString,
+    int: ogr.OFTInteger64,  # Python ints are typically 64-bit
+    float: ogr.OFTReal,
+    bool: ogr.OFTInteger,  # OGR has no boolean type, so 0/1 integer
+    bytes: ogr.OFTBinary,
+}
+
+
 def download_vector(
         src_dataset_url=None,src_layer_name=None,
         dst_dataset_path=None,dst_layer_name=None, dst_srs=None, dst_layer_mode=None,
@@ -51,15 +61,16 @@ def download_vector(
 
 ):
     """
-    Download a remote vector dataset locally in a parallel manner using a third layer polygons
-    as mask.
+    Download a remote vector dataset locally in a parallel manner using polygons as  a spatial mask. Uses PyArrow streaming.
+
     :param src_dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
-    :param: src_layer, str or int, default=0, the layer to be  read
+    :param: src_layer_name, str or int, default=0, the layer to be  read
     :param dst_dataset_path: str, local OGR dataset
     :param dst_layer_name: str, the name of src_layer in the dst_dataset that will be read
     :param dst_srs instance of osr.SpatialReference
     :param dst_layer_mode, str, default='w', if w layer is created and if it exists deleted, else features are appended to the layer
-    :param mask_polygons, dict[
+    :param mask_polygons,  a dict used to limit the download spatially.
+    :param add_polyid: bool, if True the poygon id supplied as key in the mask_polygons arg is set for every downloaded feature
     :param batch_size: int, max number of features to download in one batch
     :param NWORKERS: int, default=4, number of
     :param progress:
@@ -68,13 +79,6 @@ def download_vector(
     assert src_dataset_url not in ('', None), f'src_dataset_url={src_dataset_url} is invalid'
     assert src_layer_name not in ('', None), f'src_layer_name={src_layer_name} is invalid'
 
-    # src_dataset_info = read_info(src_dataset_url, src_layer_name)
-    #
-    # assert src_dataset_info, f'Could not read info from {src_dataset_url}. Please check the URL or the dataset format'
-    # src_crs = src_dataset_info['crs']
-    # src_srs = osr.SpatialReference()
-    # src_srs.SetFromUserInput(src_crs)
-    # src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
     def _create_layer_(_src_layer_=None, _dst_ds_=None, _dst_layer_name_=None, _dst_srs_=None):
         _src_layer_defn_ = _src_layer_.GetLayerDefn()
@@ -104,6 +108,7 @@ def download_vector(
                 src_layer = src_ds.GetLayerByName(src_layer_name)
                 src_srs = src_layer.GetSpatialRef()
                 src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                 will_reproject =  not proj_are_equal(src_srs=src_srs, dst_srs=dst_srs)
                 if will_reproject :
                     src_crs = f"{src_srs.GetAuthorityName(None)}:{src_srs.GetAuthorityCode(None)}"
@@ -128,8 +133,10 @@ def download_vector(
                 field_names = [destination_layer.GetLayerDefn().GetFieldDefn(i).GetName() for i in
                                range(destination_layer.GetLayerDefn().GetFieldCount())]
                 if add_polyid and not 'polyid' in field_names:
-                    assert all([isinstance(e, str) for e in mask_polygons]), 'mask polygon keys needs to be strings'
-                    poly_field = ogr.FieldDefn('polyid', ogr.OFTString)
+                    first_poly_id = list(mask_polygons.keys())[0]
+                    first_poly_type = type(first_poly_id)
+                    assert all([isinstance(e, first_poly_type) for e in mask_polygons]), f'mask polygon keys needs to be {first_poly_type}'
+                    poly_field = ogr.FieldDefn('polyid', PYTHON2OGR[first_poly_type])
                     destination_layer.CreateField(poly_field)
                 if not 'SRC_FID' in field_names:
                     srcid_field = ogr.FieldDefn('SRC_FID', ogr.OFTInteger64)
@@ -150,7 +157,7 @@ def download_vector(
                             mask=polygon,
                             batch_size=batch_size,
                             signal_event=stop,
-                            name=poly_id,
+                            polygon_id=poly_id,
                             progress=progress,
                             results=results,
                             add_polyid=add_polyid
@@ -160,7 +167,7 @@ def download_vector(
                     total_task = progress.add_task(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
                     nworkers = njobs if njobs < NWORKERS else NWORKERS
-                    futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
+                    futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop, id_prop_name='polygon_id') for i in range(nworkers)]
                     while True:
                         try:
                             try:
@@ -266,7 +273,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
             destination_layer = project_dataset.CreateLayer(
                 layer_name,
                 srs=admin_srs,
-                geom_type=OGR_TYPES_MAPPING.get(dataset_info['geometry_type'], ogr.wkbUnknown),
+                geom_type=OGR_GEOM_TYPES_MAPPING.get(dataset_info['geometry_type'], ogr.wkbUnknown),
                 options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
             )
 

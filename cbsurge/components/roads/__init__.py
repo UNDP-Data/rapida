@@ -178,8 +178,7 @@ class RoadsVariable(Variable):
                 df_polygon=df_polygon,
                 df_line=df_line,
                 operator=self.operator,
-                field_name=self.name,
-                clip=True
+                field_name=self.name
             )
 
             if progress is not None and evaluate_task is not None:
@@ -194,8 +193,7 @@ class RoadsVariable(Variable):
                     df_polygon=output_df,
                     df_line=df_line_affected,
                     operator=self.operator,
-                    field_name=self.affected_variable,
-                    clip=True
+                    field_name=self.affected_variable
                 )
 
                 if progress is not None and evaluate_task is not None:

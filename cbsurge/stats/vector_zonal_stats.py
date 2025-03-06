@@ -18,8 +18,7 @@ VECTOR_OPERATORS = {
 def vector_line_zonal_stats(df_polygon,
                             df_line,
                             operator: str,
-                            field_name: str,
-                            clip=True):
+                            field_name: str):
     """
     Compute zonal statistics for polygon layer from a given line layer
 
@@ -27,7 +26,6 @@ def vector_line_zonal_stats(df_polygon,
     :param df_line: Line layer dataframe which is used to compute zonal statistics
     :param operator: zonal statistics operator such as sum, min, max, mean, median, count.
     :param field_name: statistics field name to be added to target polygon layer
-    :param clip: optional. default is True. If true, clip line layer by polygon before computing zonal statistics. Otherwise, zonal statistics can include line length outside of polygons.
     :return: output dataframe with zonal statistics
     """
     df_output = df_polygon.copy()
@@ -35,11 +33,7 @@ def vector_line_zonal_stats(df_polygon,
     selected_operator = VECTOR_OPERATORS.get(operator)
     assert selected_operator is not None, f"Operator '{operator}' is not supported."
 
-    if clip:
-        df_line_cloned = gpd.clip(df_line, mask=df_output, keep_geom_type=True)
-    else:
-        df_line_cloned = df_line.copy()
-
+    df_line_cloned = df_line.copy()
     intersects = gpd.sjoin(df_line_cloned, df_output, predicate="intersects", how="inner")
     line_stats = intersects.groupby("index_right")["geometry"].apply(selected_operator)
     df_output[field_name] = df_output.index.map(line_stats).fillna(0)

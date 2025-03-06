@@ -52,10 +52,11 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
     :param mask: a shapely geometry in the same projection like src_layer
     :param batch_size: int, the number of features to stream in one batch
     :param signal_event: multiprocessing even instance to stop/cancel the streaming
-    :param name: the name assigned to the mask/bbox, used to logging purposes
+    :param name: the name assigned to the mask/bbox, used for logging purposes
     :param ntries: int=3, how many times should the stream be restarted in case an error is encountyered
     :param progress:instance of  roch progress bar
     :param results: instance of collections.deque used to place the downloaded features into the main thread
+    :param add_polyid, bool=False,
     :return: str, the name of the mask/bbox
     NB. The function shuts itself down if no features are downloaded/read in 1800 seconds
 
@@ -80,7 +81,7 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                             return name
                         if b.num_rows > 0:
                             if add_polyid:
-                                b = b.append_column('polyid', name)
+                                b = b.append_column('polyid', [name]*b.num_rows)
                             results.append(b)
                             nb+=b.num_rows
                             if progress:progress.update(task, description=f'[green]Downloaded {nb} features in {name}',

@@ -147,12 +147,14 @@ class BuildingsComponent(Component):
 
 class BuildingsVariable(Variable):
 
-    def download(self, force_compute=False, progress=None, **kwargs):
+    def download(self, progress=None, force_compute=None, **kwargs):
+
         logger.debug(f'Downloading {self.name}')
         project = Project(os.getcwd())
-
+        # self._compute_affected_(progress=progress)
+        # return
         dst_layers = pyogrio.list_layers(project.geopackage_file_path)
-        if self.component in dst_layers[:,0] and not force_compute :
+        if self.component in dst_layers[:,0]  and not force_compute:
             if 'mask' in dst_layers:
                 affected_layer_name = f'{self.component}.affected'
                 assert affected_layer_name in dst_layers, f'layer {affected_layer_name}  does not exist'
@@ -161,8 +163,8 @@ class BuildingsVariable(Variable):
         with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
             lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
             for ci, country in enumerate(project.countries):
-                mode = 'w' if force_compute and ci == 0 else 'a'
-                logger.info(f'Downloading {self.name} in {country}')
+                mode = 'w' if ci == 0 else 'a'
+                logger.info(f'Downloading {self.name} in {country} with mode {mode}')
                 source = self.interpolate_template(template=self.source, country=country, **kwargs)
                 source, layer_name = source.split('::')
                 try:

@@ -76,6 +76,20 @@ def download_vector(
     # src_srs.SetFromUserInput(src_crs)
     # src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
+    def _create_layer_(_src_layer_=None, _dst_ds_=None, _dst_layer_name_=None, _dst_srs_=None):
+        _src_layer_defn_ = _src_layer_.GetLayerDefn()
+        _destination_layer_ = _dst_ds_.CreateLayer(
+            _dst_layer_name_,
+            srs=_dst_srs_,
+            geom_type=_src_layer_defn_.GetGeomType(),
+            options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+        )
+        # Copy fields
+        for i in range(_src_layer_defn_.GetFieldCount()):
+            field_defn = _src_layer_defn_.GetFieldDefn(i)
+            _destination_layer_.CreateField(field_defn)
+
+        return _destination_layer_
 
 
     written_features = set()
@@ -88,34 +102,28 @@ def download_vector(
         with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
             with gdal.OpenEx(src_dataset_url, gdal.OF_VECTOR | gdal.OF_READONLY) as src_ds:
                 src_layer = src_ds.GetLayerByName(src_layer_name)
-                src_layer_defn = src_layer.GetLayerDefn()
                 src_srs = src_layer.GetSpatialRef()
+                src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                 will_reproject =  not proj_are_equal(src_srs=src_srs, dst_srs=dst_srs)
                 if will_reproject :
                     src_crs = f"{src_srs.GetAuthorityName(None)}:{src_srs.GetAuthorityCode(None)}"
                     dst_crs = f"{dst_srs.GetAuthorityName(None)}:{dst_srs.GetAuthorityCode(None)}"
                     transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
-
                 if dst_layer_mode == 'w':
-                    destination_layer = dst_ds.CreateLayer(
-                        dst_layer_name,
-                        srs=dst_srs,
-                        geom_type=src_layer_defn.GetGeomType(),
-                        options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+                    destination_layer = _create_layer_(
+                        _src_layer_=src_layer,
+                        _dst_ds_=dst_ds,
+                        _dst_layer_name_=dst_layer_name,
+                        _dst_srs_=dst_srs
                     )
-                    # Copy fields
-                    for i in range(src_layer_defn.GetFieldCount()):
-                        field_defn = src_layer_defn.GetFieldDefn(i)
-                        destination_layer.CreateField(field_defn)
-
                 elif dst_layer_mode == 'a':
                     destination_layer = dst_ds.GetLayerByName(dst_layer_name)
                     if destination_layer is None:
-                        destination_layer = dst_ds.CreateLayer(
-                            dst_layer_name,
-                            srs=dst_srs,
-                            geom_type=src_layer_defn.GetGeomType(),
-                            options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
+                        destination_layer = _create_layer_(
+                            _src_layer_=src_layer,
+                            _dst_ds_=dst_ds,
+                            _dst_layer_name_=dst_layer_name,
+                            _dst_srs_=dst_srs
                         )
                 field_names = [destination_layer.GetLayerDefn().GetFieldDefn(i).GetName() for i in
                                range(destination_layer.GetLayerDefn().GetFieldCount())]
@@ -126,6 +134,8 @@ def download_vector(
                 if not 'OGC_FID' in field_names:
                     ogcid_field = ogr.FieldDefn('OGC_FID', ogr.OFTInteger64)
                     destination_layer.CreateField(ogcid_field)
+
+
                 stop = threading.Event()
                 jobs = deque()
                 results = deque()
@@ -142,7 +152,8 @@ def download_vector(
                             signal_event=stop,
                             name=poly_id,
                             progress=progress,
-                            results=results
+                            results=results,
+                            add_polyid=add_polyid
                         )
                         jobs.append(job)
                     njobs = len(jobs)
@@ -195,7 +206,6 @@ def download_vector(
                             except IndexError as ie:
                                 done = [f.done() for f in futures]
                                 if len(mask_polygons) == 0 or all(done):
-                                    stop.set()
                                     break
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)
@@ -203,7 +213,7 @@ def download_vector(
 
 
                         except KeyboardInterrupt:
-                            logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')
+                            logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown and cleanup')
                             stop.set()
                             raise
 
@@ -214,7 +224,13 @@ def download_vector(
         if progress and total_task:
             progress.remove_task(total_task)
             progress.columns = cols
-
+        if stop.is_set(): # the download was cancelled, the layer is removed. Should this be?
+            with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as target_ds:
+                for i in  range(target_ds.GetLayerCount()):
+                    l = target_ds.GetLayer(i)
+                    if l.GetName() == dst_layer_name:
+                        logger.info(f'Layer {dst_layer_name} will be deleted as a result of cancelling')
+                        target_ds.DeleteLayer(i)
 
 
 

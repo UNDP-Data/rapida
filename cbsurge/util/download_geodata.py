@@ -63,7 +63,7 @@ def download_vector(
     """
     Download a remote vector dataset locally in a parallel manner using polygons as  a spatial mask. Uses PyArrow streaming.
 
-    :param src_dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
+    :param src_dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles. The URL should start with `/vsicurl/` prefix, if not, the funciton will add the prefix to proceed.
     :param: src_layer_name, str or int, default=0, the layer to be  read
     :param dst_dataset_path: str, local OGR dataset
     :param dst_layer_name: str, the name of src_layer in the dst_dataset that will be read
@@ -102,10 +102,16 @@ def download_vector(
         cols = progress.columns
         progress.columns = [e for e in cols] + [TimeElapsedColumn()]
     try:
-
+        stop = None
         with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
+            if not src_dataset_url.startswith('/vsicurl/'):
+                src_dataset_url = f"/vsicurl/{src_dataset_url}"
             with gdal.OpenEx(src_dataset_url, gdal.OF_VECTOR | gdal.OF_READONLY) as src_ds:
-                src_layer = src_ds.GetLayerByName(src_layer_name)
+                if isinstance(src_layer_name, int) or src_layer_name is None:
+                    layer_index = src_layer_name if src_layer_name is not None else 0
+                    src_layer = src_ds.GetLayer(layer_index)
+                else:
+                    src_layer = src_ds.GetLayerByName(src_layer_name)
                 src_srs = src_layer.GetSpatialRef()
                 src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                 dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
@@ -153,7 +159,7 @@ def download_vector(
                     for poly_id, polygon in mask_polygons.items():
                         job = dict(
                             src_path=src_dataset_url,
-                            src_layer=src_layer_name,
+                            src_layer=src_layer.GetName(),
                             mask=polygon,
                             batch_size=batch_size,
                             signal_event=stop,
@@ -163,6 +169,8 @@ def download_vector(
                             add_polyid=add_polyid
                         )
                         jobs.append(job)
+
+                    ndownloaded = 0
                     njobs = len(jobs)
                     total_task = progress.add_task(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
@@ -209,10 +217,12 @@ def download_vector(
                                 except Exception as e:
                                     logger.info(
                                         f'writing batch with {batch.num_rows} rows from {poly_id} failed with error {e} and will be ignored')
+                                # keep the number of worker processed to prevent going into infinite loop
+                                ndownloaded += 1
 
                             except IndexError as ie:
                                 done = [f.done() for f in futures]
-                                if len(mask_polygons) == 0 or all(done):
+                                if len(mask_polygons) == 0 or all(done) or ndownloaded == len(futures):
                                     break
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)
@@ -231,7 +241,7 @@ def download_vector(
         if progress is not None and total_task:
             progress.remove_task(total_task)
             progress.columns = cols
-        if stop.is_set(): # the download was cancelled, the layer is removed. Should this be?
+        if stop is not None and stop.is_set(): # the download was cancelled, the layer is removed. Should this be?
             with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as target_ds:
                 for i in  range(target_ds.GetLayerCount()):
                     l = target_ds.GetLayer(i)

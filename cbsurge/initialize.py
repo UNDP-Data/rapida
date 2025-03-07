@@ -6,7 +6,8 @@ from cbsurge.session import Session
 from cbsurge.components.population.variables import generate_variables as gen_pop_vars
 from cbsurge.components.buildings.variables import generate_variables as gen_bldgs_vars
 from cbsurge.components.rwi.variables import generate_variables as gen_rwi_vars
-
+from cbsurge.components.roads.variables import generate_variables as gen_road_vars
+from cbsurge.components.electricity.variables import generate_variables as gen_electric_vars
 from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
@@ -81,7 +82,9 @@ def setup_prompt(session: Session):
         "variables": {
             "population":  gen_pop_vars(),
             "buildings": gen_bldgs_vars(),
+            "roads": gen_road_vars(),
             "rwi": gen_rwi_vars(),
+            "electricity": gen_electric_vars(),
         }
     }
     session.config.update(vars_dict)

@@ -222,7 +222,7 @@ def download_vector(
 
                             except IndexError as ie:
                                 done = [f.done() for f in futures]
-                                if len(mask_polygons) == 0 or all(done) or ndownloaded == len(futures):
+                                if len(mask_polygons) == 0 or all(done) or ndownloaded == len(jobs):
                                     break
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)

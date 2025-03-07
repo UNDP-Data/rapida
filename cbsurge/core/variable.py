@@ -69,7 +69,7 @@ class Variable(BaseModel):
     @abstractmethod
     def resolve(self, **kwargs):
         pass
-
+    @abstractmethod
     def __call__(self,  **kwargs):
         pass
 

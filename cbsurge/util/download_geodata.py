@@ -545,34 +545,38 @@ def download_raster(
                         dtype=src.dtypes[0]
                     )
                 else:
-                    src_window_transform = src.window_transform(source_window)
-                    # Create a mask array using the source window dimensions.
-                    mask_arr = rasterio.features.geometry_mask(
-                        geoms,
-                        out_shape=(int(source_window.height), int(source_window.width)),
-                        transform=src_window_transform,
-                        invert=True
-                    )
-                    data = numpy.where(mask_arr, data, numpy.nan)
+                    # TODO: the below code of masking data by geometry is not working.
+                    # to make zonal statistics, having pixel values outside of project polygons has no impact.
+                    # thus, comment the below code temporally.
+                    pass
+                    # src_window_transform = src.window_transform(source_window)
+                    # # Create a mask array using the source window dimensions.
+                    # mask_arr = rasterio.features.geometry_mask(
+                    #     geoms,
+                    #     out_shape=(int(source_window.height), int(source_window.width)),
+                    #     transform=src_window_transform,
+                    #     invert=True
+                    # )
+                    # data = numpy.where(mask_arr, data, numpy.nan)
 
-            # Determine the temporary file path for the current chunk.
-            temp_filename = os.path.join(tmpdir, f"{output_filename}_{task_id}.tmp")
-            # Calculate the transform for the current chunk relative to the overall window.
-            block_transform = rasterio.windows.transform(mosaic_window, out_transform)
-            # Prepare metadata for the temporary file.
-            block_meta = out_meta.copy()
-            block_meta.update({
-                "width": int(mosaic_window.width),
-                "height": int(mosaic_window.height),
-                "transform": block_transform
-            })
-            # Write the processed chunk data to the temporary file.
-            with rasterio.open(temp_filename, "w", **block_meta) as temp_dst:
-                temp_dst.write(data)
-            # Store the temporary file path and its window information.
-            with temp_files_lock:
-                temp_files_data.append(temp_filename)
-            chunk_progress[task_id] = {"progress": 1, "total": 1}
+                # Determine the temporary file path for the current chunk.
+                temp_filename = os.path.join(tmpdir, f"{output_filename}_{task_id}.tmp")
+                # Calculate the transform for the current chunk relative to the overall window.
+                block_transform = rasterio.windows.transform(mosaic_window, out_transform)
+                # Prepare metadata for the temporary file.
+                block_meta = out_meta.copy()
+                block_meta.update({
+                    "width": int(mosaic_window.width),
+                    "height": int(mosaic_window.height),
+                    "transform": block_transform
+                })
+                # Write the processed chunk data to the temporary file.
+                with rasterio.open(temp_filename, "w", **block_meta) as temp_dst:
+                    temp_dst.write(data)
+                # Store the temporary file path and its window information.
+                with temp_files_lock:
+                    temp_files_data.append(temp_filename)
+                chunk_progress[task_id] = {"progress": 1, "total": 1}
 
 
         futures = []
@@ -640,6 +644,10 @@ def download_raster(
         if progress and merge_task is not None:
             progress.update(merge_task, description="[green]Creating VRT...")
         vrt_filename = os.path.join(tmpdir, f"{output_filename}.vrt")
+
+        if len(temp_files_data) == 0:
+            raise RuntimeError("No files were downloaded.")
+
         with gdal.BuildVRT(vrt_filename, temp_files_data,
                            resampleAlg='nearest', srcNodata=src_nodata) as vrt:
             if progress and merge_task is not None:

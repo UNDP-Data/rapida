@@ -184,6 +184,60 @@ class PopulationComponent(Component):
 
 class PopulationVariable(Variable):
 
+
+
+    def __call__(self, *args, **kwargs):
+        """
+                Assess a variable. Essentially this means a series of steps in a specific order:
+                    - download
+                    - preprocess
+                    - analysis/zonal stats
+
+                :param kwargs:
+                :return:
+                """
+
+        force_compute = kwargs.get('force_compute', False)
+        progress = kwargs.get('progress', None)
+
+        if progress is not None:
+            variable_task = progress.add_task(
+                description=f'[blue]Assessing {self.component}->{self.name}', total=None)
+
+        if not self.dep_vars:  # simple variable,
+            if not force_compute:
+                # logger.debug(f'Downloading {self.name} source')
+                self.download(**kwargs)
+                if progress is not None and variable_task is not None:
+                    progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
+            else:
+                # logger.debug(f'Computing {self.name} using gdal_calc from sources')
+                self.compute(**kwargs)
+                if progress is not None and variable_task is not None:
+                    progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}', )
+
+        else:
+            if self.operator:
+                if not force_compute:
+                    # logger.debug(f'Downloading {self.name} from  source')
+                    self.download(**kwargs)
+                    if progress is not None and variable_task is not None:
+                        progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
+                else:
+                    # logger.info(f'Computing {self.name}={self.sources} using GDAL')
+                    self.compute(**kwargs)
+                    if progress is not None and variable_task is not None:
+                        progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
+            else:
+                # logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
+                sources = self.resolve(**kwargs)
+
+        self.evaluate(**kwargs)
+        if progress is not None and variable_task is not None:
+            progress._tasks[variable_task].total = 1
+            progress.update(variable_task, description=f'[blue]Assessed {self.component}->{self.name}', advance=1)
+
+
     def compute(self, **kwargs):
 
 
@@ -429,3 +483,6 @@ class PopulationVariable(Variable):
 
     def alter(self, **kwargs):
         return f'vrt://{self.local_path}?{urlencode(kwargs)}'
+
+
+

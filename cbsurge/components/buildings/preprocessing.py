@@ -1,5 +1,6 @@
 import concurrent
 import logging
+import os.path
 import random
 import threading
 from collections import deque
@@ -10,7 +11,7 @@ import pyarrow as pa
 import rasterio
 from osgeo import gdal, ogr, osr
 from osgeo.ogr import wkbPolygon
-from pyogrio import read_dataframe
+from pyogrio import read_dataframe, open_arrow
 from rasterio.windows import Window
 from rich.progress import Progress
 from cbsurge.util.worker import worker as genworker
@@ -88,7 +89,7 @@ def geoarrow_schema_adapter(schema: pa.Schema) -> pa.Schema:
     geoarrow_schema = schema.set(geometry_field_index, geoarrow_geometry_field)
 
     return geoarrow_schema
-
+from pyogrio.geopandas import read_dataframe
 
 def mask_buildings_in_block(buildings_dataset=None, buildings_layer_name=None,
                             mask_ds=None, block=None, name=None, results=None, progress=None, band=1):
@@ -103,7 +104,6 @@ def mask_buildings_in_block(buildings_dataset=None, buildings_layer_name=None,
         ds_mask = mask_ds.read(band, window=window)
 
         bbox = rasterio.windows.bounds(window=window, transform=mask_ds.transform)
-
         buildings_gdf = read_dataframe(buildings_dataset, layer=buildings_layer_name,  bbox=bbox, read_geometry=True)
         if len(buildings_gdf) == 0:
             logger.debug(f'No buildings exist in {name}-{bbox}')
@@ -127,6 +127,7 @@ def mask_buildings_in_block(buildings_dataset=None, buildings_layer_name=None,
         if masked_buildings_gdf.size > 0:
             arrow_object = masked_buildings_gdf.to_arrow(index=False)
             table = pa.table(arrow_object)
+            #table = table.rename_columns(names={'geometry': 'wkb_geometry'})
             results.append((name, table))
         return name
     except Exception as e:
@@ -134,6 +135,8 @@ def mask_buildings_in_block(buildings_dataset=None, buildings_layer_name=None,
     finally:
         if progress:
             progress.remove_task(task)
+
+
 
 def filter_buildings_in_block(buildings_ds_path=None,  mask_ds=None,
                             block=None, block_id=None, band=1):
@@ -328,11 +331,23 @@ def filter_buildings(buildings_path=None, mask_path=None, mask_pixel_value=None,
             logger.error(msg)
 
 
-
 def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_path=None,
-                    masked_buildings_dataset=None, masked_buildings_layer_name=None, overwrite_dst_layer=True,
+                    masked_buildings_dataset=None, masked_buildings_layer_name=None,
                     horizontal_chunks=None, vertical_chunks=None, workers=4, progress=None
                    ):
+    """
+    Filter buildings based on a raster mask
+    :param buildings_dataset:
+    :param buildings_layer_name:
+    :param mask_ds_path:
+    :param masked_buildings_dataset:
+    :param masked_buildings_layer_name:
+    :param horizontal_chunks:
+    :param vertical_chunks:
+    :param workers:
+    :param progress:
+    :return:
+    """
     total_task = None
     if progress:
         cols = progress.columns
@@ -351,43 +366,22 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
             jobs = deque()
             results = deque()
             workers = nblocks if workers > nblocks else workers
-            with gdal.OpenEx(masked_buildings_dataset, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
-                with gdal.OpenEx(buildings_dataset, gdal.OF_VECTOR | gdal.OF_READONLY) as bldgs_ds:
+            folder_path, _ = os.path.split(masked_buildings_dataset)
+            out_path = os.path.join(folder_path, f'{masked_buildings_layer_name}.fgb')
+            with ogr.GetDriverByName('FlatGeobuf').CreateDataSource(out_path) as dst_ds:
+                with gdal.OpenEx(buildings_dataset, gdal.OF_VECTOR) as bldgs_ds:
                     bldgs_layer = bldgs_ds.GetLayerByName(buildings_layer_name)
                     bldgs_layer_defn = bldgs_layer.GetLayerDefn()
-                    overwrite_txt = 'YES' if overwrite_dst_layer else 'NO'
+
                     destination_layer = dst_ds.CreateLayer(
                         masked_buildings_layer_name,
                         srs=bldgs_layer.GetSpatialRef(),
                         geom_type=bldgs_layer_defn.GetGeomType(),
-                        options=[f'OVERWRITE={overwrite_txt}', 'GEOMETRY_NAME=geometry']
                     )
                     # Copy fields
                     for i in range(bldgs_layer_defn.GetFieldCount()):
                         field_defn = bldgs_layer_defn.GetFieldDefn(i)
                         destination_layer.CreateField(field_defn)
-                # destination_layer = dst_ds.GetLayerByName(masked_buildings_layer_name)
-                # if destination_layer is not None:
-                #     if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
-                #         for i in range(dst_ds.GetLayerCount()):
-                #             l = dst_ds.GetLayer(i)
-                #             if l.GetName() == masked_buildings_layer_name:
-                #                 logger.info(f'Deleting layer {masked_buildings_layer_name} from {masked_buildings_dataset}')
-                #                 dst_ds.DeleteLayer(i)
-                #         destination_layer = dst_ds.CreateLayer(
-                #             masked_buildings_layer_name,
-                #             srs=mask_srs,
-                #             geom_type=wkbPolygon,
-                #             options=['GEOMETRY_NAME=geometry']
-                #         )
-                # else:
-                #     destination_layer = dst_ds.CreateLayer(
-                #         masked_buildings_layer_name,
-                #         srs=mask_srs,
-                #         geom_type=wkbPolygon,
-                #         options=['GEOMETRY_NAME=geometry']
-                #     )
-
                 with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
 
                     if progress:
@@ -407,13 +401,12 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                         )
 
                         jobs.append(job)
-
-
-                    futures = [executor.submit(genworker, job=mask_buildings_in_block, jobs=jobs, stop=stop_event, task=total_task) for i in range(workers)]
+                    futures = [executor.submit(genworker, job=mask_buildings_in_block, jobs=jobs, stop=stop_event, task=total_task, id_prop_name='name') for i in range(workers)]
                     while True:
                         try:
                             try:
                                 block_id, table = results.pop()
+                                table = table.rename_columns({'geometry':'wkb_geometry'})
                                 try:
                                     destination_layer.WritePyArrow(table)
                                     destination_layer.SyncToDisk()
@@ -429,14 +422,16 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)
                                 continue
-
-
                         except KeyboardInterrupt:
                             logger.info(f'Cancelling. Please wait/allow for a graceful shutdown')
                             stop_event.set()
                             raise
-
-
+                        gdal.VectorTranslateOptions()
+            #with gdal.config_option(key="OGR2OGR_USE_ARROW_API", value="NO"):
+                # ogr Arrow is used in translate > 3.8 and it has some issue with OGC_FID col
+            with gdal.VectorTranslate(destNameOrDestDS=masked_buildings_dataset,srcDS=out_path, accessMode='append') as ds:
+                pass
+            os.remove(out_path)
     except Exception as e:
         logger.error(f'Error masking {buildings_dataset} with error {e}')
         raise

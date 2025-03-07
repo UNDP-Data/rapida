@@ -33,7 +33,8 @@ import typing
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
-OGR_TYPES_MAPPING = {
+
+OGR_GEOM_TYPES_MAPPING = {
     'LineString': ogr.wkbLineString,
     'MultiLineString': ogr.wkbMultiLineString,
     'Point': ogr.wkbPoint,
@@ -43,21 +44,33 @@ OGR_TYPES_MAPPING = {
     'MultiPoint': ogr.wkbMultiPoint,
 }
 
+PYTHON2OGR = {
+    str: ogr.OFTString,
+    int: ogr.OFTInteger64,  # Python ints are typically 64-bit
+    float: ogr.OFTReal,
+    bool: ogr.OFTInteger,  # OGR has no boolean type, so 0/1 integer
+    bytes: ogr.OFTBinary,
+}
+
+
 def download_vector(
         src_dataset_url=None,src_layer_name=None,
-        dst_dataset_path=None,dst_layer_name=None, dst_srs=None, overwrite_dst_layer=False,
-        mask_polygons:typing.Dict[str,shapely.lib.Geometry]=None,
+        dst_dataset_path=None,dst_layer_name=None, dst_srs=None, dst_layer_mode=None,
+        mask_polygons:typing.Dict[str,shapely.lib.Geometry]=None, add_polyid=False,
         batch_size=5000,NWORKERS=4,progress=None,
 
 ):
     """
-    Download a remote vector dataset locally in a parallel manner using a third layer polygons
-    as mask.
+    Download a remote vector dataset locally in a parallel manner using polygons as  a spatial mask. Uses PyArrow streaming.
+
     :param src_dataset_url: str, URL to the dataset to download. The dataset needs to be in a format that can be read by OGR and also in a cloud optimized format such as FlatGeobuf or PMTiles
-    :param: src_layer, str or int, default=0, the layer to be  read
+    :param: src_layer_name, str or int, default=0, the layer to be  read
     :param dst_dataset_path: str, local OGR dataset
     :param dst_layer_name: str, the name of src_layer in the dst_dataset that will be read
-    :param mask_polygons, dict[
+    :param dst_srs instance of osr.SpatialReference
+    :param dst_layer_mode, str, default='w', if w layer is created and if it exists deleted, else features are appended to the layer
+    :param mask_polygons,  a dict used to limit the download spatially.
+    :param add_polyid: bool, if True the poygon id supplied as key in the mask_polygons arg is set for every downloaded feature
     :param batch_size: int, max number of features to download in one batch
     :param NWORKERS: int, default=4, number of
     :param progress:
@@ -66,12 +79,23 @@ def download_vector(
     assert src_dataset_url not in ('', None), f'src_dataset_url={src_dataset_url} is invalid'
     assert src_layer_name not in ('', None), f'src_layer_name={src_layer_name} is invalid'
 
-    src_dataset_info = read_info(src_dataset_url)
-    assert src_dataset_info, f'Could not read info from {src_dataset_url}. Please check the URL or the dataset format'
-    src_crs = src_dataset_info['crs']
-    src_srs = osr.SpatialReference()
-    src_srs.SetFromUserInput(src_crs)
-    src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+    def _create_layer_(_src_layer_=None, _dst_ds_=None, _dst_layer_name_=None, _dst_srs_=None):
+        _src_layer_defn_ = _src_layer_.GetLayerDefn()
+        _destination_layer_ = _dst_ds_.CreateLayer(
+            _dst_layer_name_,
+            srs=_dst_srs_,
+            geom_type=_src_layer_defn_.GetGeomType(),
+            options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry', 'FID=FID']
+        )
+        # Copy fields
+        for i in range(_src_layer_defn_.GetFieldCount()):
+            field_defn = _src_layer_defn_.GetFieldDefn(i)
+            _destination_layer_.CreateField(field_defn)
+
+        return _destination_layer_
+
+
     written_features = set()
     total_task = None
     if progress:
@@ -80,38 +104,44 @@ def download_vector(
     try:
 
         with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as dst_ds:
+            with gdal.OpenEx(src_dataset_url, gdal.OF_VECTOR | gdal.OF_READONLY) as src_ds:
+                src_layer = src_ds.GetLayerByName(src_layer_name)
+                src_srs = src_layer.GetSpatialRef()
+                src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                 will_reproject =  not proj_are_equal(src_srs=src_srs, dst_srs=dst_srs)
                 if will_reproject :
+                    src_crs = f"{src_srs.GetAuthorityName(None)}:{src_srs.GetAuthorityCode(None)}"
                     dst_crs = f"{dst_srs.GetAuthorityName(None)}:{dst_srs.GetAuthorityCode(None)}"
                     transformer = Transformer.from_crs(src_crs, dst_crs, always_xy=True)
-                overwrite = 'YES' if overwrite_dst_layer else 'NO'
-                destination_layer = dst_ds.CreateLayer(
-                            dst_layer_name,
-                            srs=dst_srs,
-                            geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                            options=[f'OVERWRITE={overwrite}', 'GEOMETRY_NAME=geometry']
-                )
-                #destination_layer = dst_ds.GetLayerByName(dst_layer_name)
-                # if destination_layer is not None:
-                #     if overwrite_dst_layer is True and dst_ds.TestCapability(ogr.ODsCDeleteLayer) is True:
-                #         for i in range(dst_ds.GetLayerCount()):
-                #             l = dst_ds.GetLayer(i)
-                #             if l.GetName() == dst_layer_name:
-                #                 logger.info(f'Deleting layer {dst_layer_name} from {dst_dataset_path}')
-                #                 dst_ds.DeleteLayer(i)
-                #         destination_layer = dst_ds.CreateLayer(
-                #             dst_layer_name,
-                #             srs=dst_srs,
-                #             geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                #             options=['GEOMETRY_NAME=geometry']
-                #         )
-                # else:
-                #     destination_layer = dst_ds.CreateLayer(
-                #         dst_layer_name,
-                #         srs=dst_srs,
-                #         geom_type=OGR_TYPES_MAPPING.get(src_dataset_info['geometry_type'], ogr.wkbUnknown),
-                #         options=['GEOMETRY_NAME=geometry']
-                #     )
+                if dst_layer_mode == 'w':
+                    destination_layer = _create_layer_(
+                        _src_layer_=src_layer,
+                        _dst_ds_=dst_ds,
+                        _dst_layer_name_=dst_layer_name,
+                        _dst_srs_=dst_srs
+                    )
+                elif dst_layer_mode == 'a':
+                    destination_layer = dst_ds.GetLayerByName(dst_layer_name)
+                    if destination_layer is None:
+                        destination_layer = _create_layer_(
+                            _src_layer_=src_layer,
+                            _dst_ds_=dst_ds,
+                            _dst_layer_name_=dst_layer_name,
+                            _dst_srs_=dst_srs
+                        )
+                field_names = [destination_layer.GetLayerDefn().GetFieldDefn(i).GetName() for i in
+                               range(destination_layer.GetLayerDefn().GetFieldCount())]
+                if add_polyid and not 'polyid' in field_names:
+                    first_poly_id = list(mask_polygons.keys())[0]
+                    first_poly_type = type(first_poly_id)
+                    assert all([isinstance(e, first_poly_type) for e in mask_polygons]), f'mask polygon keys needs to be {first_poly_type}'
+                    poly_field = ogr.FieldDefn('polyid', PYTHON2OGR[first_poly_type])
+                    destination_layer.CreateField(poly_field)
+                if not 'SRC_FID' in field_names:
+                    srcid_field = ogr.FieldDefn('SRC_FID', ogr.OFTInteger64)
+                    destination_layer.CreateField(srcid_field)
+
 
                 stop = threading.Event()
                 jobs = deque()
@@ -127,19 +157,17 @@ def download_vector(
                             mask=polygon,
                             batch_size=batch_size,
                             signal_event=stop,
-                            name=poly_id,
+                            polygon_id=poly_id,
                             progress=progress,
-                            results=results
+                            results=results,
+                            add_polyid=add_polyid
                         )
                         jobs.append(job)
                     njobs = len(jobs)
                     total_task = progress.add_task(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
                     nworkers = njobs if njobs < NWORKERS else NWORKERS
-                    futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop) for i in range(nworkers)]
-
-                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
-
+                    futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop, id_prop_name='polygon_id') for i in range(nworkers)]
                     while True:
                         try:
                             try:
@@ -169,24 +197,11 @@ def download_vector(
 
                                 batch = batch.drop_columns(['wkb_geometry'])
                                 batch = batch.append_column('wkb_geometry', pa.array(new_geometries))
-
-                                if nfields == 0:
-                                    logger.debug('Creating fields')
-                                    for name in batch.schema.names:
-                                        if 'wkb' in name or 'geometry' in name: continue
-                                        field = batch.schema.field(name)
-                                        field_type = ARROWTYPE2OGRTYPE[field.type]
-                                        if destination_layer.GetLayerDefn().GetFieldIndex(name) == -1:
-                                            destination_layer.CreateField(ogr.FieldDefn(name, field_type))
-
-                                    nfields = destination_layer.GetLayerDefn().GetFieldCount()
-                                    destination_layer.SyncToDisk()
-
                                 if batch.num_rows == 0:
                                     logger.debug('Skipping empty batch')
                                     continue
 
-                                batch = batch.rename_columns({"wkb_geometry": "geometry"})
+                                batch = batch.rename_columns({"wkb_geometry": "geometry", 'OGC_FID':'SRC_FID'})
 
                                 try:
                                     destination_layer.WritePyArrow(batch)
@@ -198,7 +213,6 @@ def download_vector(
                             except IndexError as ie:
                                 done = [f.done() for f in futures]
                                 if len(mask_polygons) == 0 or all(done):
-                                    stop.set()
                                     break
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)
@@ -206,7 +220,7 @@ def download_vector(
 
 
                         except KeyboardInterrupt:
-                            logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown')
+                            logger.info(f'Cancelling download. Please wait/allow for a graceful shutdown and cleanup')
                             stop.set()
                             raise
 
@@ -214,10 +228,17 @@ def download_vector(
         logger.error(f'Error downloading {src_dataset_url} with error {e}')
         raise
     finally:
-        if progress and total_task:
+        if progress is not None and total_task:
             progress.remove_task(total_task)
             progress.columns = cols
+        if stop.is_set(): # the download was cancelled, the layer is removed. Should this be?
+            with gdal.OpenEx(dst_dataset_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as target_ds:
+                for i in  range(target_ds.GetLayerCount()):
+                    l = target_ds.GetLayer(i)
+                    if l.GetName() == dst_layer_name:
+                        logger.info(f'Layer {dst_layer_name} will be deleted as a result of cancelling')
 
+                        target_ds.DeleteLayer(i)
 
 
 
@@ -252,7 +273,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
             destination_layer = project_dataset.CreateLayer(
                 layer_name,
                 srs=admin_srs,
-                geom_type=OGR_TYPES_MAPPING.get(dataset_info['geometry_type'], ogr.wkbUnknown),
+                geom_type=OGR_GEOM_TYPES_MAPPING.get(dataset_info['geometry_type'], ogr.wkbUnknown),
                 options=['OVERWRITE=YES', 'GEOMETRY_NAME=geometry']
             )
 
@@ -339,7 +360,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
                                 try:
                                     destination_layer.WritePyArrow(batch)
                                 except Exception as e:
-                                    print(batch.column_names)
+
                                     logger.info(
                                         f'writing batch with {batch.num_rows} rows from {au_name} failed with error {e} and will be ignored')
 
@@ -348,6 +369,7 @@ def download_geodata_by_admin(dataset_url, geopackage_path=None, batch_size=5000
                             progress.update(total_task,
                                             description=f'[red]Downloaded geo file from {ndownloaded} out of {njobs} admin units',
                                             advance=1)
+
                         except IndexError as ie:
                             if not jobs and (progress.finished or ndownloaded == len(all_features)):
                                 stop.set()

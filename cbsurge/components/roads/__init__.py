@@ -76,8 +76,6 @@ class RoadsVariable(Variable):
         project = Project(path=os.getcwd())
         self.local_path = project.geopackage_file_path
 
-        source = self.source
-
         force_compute = kwargs.get('force_compute', False)
         progress = kwargs.get('progress', False)
 
@@ -87,28 +85,30 @@ class RoadsVariable(Variable):
         if force_compute == True or not self.component in layer_names:
             with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
                 lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
+
+                try:
+                    src_dataset_info = pyogrio.read_info(self.source)
+                except Exception as e:
+                    if '404' in str(e):
+                        logger.error(f'{self.source} is not reachable')
+                    raise
+                src_crs = src_dataset_info['crs']
+                src_srs = osr.SpatialReference()
+                src_srs.SetFromUserInput(src_crs)
+                src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+                target_srs = lyr.GetSpatialRef()
+                will_reproject = not proj_are_equal(src_srs=src_srs, dst_srs=target_srs)
+                if will_reproject:
+                    target2src_tr = osr.CoordinateTransformation(target_srs, src_srs)
+
                 mask_polygons = dict()
                 for feat in lyr:
                     polygon = feat.GetGeometryRef()
-
-                    try:
-                        src_dataset_info = pyogrio.read_info(source)
-                    except Exception as e:
-                        if '404' in str(e):
-                            logger.error(f'{source} is not reachable')
-                        raise
-                    src_crs = src_dataset_info['crs']
-                    src_srs = osr.SpatialReference()
-                    src_srs.SetFromUserInput(src_crs)
-                    src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-
-                    target_srs = lyr.GetSpatialRef()
-                    will_reproject = not proj_are_equal(src_srs=src_srs, dst_srs=target_srs)
                     if will_reproject:
-                        target2src_tr = osr.CoordinateTransformation(target_srs, src_srs)
                         polygon.Transform(target2src_tr)
                     shapely_polygon = shapely.wkb.loads(bytes(polygon.ExportToIsoWkb()))
-                    poly_id = f'line::{feat.GetFID()}'
+                    poly_id = feat['h3id'] or feat.GetFID()
                     mask_polygons[poly_id] = shapely_polygon
 
                 download_vector(
@@ -117,9 +117,10 @@ class RoadsVariable(Variable):
                     dst_dataset_path=self.local_path,
                     dst_layer_name=self.component,
                     dst_srs=target_srs,
+                    dst_layer_mode="w",
                     mask_polygons=mask_polygons,
                     progress=progress,
-                    overwrite_dst_layer=True
+                    add_polyid=True
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
@@ -130,7 +131,6 @@ class RoadsVariable(Variable):
                 df_mask = gpd.read_file(self.local_path, layer=project.vector_mask)
                 df_line_mask = gpd.clip(df_line, mask=df_mask, keep_geom_type=True)
                 df_line_mask.to_file(self.local_path, driver='GPKG', layer=self.affected_layer, mode='w')
-
 
         return self.local_path
 

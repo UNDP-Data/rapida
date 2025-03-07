@@ -1,3 +1,6 @@
+import pandas as pd
+from shapely.creation import polygons
+
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.util.download_geodata import download_vector
@@ -10,7 +13,13 @@ from osgeo import gdal, osr
 import shapely
 from cbsurge.components.buildings.preprocessing import mask_buildings
 from cbsurge.util.proj_are_equal import proj_are_equal
+import geopandas as gpd
+
 logger = logging.getLogger(__name__)
+
+
+
+
 # import click
 # from cbsurge.components.builtenv.buildings.fgb import download_bbox, download_admin
 # from cbsurge.components.builtenv.buildings.pmt import download as download_pmt, GMOSM_BUILDINGS
@@ -139,16 +148,12 @@ class BuildingsComponent(Component):
 
 class BuildingsVariable(Variable):
 
-    def download(self, force_compute=False, progress=None, **kwargs):
+    def download(self, progress=None, force_compute=None, **kwargs):
+
         logger.debug(f'Downloading {self.name}')
         project = Project(os.getcwd())
-        if force_compute:
-            overwrite = [i == 0 for i in range(len(project.countries))]
-        else:
-            overwrite = [False for i in range(len(project.countries))]
-
         dst_layers = pyogrio.list_layers(project.geopackage_file_path)
-        if self.component in dst_layers[:,0] and not force_compute :
+        if self.component in dst_layers[:,0]  and not force_compute:
             if 'mask' in dst_layers:
                 affected_layer_name = f'{self.component}.affected'
                 assert affected_layer_name in dst_layers, f'layer {affected_layer_name}  does not exist'
@@ -157,6 +162,7 @@ class BuildingsVariable(Variable):
         with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
             lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
             for ci, country in enumerate(project.countries):
+                mode = 'w' if ci == 0 else 'a'
                 logger.info(f'Downloading {self.name} in {country}')
                 source = self.interpolate_template(template=self.source, country=country, **kwargs)
                 source, layer_name = source.split('::')
@@ -182,29 +188,34 @@ class BuildingsVariable(Variable):
                     if will_reproject:
                         polygon.Transform(target2src_tr)
                     shapely_polygon = shapely.wkb.loads(bytes(polygon.ExportToIsoWkb()))
-                    poly_id = feat['name'] or f'polygon::{feat.GetFID()}'
+                    poly_id = feat['h3id'] or feat.GetFID()
                     mask_polygons[poly_id] = shapely_polygon
 
                 download_vector(
                     src_dataset_url=source,
                     src_layer_name=layer_name,
                     dst_dataset_path=project.geopackage_file_path,
-                    dst_layer_name=self.component, dst_srs=target_srs,
+                    dst_layer_name=self.component,
+                    dst_srs=target_srs,
+                    dst_layer_mode=mode,
                     mask_polygons=mask_polygons,
                     progress=progress,
-                    overwrite_dst_layer=overwrite[ci]
+                    add_polyid=True
+
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
         self.local_path = f'{project.geopackage_file_path}::{self.component}'
-        self._compute_affected_(progress=progress, force_compute=overwrite[ci])
+        self._compute_affected_(progress=progress )
         return self.local_path
 
-    def _compute_affected_(self, force_compute=False, progress=None):
+    def _compute_affected_(self,  progress=None):
+        logger.info('Calculating affected buildings')
         project = Project(os.getcwd())
         affected_layer_name = f'{self.component}.affected'
         mask_buildings(
-            buildings_dataset=project.geopackage_file_path, buildings_layer_name=self.component,
+            buildings_dataset=project.geopackage_file_path,
+            buildings_layer_name=self.component,
             mask_ds_path=project.raster_mask,
             masked_buildings_dataset=project.geopackage_file_path,
             masked_buildings_layer_name=affected_layer_name,
@@ -212,7 +223,7 @@ class BuildingsVariable(Variable):
             vertical_chunks=10,
             workers=4,
             progress=progress,
-            overwrite_dst_layer=force_compute
+
 
         )
 
@@ -222,6 +233,51 @@ class BuildingsVariable(Variable):
         return self.download(force_compute=force_compute, **kwargs)
 
     def evaluate(self, **kwargs):
-        pass
+        destination_layer = f'stats.{self.component}'
+        affected_var_name = f'{self.name}_affected'
+        affected_var_percentage_name = f'{affected_var_name}_percentage'
+        project = Project(os.getcwd())
+        logger.info(f'Evaluating variable {self.name}')
+        dataset_path, layer_name = self.local_path.split('::')
+        buildings_gdf = gpd.read_file(filename=dataset_path,layer=layer_name)
+        layers = pyogrio.list_layers(dataset_path)
+        layer_names = layers[:, 0]
+
+        if destination_layer in layer_names:
+            polygons_layer = destination_layer
+        else:
+            polygons_layer = project.polygons_layer_name
+
+        polygons_gdf = gpd.read_file(project.geopackage_file_path,layer=polygons_layer)
+        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+
+        if self.name == 'nbuildings':
+            var_gdf  = buildings_gdf.groupby('polyid').size().reset_index(name=self.name)
+        else:
+            buildings_gdf[self.name] = buildings_gdf.geometry.area
+            var_gdf = buildings_gdf.groupby('polyid')[self.name].sum().reset_index()
+
+        affected_layer_name = f'{self.component}.affected'
+        if affected_layer_name in layer_names:
+            affected_buildings_gdf = gpd.read_file(filename=dataset_path, layer=affected_layer_name)
+            if self.name == 'nbuildings':
+                affected_var_gdf  = affected_buildings_gdf.groupby('polyid').size().reset_index(name=affected_var_name)
+            else:
+                affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
+                affected_var_gdf = affected_buildings_gdf.groupby('polyid')[affected_var_name].sum().reset_index()
+            var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
+            var_gdf.eval(f"{affected_var_percentage_name}={f'{affected_var_name}'}/{self.name}*100", inplace=True)
+
+        for col in [self.name, affected_var_name, affected_var_percentage_name]:
+            if col in polygons_gdf.columns:
+                polygons_gdf.drop(columns=[col], inplace=True)
+
+
+        out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='inner')
+        out_gdf = out_gdf.rename(columns={'polyid':'h3id'})
+        out_gdf.to_file(dataset_path,layer=destination_layer,driver='GPKG', mode='w')
+
+
+
     def resolve(self, **kwargs):
         pass

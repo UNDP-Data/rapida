@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 def worker(job: typing.Callable = None, jobs: collections.deque[dict] = None, stop: multiprocessing.Event = None,
-           task: int = None):
+           task: int = None, id_prop_name=None):
     """
     Generic worker that manages jobs
 
@@ -19,6 +19,7 @@ def worker(job: typing.Callable = None, jobs: collections.deque[dict] = None, st
     :param jobs_kwargs: queue with job kwargs as dict where jobs are  extracted from
     :param stop: instance of multiprocessing.Event, used to stop the worker
     :param task: int, the id of the parent rich progress task
+    :param id_prop_name, str, the name of the arg in job kwargs used to identify a single job
     :return: None
 
     The worker runs in an infinite loop and executes download jobs for partitions placed in the queue.
@@ -42,7 +43,7 @@ def worker(job: typing.Callable = None, jobs: collections.deque[dict] = None, st
 
     while len(jobs) > 0 :
         job_kwargs = jobs.pop()
-        job_id = job_kwargs.get('name' or '')
+        job_id = job_kwargs.get(id_prop_name or '')
         if stop.is_set():
             logger.debug(f'Worker was signalled to stop in {threading.current_thread().name}')
             break
@@ -52,7 +53,7 @@ def worker(job: typing.Callable = None, jobs: collections.deque[dict] = None, st
         try:
             logger.debug(f'Starting job with {job_id}')
             rname = job(**job_kwargs)
-            logger.debug(f'Finished job  {rname}')
+            logger.debug(f'Finished job  {job_id}')
             # description = f'[red]Handled features covering {rname}'
 
         except Exception as e:

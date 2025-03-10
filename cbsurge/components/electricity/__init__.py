@@ -5,16 +5,20 @@ from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
+import pyogrio
+import shapely
+from osgeo import gdal, osr
 
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.util.http_get_json import http_get_json
-from cbsurge.util.download_geodata import download_geodata_by_admin
+from cbsurge.util.download_geodata import download_geodata_by_admin, download_vector
 import httpx
 import logging
 
 from cbsurge.core.component import Component
+from cbsurge.util.proj_are_equal import proj_are_equal
 from cbsurge.util.resolve_url import resolve_geohub_url
 
 logger = logging.getLogger(__name__)
@@ -97,7 +101,6 @@ class ElectricityVariable(Variable):
                 :param kwargs:
                 :return:
                 """
-
         force_compute = kwargs.get('force_compute', False)
         progress = kwargs.get('progress', None)
 
@@ -108,10 +111,12 @@ class ElectricityVariable(Variable):
         if not self.dep_vars:  # simple variable,
             if not force_compute:
                 # logger.debug(f'Downloading {self.name} source')
+                print("HERE1")
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
                     progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
             else:
+                print("HERE2")
                 # logger.debug(f'Computing {self.name} using gdal_calc from sources')
                 self.compute(**kwargs)
                 if progress is not None and variable_task is not None:
@@ -120,16 +125,19 @@ class ElectricityVariable(Variable):
         else:
             if self.operator:
                 if not force_compute:
+                    print("HERE3")
                     # logger.debug(f'Downloading {self.name} from  source')
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:
                         progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
                 else:
+                    print("HERE4")
                     # logger.info(f'Computing {self.name}={self.sources} using GDAL')
                     self.compute(**kwargs)
                     if progress is not None and variable_task is not None:
                         progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
             else:
+                print("HERE5")
                 # logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
                 sources = self.resolve(**kwargs)
 
@@ -152,10 +160,50 @@ class ElectricityVariable(Variable):
     def download(self, **kwargs):
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
-        download_geodata_by_admin(
-            dataset_url=self.source,
-            geopackage_path=geopackage_path,
-        )
+        force_compute = kwargs.get('force_compute', False)
+        progress = kwargs.get('progress', False)
+        layers = pyogrio.list_layers(geopackage_path)
+        layer_names = layers[:, 0]
+        if force_compute or self.component not in layer_names:
+            with gdal.OpenEx(geopackage_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
+                lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
+                try:
+                    src_dataset_info = pyogrio.read_info(self.source)
+                except Exception as e:
+                    if '404' in str(e):
+                        logger.error(f'{self.source} is not reachable')
+                    raise
+                src_crs = src_dataset_info['crs']
+                src_srs = osr.SpatialReference()
+                src_srs.SetFromUserInput(src_crs)
+                src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+                target_srs = lyr.GetSpatialRef()
+                will_reproject = not proj_are_equal(src_srs=src_srs, dst_srs=target_srs)
+                if will_reproject:
+                    target2src_tr = osr.CoordinateTransformation(target_srs, src_srs)
+                mask_polygons = dict()
+                for feat in lyr:
+                    polygon = feat.GetGeometryRef()
+                    if will_reproject:
+                        polygon.Transform(target2src_tr)
+                    shapely_polygon = shapely.wkb.loads(bytes(polygon.ExportToIsoWkb()))
+                    poly_id = feat['h3id'] or feat.GetFID()
+                    mask_polygons[poly_id] = shapely_polygon
+
+                download_vector(
+                    src_dataset_url=self.source,
+                    src_layer_name=0,
+                    dst_dataset_path=geopackage_path,
+                    dst_layer_name=self.component,
+                    dst_srs=target_srs,
+                    dst_layer_mode="w",
+                    mask_polygons=mask_polygons,
+                    progress=progress,
+                    add_polyid=True
+                )
+                lyr.SetAttributeFilter(None)
+                lyr.ResetReading()
 
     def grid_density(self, grid_df, polygons_df):
         project = Project(path=os.getcwd())
@@ -171,6 +219,7 @@ class ElectricityVariable(Variable):
 
     def evaluate(self, **kwargs):
         logger.info(f'Evaluating variable "{self.name}"')
+        print(f'Evaluating variable "{self.name}"')
         destination_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
 
@@ -195,7 +244,6 @@ class ElectricityVariable(Variable):
 
 
 
-
     def _compute_affected(self):
         pass
 
@@ -204,14 +252,3 @@ class ElectricityVariable(Variable):
 
     def resolve(self, **kwargs):
         pass
-
-
-
-if __name__ == "__main__":
-    va = ElectricityVariable(
-        name='electricity_grid_length',
-        component='builtenv.electricity',
-        source='geohub:https://geohub.data.undp.org/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
-        title='Electricity Grid Length',
-    )
-    va.compute()

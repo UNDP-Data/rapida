@@ -110,13 +110,10 @@ class ElectricityVariable(Variable):
 
         if not self.dep_vars:  # simple variable,
             if not force_compute:
-                # logger.debug(f'Downloading {self.name} source')
-                print("HERE1")
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
                     progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
             else:
-                print("HERE2")
                 # logger.debug(f'Computing {self.name} using gdal_calc from sources')
                 self.compute(**kwargs)
                 if progress is not None and variable_task is not None:
@@ -125,20 +122,14 @@ class ElectricityVariable(Variable):
         else:
             if self.operator:
                 if not force_compute:
-                    print("HERE3")
-                    # logger.debug(f'Downloading {self.name} from  source')
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:
                         progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
                 else:
-                    print("HERE4")
-                    # logger.info(f'Computing {self.name}={self.sources} using GDAL')
                     self.compute(**kwargs)
                     if progress is not None and variable_task is not None:
                         progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
             else:
-                print("HERE5")
-                # logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
                 sources = self.resolve(**kwargs)
 
         self.evaluate(**kwargs)
@@ -219,7 +210,6 @@ class ElectricityVariable(Variable):
 
     def evaluate(self, **kwargs):
         logger.info(f'Evaluating variable "{self.name}"')
-        print(f'Evaluating variable "{self.name}"')
         destination_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
 

@@ -1,7 +1,8 @@
+import logging
 import os
 from abc import ABC
-from typing import List
 from pathlib import Path
+from typing import List
 
 import geopandas as gpd
 import numpy as np
@@ -9,15 +10,11 @@ import pyogrio
 import shapely
 from osgeo import gdal, osr
 
+from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
-from cbsurge.util.http_get_json import http_get_json
-from cbsurge.util.download_geodata import download_geodata_by_admin, download_vector
-import httpx
-import logging
-
-from cbsurge.core.component import Component
+from cbsurge.util.download_geodata import download_vector
 from cbsurge.util.proj_are_equal import proj_are_equal
 from cbsurge.util.resolve_url import resolve_geohub_url
 
@@ -29,8 +26,8 @@ def compute_grid_length(grid_df, polygons_df):
     # overlay with the polygons to get only the grid within the polygons
     electricity_grid_df = gpd.overlay(grid_df, polygons_df, how='intersection')
     electricity_grid_df['electricity_grid_length'] = electricity_grid_df.geometry.length
-    length_per_unit = electricity_grid_df.groupby('name', as_index=False)['electricity_grid_length'].sum()
-    output_df = polygons_df.merge(length_per_unit, on='name', how='left')
+    length_per_unit = electricity_grid_df.groupby('h3id', as_index=False)['electricity_grid_length'].sum()
+    output_df = polygons_df.merge(length_per_unit, on='h3id', how='left')
     output_df['electricity_grid_length'] = output_df['electricity_grid_length'].fillna(0)
 
     # affected_grid_length
@@ -41,9 +38,9 @@ def compute_grid_length(grid_df, polygons_df):
         electricity_grid_df_affected.to_file(project.geopackage_file_path, driver="GPKG", layer="affected_electricity")
         electricity_grid_df_affected['affected_electricity_grid_length'] = electricity_grid_df_affected.geometry.length
         # overlay the affected with the admin
-        affected_length_per_unit = electricity_grid_df_affected.groupby('name', as_index=False)[
+        affected_length_per_unit = electricity_grid_df_affected.groupby('h3id', as_index=False)[
             'affected_electricity_grid_length'].sum()
-        output_df = output_df.merge(affected_length_per_unit, on='name', how='left')
+        output_df = output_df.merge(affected_length_per_unit, on='h3id', how='left')
     return output_df
 
 

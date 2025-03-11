@@ -8,17 +8,19 @@ import os
 import shutil
 import sys
 import webbrowser
+
 import click
 import geopandas
+import h3
 from osgeo import gdal, ogr, osr
 from pyproj import CRS as pCRS
-from cbsurge.util import geo
+
 from cbsurge import constants
 from cbsurge.admin.osm import fetch_admin
 from cbsurge.az.blobstorage import check_blob_exists
 from cbsurge.session import Session
+from cbsurge.util import geo
 from cbsurge.util.dataset2pmtiles import dataset2pmtiles
-
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -37,6 +39,7 @@ class Project:
 
     def __init__(self, path: str,polygons: str = None,
                  mask: str = None,
+                 h3id_precision = 7,
                  comment: str = None, vector_mask_layer: str = 'mask', **kwargs ):
 
         if path is None:
@@ -99,7 +102,7 @@ class Project:
                     coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
                     geo_bounds = coord_trans.TransformBounds(*proj_bounds,21)
 
-                    admin0_polygons = fetch_admin(bbox=geo_bounds,admin_level=0)
+                    admin0_polygons = fetch_admin(bbox=geo_bounds,admin_level=0, h3id_precision=h3id_precision)
 
                     target_crs = pCRS.from_user_input(self.projection)
                     with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
@@ -108,13 +111,26 @@ class Project:
                     centroids["geometry"] = gdf.centroid
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
-
                     self.countries = tuple(sorted(set(joined['iso3'])))
-
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
                                  promote_to_multi=True)
                 else:
                     self.countries = tuple(set(gdf['iso3']))
+                if 'h3id' in cols:
+                    gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name)
+                    h3ids = gdf['h3id'].tolist()
+                    # check duplicated
+                    if len(h3ids) != len(set(h3ids)):
+                        # regenerate h3id
+                        gdf['h3id'] = gdf.apply(
+                            lambda g: h3.latlng_to_cell(lat=g.geometry.centroid.y, lng=g.geometry.centroid.x,
+                                                        res=h3id_precision),
+                            axis=1
+                        )
+                        # save it back
+                        gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                                 promote_to_multi=True)
+
                 self._cfg_['countries'] = self.countries
                 self.save()
 

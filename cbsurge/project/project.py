@@ -112,7 +112,7 @@ class Project:
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
                     self.countries = tuple(sorted(set(joined['iso3'])))
-                    joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                    joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True)
                 else:
                     self.countries = tuple(set(gdf['iso3']))
@@ -128,9 +128,16 @@ class Project:
                             axis=1
                         )
                         # save it back
-                        gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer='polygons',
+                        gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True)
-
+                else:
+                    gdf['h3id'] = gdf.apply(
+                        lambda g: h3.latlng_to_cell(lat=g.geometry.centroid.y, lng=g.geometry.centroid.x,
+                                                    res=h3id_precision),
+                        axis=1
+                    )
+                    gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
+                                 promote_to_multi=True)
                 self._cfg_['countries'] = self.countries
                 self.save()
 

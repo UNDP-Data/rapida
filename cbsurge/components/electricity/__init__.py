@@ -38,6 +38,7 @@ def compute_grid_length(grid_df, polygons_df):
         mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
         # overlay with the mask to get only the affected grid
         electricity_grid_df_affected = gpd.overlay(electricity_grid_df, mask_df, how='intersection')
+        electricity_grid_df_affected.to_file(project.geopackage_file_path, driver="GPKG", layer="affected_electricity")
         electricity_grid_df_affected['affected_electricity_grid_length'] = electricity_grid_df_affected.geometry.length
         # overlay the affected with the admin
         affected_length_per_unit = electricity_grid_df_affected.groupby('name', as_index=False)[
@@ -237,8 +238,9 @@ class ElectricityVariable(Variable):
     def _compute_affected(self):
         pass
 
-    def compute(self, **kwargs):
-        pass
+    def compute(self, force_compute=True, **kwargs):
+        assert force_compute, f'invalid force_compute={force_compute}'
+        return self.download(force_compute=force_compute, **kwargs)
 
     def resolve(self, **kwargs):
         pass

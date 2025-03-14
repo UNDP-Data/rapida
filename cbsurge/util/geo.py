@@ -1,6 +1,4 @@
 import pyogrio.core
-from duckdb.duckdb import description
-
 from cbsurge import constants
 from osgeo import gdal, ogr, osr
 from osgeo_utils.gdal_calc import Calc

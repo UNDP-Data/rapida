@@ -26,9 +26,14 @@ from shapely.ops import transform
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 from cbsurge.util.downloader import downloader
 from cbsurge.util.worker import worker
-from cbsurge.util.read_bbox import stream
+from cbsurge.util.read_bbox import stream, read_rasterio_window
+from cbsurge.util.generator_length import generator_length
 from rich.progress import TimeElapsedColumn
 import typing
+from cbsurge.util.gen_blocks_bbox import gen_blocks_bbox
+from rasterio.crs import CRS
+from affine import Affine
+from rasterio.warp import transform_bounds
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
@@ -663,3 +668,114 @@ def download_raster(
             progress.remove_task(merge_task)
 
     return final_output_path
+
+def download_rasta( src_dataset_path=None, src_band=1,
+                    dst_dataset_path=None, dst_band=1,
+                    polygons_dataset_path=None, polygons_layer_name=None,
+                    horizontal_chunk_size=256, vertical_chunk_size=256, workers=4, progress=None
+                   ):
+
+    with gdal.OpenEx(polygons_dataset_path, gdal.OF_VECTOR|gdal.OF_READONLY) as poly_ds:
+        lyr = poly_ds.GetLayerByName(polygons_layer_name)
+        minx, maxx, miny, maxy = lyr.GetExtent(force=True)
+        dst_srs = lyr.GetSpatialRef()
+        dst_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+        dst_crs = f"{dst_srs.GetAuthorityName(None)}:{dst_srs.GetAuthorityCode(None)}"
+        if not src_dataset_path.startswith('/vsicurl'):
+            src_dataset_path = f'/vsicurl/{src_dataset_path}'
+        #with gdal.OpenEx(src_dataset_path, gdal.OF_READONLY | gdal.OF_RASTER) as src_ds:
+        with rasterio.open(src_dataset_path, mode='r') as src_ds:
+            src_srs = osr.SpatialReference()
+            src_srs.ImportFromWkt(src_ds.crs.to_wkt())
+            #src_srs = src_ds.GetSpatialRef()
+            src_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+            should_reproject = not proj_are_equal(src_srs=src_srs, dst_srs=dst_srs)
+            if should_reproject:
+                bounds = transform_bounds(src_crs=CRS.from_wkt(dst_srs.ExportToWkt()),
+                                          dst_crs=src_ds.crs,
+                                          left=minx,bottom=miny,right=maxx, top=maxy, )
+
+            else:
+                bounds = minx, miny, maxx, maxy
+
+            win = rasterio.windows.from_bounds(*bounds,transform=src_ds.transform)
+            row_slice, col_slice = win.toslices()
+            src_ds.RasterXSize = src_ds.width
+            src_ds.RasterYSize = src_ds.height
+            blocks = gen_blocks_bbox(ds=src_ds,blockxsize=horizontal_chunk_size, blockysize=vertical_chunk_size,
+                                     xminc=col_slice.start,yminr=row_slice.start,
+                                     xmaxc=col_slice.stop, ymaxr=row_slice.stop)
+
+            nblocks, blocks = generator_length(blocks)
+            block_dict = {}
+            stop_event = threading.Event()
+            jobs = deque()
+            results = deque()
+            workers = nblocks if workers > nblocks else workers
+            profile = src_ds.meta.copy()
+            profile['width'] = abs(col_slice.start-col_slice.stop)
+            profile['height'] = abs(row_slice.start-row_slice.stop)
+            profile.update(constants.GTIFF_CREATION_OPTIONS)
+            profile['transform'] = rasterio.transform.from_bounds(*bounds,profile['width'], profile['height'])
+
+            with rasterio.open(dst_dataset_path, mode='w+', **profile) as dst_ds:
+
+                with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+
+                    if progress:
+                        total_task = progress.add_task(
+                            description=f'[red]Going to download data in {nblocks} blocks/chunks',
+                            total=nblocks)
+                    for block_id, block in enumerate(blocks):
+                        win_id = f'window_{block_id}'
+                        job = dict(
+                            src_ds_path=src_dataset_path,
+                            src_band=src_band,
+                            window=Window(*block),
+                            window_id=win_id,
+                            results=results,
+                            progress=progress
+
+                        )
+                        jobs.append(job)
+                        block_dict[win_id] = block
+
+                    futures = [
+                        executor.submit(worker, job=read_rasterio_window, jobs=jobs, stop=stop_event, task=total_task,
+                                        id_prop_name='window_id') for i in range(workers)]
+
+                    while True:
+                        try:
+                            try:
+                                win_id, data = results.pop()
+                                block = block_dict[win_id]
+                                col_start, row_start, col_size, row_size = block
+                                write_win = Window(
+                                    col_off=col_start-col_slice.start,
+                                    row_off = row_start-row_slice.start,
+                                    width=col_size,
+                                    height=row_size
+                                )
+
+                                dst_ds.write(data,dst_band, window=write_win)
+                                try:
+                                    pass # write here to dst raster
+                                except Exception as e:
+                                    logger.error(
+                                        f'Failed to write  block id {block_id} because {e}. Skipping')
+
+                            except IndexError as ie:
+                                done = [f.done() for f in futures]
+                                if nblocks == 0 or all(done):
+                                    stop_event.set()
+                                    break
+                                s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
+                                time.sleep(s)
+                                continue
+                        except KeyboardInterrupt:
+                            logger.info(f'Cancelling. Please wait/allow for a graceful shutdown')
+                            stop_event.set()
+                            raise
+
+
+

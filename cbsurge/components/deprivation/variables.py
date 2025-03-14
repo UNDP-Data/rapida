@@ -11,11 +11,11 @@ def generate_variables():
     """
 
     variables = OrderedDict()
-
-    for operator in ['mean', 'min', 'max']:
+    names = 'Average', 'Smallest', 'Largest'
+    for i, operator in enumerate(['mean', 'min', 'max']):
         variables[f'depriv_{operator}'] = dict(
-            title=f'{operator} of relative deprivation index',
-            source='geohub:/api/datasets/fcde6ab53a79657a27906b3248a1979d',
+            title=f'{names[i]} value of relative deprivation index',
+            source='geohub:/api/datasets/8b885646578937906c1d2759657f98e4',
             operator=operator
         )
     return variables

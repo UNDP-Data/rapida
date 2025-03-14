@@ -1,8 +1,8 @@
 import datetime
 import logging
 import time
+import rasterio
 from pyogrio import open_arrow
-
 logger = logging.getLogger(__name__)
 
 
@@ -103,4 +103,30 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                     raise e
     finally:
         if progress:
+            progress.remove_task(task)
+
+
+def read_rasterio_window(src_ds_path=None, src_band=1, window=None, window_id=None, progress=None, results=None, entries=3):
+    task = None
+    try:
+        for attempt in range(entries):
+            logger.debug(f'Attempt no {attempt} at {window_id} {window}')
+            try:
+                if progress:
+                    task = progress.add_task(description=f'[green]Downloading data in {window_id}...', start=False,
+                                             total=None )
+                with rasterio.open(src_ds_path) as src:
+                    data = src.read(src_band, window=window)
+                    results.append((window_id, data))
+
+                return window_id
+            except Exception as e:
+
+                if attempt < entries-1:
+                    time.sleep(1)
+                    continue
+                else:
+                    raise e
+    finally:
+        if progress is not None and task is not None:
             progress.remove_task(task)

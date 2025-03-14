@@ -136,7 +136,6 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
 
         # don't apply classification if data in column is not numeric
         if not gdf[visualization_params['column']].apply(lambda x: isinstance(x, (int, float))).all():
-            gdf[visualization_params['column']].apply(lambda x: print(isinstance(x, (int, float))))
             visualization_params['method'] = None
             # hide the classification method selector
             classification_method_selector.layout.visibility = 'hidden'
@@ -146,4 +145,7 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
         if raster is not None:
             m.add_raster(raster, colormap="viridis", layer_name='raster_layer', layer_control=True)
     display(controls, m)
+    # return the m object just to make it available in the notebook when this function is called.
+    # NOTE: To prevent double maps, use this function as follows:
+    # m = display_data(**kwargs)
     return m

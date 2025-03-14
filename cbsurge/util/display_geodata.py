@@ -30,7 +30,7 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
 
     visualization_params = {
         'layer_name': 'vector_layer',
-        'column': columns[7],
+        'column': columns[0],
         'cmap': cmap,
         'scheme': classifiers[0],
         'add_legend':True,
@@ -42,7 +42,7 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
         options=columns,
         description='Column:',
         disabled=False,
-        value=columns[7],
+        value=columns[0],
     )
     colormap_selector = widgets.Dropdown(
         options=leafmap.list_palettes(),

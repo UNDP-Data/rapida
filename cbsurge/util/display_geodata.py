@@ -8,8 +8,6 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
     """
     Displays a GeoDataFrame or raster on a Leafmap map.
     """
-    print("CALLING DISPLAY GEODATA")
-
     m = leafmap.Map()
     classifiers = ['EqualInterval', 'FisherJenks', 'NaturalBreaks', 'Quantiles']
 
@@ -24,7 +22,9 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
         'cmap': cmap,
         'scheme': classification_method or classifiers[0],
         'add_legend': True,
-        'info_mode': None
+        'info_mode': None,
+        'raster_min': None,
+        'raster_max': None,
     }
 
     column_selector = widgets.Dropdown(options=columns, description='Column:', value=visualization_params['column'])
@@ -43,9 +43,17 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
             m.remove(m.find_layer('vector_layer'))
             m.add_data(gdf, **visualization_params)
         if raster:
-            m.remove(m.find_layer('raster_layer'))
-            m.add_raster(raster, colormap=visualization_params['cmap'], layer_name='raster_layer', layer_control=True,
-                         zoom_to_layer=True)
+            with rasterio.open(raster) as src:
+                no_data = src.nodata
+                m.remove(m.find_layer('raster_layer'))
+                m.add_raster(
+                    source=raster,
+                    colormap=visualization_params['cmap'],
+                    layer_name='raster_layer',
+                    nodata=no_data,
+                    vmax=visualization_params['raster_max'],
+                    vmin=visualization_params['raster_min'],
+                )
 
     def on_column_change(change):
         visualization_params['column'] = change['new']
@@ -102,18 +110,32 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
     if raster:
         with rasterio.open(raster) as src:
             no_data = src.nodata
-            minimum = src.read(1).min()
-            maximum = src.read(1).max()
-            min_max_slider = widgets.FloatRangeSlider(min=minimum, max=maximum)
+            visualization_params['raster_min'] = src.read(1).min()
+            visualization_params['raster_max'] = src.read(1).max()
+            min_max_slider = widgets.FloatRangeSlider(
+                min=visualization_params['raster_min'],
+                max=visualization_params['raster_max'])
+            min_max_label = widgets.Label(value='Min/Max:')
+            def on_values_change(change):
+                visualization_params['raster_min'] = change['new'][0]
+                visualization_params['raster_max'] = change['new'][1]
+                update_map()
+
+
+            min_max_slider.observe(on_values_change, names='value')
+
             leafmap.cog_validate(raster, verbose=True)
-            m.add_raster(raster,
+
+            m.add_raster(source=raster,
                          colormap=visualization_params['cmap'],
                          layer_name='raster_layer',
-                         layer_control=True,
                          zoom_to_layer=True,
-                         no_data=no_data,
+                         nodata=no_data,
+                         vmax=visualization_params['raster_max'],
+                         vmin=visualization_params['raster_min'],
                          )
+            controls = widgets.HBox([min_max_label, min_max_slider, controls])
 
-    display(controls, m, min_max_slider)
+    display(controls, m)
     return m
 

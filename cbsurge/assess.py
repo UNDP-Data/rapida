@@ -10,6 +10,8 @@ from cbsurge.project import Project
 from cbsurge.util.setup_logger import setup_logger
 
 
+logger = setup_logger()
+
 def import_class(fqcn: str):
     """Dynamically imports a class using its fully qualified class name.
 
@@ -24,17 +26,43 @@ def import_class(fqcn: str):
     return getattr(module, class_name)
 
 
-@click.command(short_help='assess the effect of natural or social hazards')
 
+def getComponents():
+    try:
+        with Session() as session:
+            components = session.get_components()
+            return list(components)
+    except:
+        return []
+
+
+available_components = getComponents()
+
+
+def getVariables():
+    try:
+        with Session() as session:
+            variables = []
+            for component in available_components:
+                res = session.get_variables(component=component)
+                variables.extend(res)
+            return list(variables)
+    except:
+        return []
+
+
+available_variables = getVariables()
+
+
+@click.command(short_help='assess the effect of natural or social hazards')
 @click.option(
     '--components', '-c', required=False, multiple=True,
-    #help=f'One or more components to be assessed. Valid input example: --components "{", ".join(components)}". '
-    help=f'One or more components to be assessed. Valid input example: -c component1 -c component2 '
-
+    type=click.Choice(available_components, case_sensitive=False),
+    help=f'One or more components to be assessed. Valid input example: {" ".join([f"-c {var}" for var in available_components[:2]])}'
 )
-
-@click.option('--variables', '-v', required=False, type=click.STRING, multiple=True,
-               help=f'The variable/s to be assessed. Valid input example: -v variable1 -v variable2' )
+@click.option('--variables', '-v', required=False, multiple=True,
+              type=click.Choice(available_variables, case_sensitive=False),
+              help=f'The variable/s to be assessed. Valid input example: {" ".join([f"-v {var}" for var in available_variables[:2]])}' )
 @click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
               show_default=True,help=f'The year for which to compute population' )
 
@@ -62,6 +90,10 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
     except Exception as e:
         logger.error(f'"{current_folder}" is not a valid rapida project folder. {e}')
     else:
+        if len(available_components) == 0 or len(available_variables) == 0:
+            logger.warning("There are no available components. Please run `rapida init` to setup the tool first")
+            sys.exit(0)
+
         if project.is_valid:
             logger.info(f'Current project/folder: {project.path}')
             with Progress(disable=False) as progress:

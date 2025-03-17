@@ -1,5 +1,4 @@
 import pyogrio.core
-
 from cbsurge import constants
 from osgeo import gdal, ogr, osr
 from osgeo_utils.gdal_calc import Calc
@@ -35,6 +34,16 @@ is_raster = lambda src: isgdal(src=src, file_type='raster')
 is_vector = lambda src: isgdal(src=src, file_type='vector')
 
 
+def gdal_callback(complete, message, data):
+    print('in callb', complete, message, len(data))
+    if data:
+        progressbar, task, timeout_event = data
+        if progressbar is not None and task is not None:
+            progressbar.update(task, completed=int(complete * 100))
+        if timeout_event and timeout_event.is_set():
+            logger.info(f'GDAL was signalled to stop...')
+            return 0
+
 def import_raster(source=None, dst=None, target_srs=None,
                   x_res: int = constants.DEFAULT_MASK_RESOLUTION_METERS,
                   y_res: int = constants.DEFAULT_MASK_RESOLUTION_METERS,
@@ -62,8 +71,15 @@ def import_raster(source=None, dst=None, target_srs=None,
     if should_crop:
         info = pyogrio.core.read_info(crop_ds, layer=crop_layer_name)
         out_bounds = list(map(float, info['total_bounds']))
+        out_bounds_srs = osr.SpatialReference()
+        out_bounds_srs.ImportFromWkt(info['crs'])
+
     else:
         out_bounds = None
+        out_bounds_srs = None
+
+
+
     warp_options = dict(
         format='GTiff',
         xRes=x_res,
@@ -73,10 +89,12 @@ def import_raster(source=None, dst=None, target_srs=None,
         cutlineLayer=crop_layer_name,
         cropToCutline=should_crop,
         targetAlignedPixels=True,
-        outputBounds=out_bounds
+        outputBounds=out_bounds,
+        outputBoundsSRS=out_bounds_srs,
 
     )
     warp_options.update(kwargs)
+
 
     with gdal.OpenEx(source, gdal.OF_RASTER | gdal.OF_READONLY) as src_ds:
         src_srs = src_ds.GetSpatialRef()

@@ -8,6 +8,7 @@ from cbsurge.components.buildings.variables import generate_variables as gen_bld
 from cbsurge.components.rwi.variables import generate_variables as gen_rwi_vars
 from cbsurge.components.roads.variables import generate_variables as gen_road_vars
 from cbsurge.components.electricity.variables import generate_variables as gen_electric_vars
+from cbsurge.components.deprivation.variables import generate_variables as gen_depriv_vars
 from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,7 @@ def setup_prompt(session: Session):
             "buildings": gen_bldgs_vars(),
             "roads": gen_road_vars(),
             "rwi": gen_rwi_vars(),
+            "deprivation": gen_depriv_vars(),
             "electricity": gen_electric_vars(),
         }
     }

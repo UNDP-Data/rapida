@@ -426,7 +426,7 @@ def mask_buildings( buildings_dataset=None, buildings_layer_name=None,mask_ds_pa
                             logger.info(f'Cancelling. Please wait/allow for a graceful shutdown')
                             stop_event.set()
                             raise
-                        gdal.VectorTranslateOptions()
+
             #with gdal.config_option(key="OGR2OGR_USE_ARROW_API", value="NO"):
                 # ogr Arrow is used in translate > 3.8 and it has some issue with OGC_FID col
             with gdal.VectorTranslate(destNameOrDestDS=masked_buildings_dataset,srcDS=out_path, accessMode='append') as ds:

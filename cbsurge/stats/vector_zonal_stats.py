@@ -32,15 +32,9 @@ def vector_line_zonal_stats(df_polygon,
 
     selected_operator = VECTOR_LINE_OPERATORS.get(operator)
 
-    # if operator == 'divide':
-    #     df_output['area'] = df_output.geometry.area
-    #     selected_operator = lambda geom: geom.length / df_output['area']
-
-    assert selected_operator is not None, f"Operator '{operator}' is not supported."
-
     df_line_cloned = df_line.copy()
     intersects = gpd.sjoin(df_line_cloned, df_output, predicate="intersects", how="inner")
+    assert selected_operator is not None, f"Operator '{operator}' is not supported."
     line_stats = intersects.groupby("index_right")["geometry"].apply(selected_operator)
     df_output[field_name] = df_output.index.map(line_stats).fillna(0)
-
     return df_output

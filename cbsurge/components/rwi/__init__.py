@@ -143,8 +143,9 @@ class RwiVariable(Variable):
                     progress=kwargs.get('progress', None)
                 )
 
-    def compute(self, **kwargs):
-        pass
+    def compute(self, force_compute=True, **kwargs):
+        assert force_compute, f'invalid force_compute={force_compute}'
+        return self.download(force_compute=force_compute, **kwargs)
 
     def resolve(self, **kwargs):
         pass

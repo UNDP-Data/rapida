@@ -707,6 +707,7 @@ def download_rasta( src_dataset_path=None, src_band=1,
                 bounds = minx, miny, maxx, maxy
 
             win = rasterio.windows.from_bounds(*bounds,transform=src_ds.transform)
+            #print(src_ds.profile)
             row_slice, col_slice = win.toslices()
             src_ds.RasterXSize = src_ds.width
             src_ds.RasterYSize = src_ds.height
@@ -715,6 +716,7 @@ def download_rasta( src_dataset_path=None, src_band=1,
                                      xmaxc=col_slice.stop, ymaxr=row_slice.stop)
 
             nblocks, blocks = generator_length(blocks)
+
             block_dict = {}
             stop_event = threading.Event()
             jobs = deque()

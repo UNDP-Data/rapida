@@ -661,7 +661,7 @@ def download_raster(
                 dstSRS=polygons_crs.to_wkt(),
                 format="COG",
                 creationOptions=["COMPRESS=ZSTD", "PREDICTOR=2","BIGTIFF=IF_SAFER", "BLOCKSIZE=256"],
-                resampleAlg='nearest',
+                resampleAlg='average',
                 srcNodata=src_nodata,
                 callback=progress_callback
             )

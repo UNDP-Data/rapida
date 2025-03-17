@@ -10,10 +10,12 @@ import pyogrio
 import shapely
 from osgeo import gdal, osr
 
+from cbsurge import constants
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
+from cbsurge.stats.vector_zonal_stats import vector_line_zonal_stats
 from cbsurge.util.download_geodata import download_vector
 from cbsurge.util.proj_are_equal import proj_are_equal
 from cbsurge.util.resolve_url import resolve_geohub_url
@@ -21,27 +23,27 @@ from cbsurge.util.resolve_url import resolve_geohub_url
 logger = logging.getLogger(__name__)
 
 
-def compute_grid_length(grid_df, polygons_df):
-    project = Project(path=os.getcwd())
-    # overlay with the polygons to get only the grid within the polygons
-    electricity_grid_df = gpd.overlay(grid_df, polygons_df, how='intersection')
-    electricity_grid_df['electricity_grid_length'] = electricity_grid_df.geometry.length
-    length_per_unit = electricity_grid_df.groupby('h3id', as_index=False)['electricity_grid_length'].sum()
-    output_df = polygons_df.merge(length_per_unit, on='h3id', how='left')
-    output_df['electricity_grid_length'] = output_df['electricity_grid_length'].fillna(0)
-
-    # affected_grid_length
-    if project.vector_mask is not None:
-        mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
-        # overlay with the mask to get only the affected grid
-        electricity_grid_df_affected = gpd.overlay(electricity_grid_df, mask_df, how='intersection')
-        electricity_grid_df_affected.to_file(project.geopackage_file_path, driver="GPKG", layer="affected_electricity")
-        electricity_grid_df_affected['affected_electricity_grid_length'] = electricity_grid_df_affected.geometry.length
-        # overlay the affected with the admin
-        affected_length_per_unit = electricity_grid_df_affected.groupby('h3id', as_index=False)[
-            'affected_electricity_grid_length'].sum()
-        output_df = output_df.merge(affected_length_per_unit, on='h3id', how='left')
-    return output_df
+# def compute_grid_length(grid_df, polygons_df):
+#     project = Project(path=os.getcwd())
+#     # overlay with the polygons to get only the grid within the polygons
+#     electricity_grid_df = gpd.overlay(grid_df, polygons_df, how='intersection')
+#     electricity_grid_df['electricity_grid_length'] = electricity_grid_df.geometry.length
+#     length_per_unit = electricity_grid_df.groupby('h3id', as_index=False)['electricity_grid_length'].sum()
+#     output_df = polygons_df.merge(length_per_unit, on='h3id', how='left')
+#     output_df['electricity_grid_length'] = output_df['electricity_grid_length'].fillna(0)
+#
+#     # affected_grid_length
+#     if project.vector_mask is not None:
+#         mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
+#         # overlay with the mask to get only the affected grid
+#         electricity_grid_df_affected = gpd.overlay(electricity_grid_df, mask_df, how='intersection')
+#         electricity_grid_df_affected.to_file(project.geopackage_file_path, driver="GPKG", layer="affected_electricity")
+#         electricity_grid_df_affected['affected_electricity_grid_length'] = electricity_grid_df_affected.geometry.length
+#         # overlay the affected with the admin
+#         affected_length_per_unit = electricity_grid_df_affected.groupby('h3id', as_index=False)[
+#             'affected_electricity_grid_length'].sum()
+#         output_df = output_df.merge(affected_length_per_unit, on='h3id', how='left')
+#     return output_df
 
 
 class ElectricityComponent(Component, ABC):
@@ -137,14 +139,21 @@ class ElectricityVariable(Variable):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        project = Project(path=os.getcwd())
+        self.local_path = project.geopackage_file_path
 
     @property
-    def affected_name(self):
-        return f'{self.name}_affected'
+    def affected_layer(self):
+        return f"{self.component}.affected"
 
     @property
-    def percentage(self):
-        return self.__dict__.get('percentage', False)
+    def affected_variable(self):
+        return f"{self.name}.affected"
+
+    @property
+    def affected_percentage_variable(self):
+        return f"{self.name}.affected_percentage"
+
 
     def download(self, **kwargs):
         project = Project(path=os.getcwd())
@@ -194,46 +203,102 @@ class ElectricityVariable(Variable):
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
 
-    def grid_density(self, grid_df, polygons_df):
-        project = Project(path=os.getcwd())
-        length_gdf = compute_grid_length(grid_df=grid_df, polygons_df=polygons_df)
-        length_gdf['area'] = polygons_df.geometry.area
-        length_gdf[self.name] = np.divide(length_gdf['electricity_grid_length'], length_gdf['area'])
-
-        # affected_grid_density
-        if project.vector_mask is not None:
-            length_gdf[f'affected_{self.name}'] = np.divide(length_gdf['affected_electricity_grid_length'], length_gdf['area'])
-        output_gdf = length_gdf.drop(columns=['area'])
-        return output_gdf
 
     def evaluate(self, **kwargs):
-        logger.info(f'Evaluating variable "{self.name}"')
+        progress = kwargs.get('progress', False)
+        evaluate_task = None
+        if progress is not None:
+            evaluate_task = progress.add_task(
+                description=f'[green]Going to evaluate {self.name} in {self.component} component', total=None)
+
         destination_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
 
-        output_df = None
+        layers = pyogrio.list_layers(self.local_path)
+        layer_names = layers[:, 0]
 
-        if destination_layer in gpd.list_layers(project.geopackage_file_path):
+        if progress is not None and evaluate_task is not None:
+            progress.update(evaluate_task, description=f'[green]Loading layers...')
+
+        if destination_layer in layer_names:
             polygons_layer = destination_layer
         else:
-            polygons_layer = 'polygons'
-        polygons_df = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
-        grid_df = gpd.read_file(project.geopackage_file_path, layer=self.component)
-        if self.name in polygons_df.columns: # remove the variable column if it exists
-            polygons_df.drop(columns=[self.name], inplace=True)
+            polygons_layer = constants.POLYGONS_LAYER_NAME
 
-        if self.operator == 'density':
-            output_df = self.grid_density(grid_df, polygons_df)
-
-        if self.operator == 'length':
-            output_df = compute_grid_length(grid_df, polygons_df)
-        output_df.to_file(project.geopackage_file_path, driver='GPKG', layer=destination_layer, mode='w')
+        if project.vector_mask is not None:
+            self._compute_affected()
 
 
+        df_polygon = gpd.read_file(self.local_path, layer=polygons_layer)
+        df_line = gpd.read_file(self.local_path, layer=self.component)
+
+
+        for col in [self.name, self.affected_variable, self.affected_percentage_variable]:
+            if col in df_polygon.columns:
+                df_polygon.drop(columns=[col], inplace=True)
+
+        assert self.operator is not None, f"[green]Operator is missing for variable {self.name}"
+
+        if self.operator:
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task, description=f'[green]Computing {self.name}.')
+
+            output_df = vector_line_zonal_stats(
+                df_polygon=df_polygon,
+                df_line=df_line,
+                operator=self.operator,
+                field_name=self.name
+            )
+
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task, description=f'[green]Computed {self.name}.')
+
+            if project.vector_mask is not None and self.affected_layer in layer_names:
+                if progress is not None and evaluate_task is not None:
+                    progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
+
+                df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer)
+                output_df = vector_line_zonal_stats(
+                    df_polygon=output_df,
+                    df_line=df_line_affected,
+                    operator=self.operator,
+                    field_name=self.affected_variable
+                )
+
+                if progress is not None and evaluate_task is not None:
+                    progress.update(evaluate_task, description=f'[green]Computed {self.affected_layer}.')
+
+                percentage = self.percentage
+                if percentage:
+                    output_df[f"{self.affected_percentage_variable}"] = np.divide(output_df[self.affected_variable], output_df[self.name]) * 100
+                    # output_df.eval(f"{self.affected_percentage_variable}={self.affected_variable}/{self.name}*100", inplace=True)
+                    if progress is not None and evaluate_task is not None:
+                        progress.update(evaluate_task, description=f'[green]Computed {self.affected_variable}.')
+
+            output_df.to_file(self.local_path, driver='GPKG', layer=destination_layer, mode='w')
+
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task, description=f'[green]updated variables to {self.local_path} as {destination_layer}')
+        else:
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task, description=f"[red]variable {self.name} has no operator is specified. It was skipped.")
+
+        if progress is not None and evaluate_task:
+            progress.remove_task(evaluate_task)
 
 
     def _compute_affected(self):
-        pass
+        project = Project(path=os.getcwd())
+        if project.vector_mask is None:
+            return
+        affected_layer = f'{self.component}.affected'
+        if affected_layer in gpd.list_layers(self.local_path):
+            return
+        mask_df = gpd.read_file(self.local_path, layer=project.vector_mask)
+        grid_df = gpd.read_file(self.local_path, layer=self.component)
+        affected_df = gpd.overlay(grid_df, mask_df, how='intersection')
+        affected_df.to_file(self.local_path, driver='GPKG', layer=affected_layer)
+
 
     def compute(self, force_compute=True, **kwargs):
         assert force_compute, f'invalid force_compute={force_compute}'

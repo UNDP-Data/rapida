@@ -1,6 +1,7 @@
 from IPython.core.display_functions import display
 import ipywidgets as widgets
 import leafmap
+import rasterio
 
 
 def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification_method='EqualInterval'):
@@ -99,11 +100,20 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
 
 
     if raster:
-        print("Validating raster data...")
-        leafmap.cog_validate(raster, verbose=True)
-        m.add_raster(raster, colormap=visualization_params['cmap'], layer_name='raster_layer', layer_control=True,
-                     zoom_to_layer=True)
+        with rasterio.open(raster) as src:
+            no_data = src.nodata
+            minimum = src.read(1).min()
+            maximum = src.read(1).max()
+            min_max_slider = widgets.FloatRangeSlider(min=minimum, max=maximum)
+            leafmap.cog_validate(raster, verbose=True)
+            m.add_raster(raster,
+                         colormap=visualization_params['cmap'],
+                         layer_name='raster_layer',
+                         layer_control=True,
+                         zoom_to_layer=True,
+                         no_data=no_data,
+                         )
 
-    display(controls, m)
+    display(controls, m, min_max_slider)
     return m
 

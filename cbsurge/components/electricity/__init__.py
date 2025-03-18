@@ -22,30 +22,6 @@ from cbsurge.util.resolve_url import resolve_geohub_url
 
 logger = logging.getLogger(__name__)
 
-
-# def compute_grid_length(grid_df, polygons_df):
-#     project = Project(path=os.getcwd())
-#     # overlay with the polygons to get only the grid within the polygons
-#     electricity_grid_df = gpd.overlay(grid_df, polygons_df, how='intersection')
-#     electricity_grid_df['electricity_grid_length'] = electricity_grid_df.geometry.length
-#     length_per_unit = electricity_grid_df.groupby('h3id', as_index=False)['electricity_grid_length'].sum()
-#     output_df = polygons_df.merge(length_per_unit, on='h3id', how='left')
-#     output_df['electricity_grid_length'] = output_df['electricity_grid_length'].fillna(0)
-#
-#     # affected_grid_length
-#     if project.vector_mask is not None:
-#         mask_df = gpd.read_file(project.geopackage_file_path, layer=project.vector_mask)
-#         # overlay with the mask to get only the affected grid
-#         electricity_grid_df_affected = gpd.overlay(electricity_grid_df, mask_df, how='intersection')
-#         electricity_grid_df_affected.to_file(project.geopackage_file_path, driver="GPKG", layer="affected_electricity")
-#         electricity_grid_df_affected['affected_electricity_grid_length'] = electricity_grid_df_affected.geometry.length
-#         # overlay the affected with the admin
-#         affected_length_per_unit = electricity_grid_df_affected.groupby('h3id', as_index=False)[
-#             'affected_electricity_grid_length'].sum()
-#         output_df = output_df.merge(affected_length_per_unit, on='h3id', how='left')
-#     return output_df
-
-
 class ElectricityComponent(Component, ABC):
 
     def __init__(self, **kwargs):
@@ -74,7 +50,7 @@ class ElectricityComponent(Component, ABC):
             if progress:
                 variable_task = progress.add_task(
                     description=f'[red]Going to process {nvars} variables', total=nvars)
-            for var_name in variables:
+            for var_index, var_name in enumerate(variables):
                 var_data = variables_data[var_name]
 
                 var_data['source'] = resolve_geohub_url(dataset_url=var_data['source'], link_name='flatgeobuf')
@@ -82,6 +58,10 @@ class ElectricityComponent(Component, ABC):
                 v = ElectricityVariable(name=var_name,
                                        component=self.component_name,
                                        **var_data)
+
+                if nvars > 1 and kwargs['force_compute'] is True:
+                    if var_index > 0:
+                        kwargs['force_compute'] = False
                 # assess
                 v(**kwargs)
 
@@ -144,15 +124,15 @@ class ElectricityVariable(Variable):
 
     @property
     def affected_layer(self):
-        return f"{self.component}.affected"
+        return f"{self.component}_affected"
 
     @property
     def affected_variable(self):
-        return f"{self.name}.affected"
+        return f"{self.name}_affected"
 
     @property
     def affected_percentage_variable(self):
-        return f"{self.name}.affected_percentage"
+        return f"{self.name}_affected_percentage"
 
 
     def download(self, **kwargs):

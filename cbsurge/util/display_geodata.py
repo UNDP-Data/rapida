@@ -94,8 +94,12 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
     classification_selector.observe(on_classification_change, names='value')
     colormap_selector.observe(on_colormap_change, names='value')
 
-    controls = widgets.HBox([column_selector, colormap_selector, classification_selector]) if gdf is not None else widgets.HBox(
-        [colormap_selector, classification_selector])
+    if gdf is not None:
+        controls = widgets.HBox([column_selector, colormap_selector, classification_selector])
+    elif raster:
+        controls = widgets.HBox([colormap_selector])
+    else:
+        controls = widgets.HBox([colormap_selector, classification_selector])
 
     if gdf is not None:
         centroid = gdf.to_crs(4326).dissolve().geometry.centroid.iloc[0]
@@ -133,6 +137,7 @@ def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification
                          nodata=no_data,
                          vmax=visualization_params['raster_max'],
                          vmin=visualization_params['raster_min'],
+                         attribution="United Nations Development Programme (UNDP)"
                          )
             controls = widgets.HBox([min_max_label, min_max_slider, controls])
 

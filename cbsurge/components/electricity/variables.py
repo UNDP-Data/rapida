@@ -1,6 +1,7 @@
 from collections import OrderedDict
 import logging
 
+
 logger = logging.getLogger(__name__)
 
 def generate_variables():
@@ -11,16 +12,15 @@ def generate_variables():
 
     variables = OrderedDict()
 
-    #dependencies
-    variables['electricity_grid_length'] = dict(
-        title='Total length of electricity grid',
-        source='geohub:/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
-        operator='length',
-        percentage=True
-    )
-    variables['electricity_grid_density'] = dict(
-        title='Density of electricity grid',
-        source='geohub:/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
-        operator='density',
-    )
+    for operator in ['sum', 'count', 'density']:
+        name = operator
+        if operator == 'sum':
+            name = 'length'
+        variables[f'electricity_{name}'] = dict(
+            title=f'Total {name} of electricity',
+            source='geohub:/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
+            operator=operator,
+            percentage=True if operator != 'density' else False,
+        )
+
     return variables

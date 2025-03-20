@@ -11,6 +11,9 @@ def generate_variables():
 
     variables = OrderedDict()
 
+    license = "Creative Commons Zero 1.0 Universal"
+    attribution = "Global biodiversity model for policy support, GLOBIO"
+
     for operator in ['sum', 'count']:
         name = operator
         if operator == 'sum':
@@ -20,6 +23,8 @@ def generate_variables():
             source='geohub:/api/datasets/300da70781b7a53808aab824543e6c2b',
             operator=operator,
             percentage=True,
+            license=license,
+            attribution=attribution,
         )
 
     return variables

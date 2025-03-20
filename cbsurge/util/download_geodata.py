@@ -506,6 +506,10 @@ def download_raster( src_dataset_path=None, src_band=1,
                                 done = [f.done() for f in futures]
                                 if nblocks == 0 or all(done):
                                     stop_event.set()
+
+                                    if progress and total_task is not None:
+                                        progress.remove_task(total_task)
+
                                     break
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)

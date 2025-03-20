@@ -9,7 +9,7 @@ from cbsurge.session import Session
 
 logger = logging.getLogger('rapida')
 
-class BuiltupComponent(Component):
+class NaturalEnvironmentComponent(Component):
     def __call__(self, variables: List[str], **kwargs):
         if not variables:
             variables = self.variables
@@ -27,7 +27,7 @@ class BuiltupComponent(Component):
             for var_name in variables:
                 var_data = variable_data[var_name]
 
-                v = BuiltupVariable(
+                v = NaturalEnvironmentVariable(
                     name=var_name,
                     component=self.component_name,
                     **var_data
@@ -36,7 +36,7 @@ class BuiltupComponent(Component):
 
 
 
-class BuiltupVariable(Variable):
+class NaturalEnvironmentVariable(Variable):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         project = Project(path=os.getcwd())

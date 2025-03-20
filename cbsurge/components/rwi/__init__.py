@@ -14,7 +14,7 @@ from cbsurge.util.resolve_url import resolve_geohub_url
 from cbsurge.stats.zst import zst
 from osgeo_utils.gdal_calc import Calc
 from cbsurge.constants import GTIFF_CREATION_OPTIONS
-from osgeo import gdal
+from osgeo import gdal, ogr
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +37,15 @@ class RwiComponent(Component):
 
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
+
+            # delete stats layer if exist
+            project = Project(path=os.getcwd())
+            geopackage_path = project.geopackage_file_path
+            with ogr.Open(geopackage_path, 1) as ds:
+                dst_layer = f"stats.{self.component_name}"
+                layer_index = ds.GetLayerByName(dst_layer)
+                if layer_index is not None:
+                    ds.DeleteLayer(dst_layer)
 
             for var_name in variables:
                 var_data = variables_data[var_name]
@@ -189,7 +198,7 @@ class RwiVariable(Variable):
         evaluate_task = None
         if progress is not None:
             evaluate_task = progress.add_task(
-                description=f'[red]Going to evaluate {self.name} in {self.component} component', total=None)
+                description=f'[red] Going to evaluate {self.name} in {self.component} component', total=None)
 
         dst_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
@@ -204,7 +213,7 @@ class RwiVariable(Variable):
             assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
 
             if progress is not None and evaluate_task is not None:
-                progress.update(evaluate_task, description=f'Evaluating variable {self.name} using zonal stats')
+                progress.update(evaluate_task, description=f'[red] Evaluating variable {self.name} using zonal stats')
 
             # raster variable, run zonal stats
             src_rasters = [self.local_path]
@@ -221,16 +230,16 @@ class RwiVariable(Variable):
                       )
 
             if progress is not None and evaluate_task is not None:
-                progress.update(evaluate_task, description=f'Evaluated variable {self.name} using zonal stats')
+                progress.update(evaluate_task, description=f'[red] Evaluated variable {self.name} using zonal stats')
 
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task,
-                                description=f'Writing {self.name} to {project.geopackage_file_path}:{dst_layer}')
+                                description=f'[red] Writing {self.name} to {project.geopackage_file_path}:{dst_layer}')
 
-            gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG")
+            gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG", overwrite=True)
         else:
             progress.update(evaluate_task,
-                            description=f'{self.name} was skipped because of lack of operator definition.')
+                            description=f'[red] {self.name} was skipped because of lack of operator definition.')
 
         if progress and evaluate_task:
             progress.remove_task(evaluate_task)

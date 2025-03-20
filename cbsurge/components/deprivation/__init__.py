@@ -11,7 +11,7 @@ from cbsurge.components.rwi import RwiVariable
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.util import geo
-from cbsurge.util.download_geodata import download_rasta
+from cbsurge.util.download_geodata import download_raster
 from cbsurge.util.resolve_url import resolve_geohub_url
 from cbsurge.stats.zst import zst
 from osgeo_utils.gdal_calc import Calc
@@ -98,7 +98,7 @@ class DeprivationVariable(RwiVariable):
         project = Project(os.getcwd())
         progress = kwargs.pop('progress', None)
         local_path = os.path.join(project.data_folder, self.component, f'{self.component}_downloaded.tif')
-        download_rasta(
+        download_raster(
             src_dataset_path=self.source,
             src_band=1,
             dst_dataset_path=local_path,

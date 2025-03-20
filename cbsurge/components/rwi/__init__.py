@@ -9,7 +9,7 @@ from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.util import geo
-from cbsurge.util.download_geodata import download_raster, download_rasta
+from cbsurge.util.download_geodata import download_raster
 from cbsurge.util.resolve_url import resolve_geohub_url
 from cbsurge.stats.zst import zst
 from osgeo_utils.gdal_calc import Calc
@@ -63,7 +63,6 @@ class RwiVariable(Variable):
         geopackage_path = project.geopackage_file_path
         output_filename = f"{self.component}.tif"
         self.local_path = os.path.join(os.path.dirname(geopackage_path), self.component, output_filename)
-        #self.local_path = os.path.join(os.path.dirname(geopackage_path), output_filename)
 
     def __call__(self, *args, **kwargs):
         """
@@ -147,7 +146,7 @@ class RwiVariable(Variable):
         project = Project(os.getcwd())
         progress = kwargs.pop('progress', None)
         local_path = os.path.join(project.data_folder, self.component, f'{self.component}_downloaded.tif')
-        download_rasta(
+        download_raster(
             src_dataset_path=self.source,
             src_band=1,
             dst_dataset_path=local_path,
@@ -178,37 +177,6 @@ class RwiVariable(Variable):
     def compute(self, force_compute=True, **kwargs):
         assert force_compute, f'invalid force_compute={force_compute}'
         return self.download(force_compute=force_compute, **kwargs)
-
-    # def download(self, **kwargs):
-    #     """
-    #     Download RWI data source
-    #     """
-    #     project = Project(path=os.getcwd())
-    #     geopackage_path = project.geopackage_file_path
-    #     cog_url = self.source
-    #
-    #     force_compute = kwargs.get('force_compute', False)
-    #
-    #     if force_compute == True or not os.path.exists(self.local_path):
-    #         self.local_path = download_raster(
-    #             dataset_url=cog_url,
-    #             geopackage_path=geopackage_path,
-    #             output_filename=os.path.basename(self.local_path),
-    #             progress=kwargs.get('progress', None)
-    #         )
-    #
-    #     if project.raster_mask is not None and geo.is_raster(self.local_path):
-    #         affected_local_path = self.affected_path
-    #         if force_compute == True or not os.path.exists(affected_local_path):
-    #             geo.clip_raster_with_mask(
-    #                 source=self.local_path,
-    #                 mask=project.raster_mask,
-    #                 output_path=affected_local_path,
-    #                 progress=kwargs.get('progress', None)
-    #             )
-
-    # def compute(self, **kwargs):
-    #     pass
 
     def resolve(self, **kwargs):
         pass

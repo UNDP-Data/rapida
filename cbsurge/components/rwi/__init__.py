@@ -130,14 +130,15 @@ class RwiVariable(Variable):
         if geo.is_raster(self.local_path):
 
             project = Project(os.getcwd())
-            affected_local_path = self.affected_path
-            ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
-                      creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
-                      NoDataValue=None,
-                      local_path=self.local_path, mask=project.raster_mask)
-            ds = None
-            assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
-            return affected_local_path
+            if project.raster_mask:
+                affected_local_path = self.affected_path
+                ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
+                          creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                          NoDataValue=None,
+                          local_path=self.local_path, mask=project.raster_mask)
+                ds = None
+                assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
+                return affected_local_path
 
     def download(self, force_compute=False, **kwargs):
 

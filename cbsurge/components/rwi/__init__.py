@@ -141,8 +141,12 @@ class RwiVariable(Variable):
                 return affected_local_path
 
     def download(self, force_compute=False, **kwargs):
+        if force_compute == False and os.path.exists(self.local_path):
+            if not os.path.exists(self.affected_path):
+                self._compute_affected_()
+            return self.local_path
 
-        if os.path.exists(self.local_path) and not force_compute:
+        if os.path.exists(self.local_path) and project.raster_mask and not force_compute:
 
             assert os.path.exists(self.affected_path), (f'The affected version of {self.component} force not exist.'
                                                         f'Consider assessing using --force_compute flag')
@@ -153,6 +157,7 @@ class RwiVariable(Variable):
 
         if not os.path.exists(out_folder):
             os.makedirs(out_folder)
+
         project = Project(os.getcwd())
         progress = kwargs.pop('progress', None)
         local_path = os.path.join(project.data_folder, self.component, f'{self.component}_downloaded.tif')

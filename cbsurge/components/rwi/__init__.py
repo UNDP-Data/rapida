@@ -146,12 +146,6 @@ class RwiVariable(Variable):
                 self._compute_affected_()
             return self.local_path
 
-        if os.path.exists(self.local_path) and project.raster_mask and not force_compute:
-
-            assert os.path.exists(self.affected_path), (f'The affected version of {self.component} force not exist.'
-                                                        f'Consider assessing using --force_compute flag')
-            return self.local_path
-
         logger.info(f'Downloading {self.component}')
         out_folder, file_name = os.path.split(self.local_path)
 

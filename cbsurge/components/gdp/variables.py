@@ -22,10 +22,12 @@ def generate_variables():
             source = UNDP_AZURE_GDP_PATH.replace("{account_name}", session.get_account_name()).replace("{stac_container_name}", session.get_stac_container_name())
 
             for operator in ['sum', 'mean', 'min', 'max']:
+                percentage = True if operator == 'sum' else False
                 variables[f'gdp_{operator}'] = dict(
                     title=f'GDP {operator}',
                     source=source,
                     operator=operator,
+                    percentage=percentage,
                     license=license,
                     attribution=attribution,
                 )

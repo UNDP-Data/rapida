@@ -102,6 +102,18 @@ class GdpComponent(Component):
 class GdpVariable(Variable):
 
     @property
+    def variable_name(self) -> str:
+        return f"{self.name}_{self.target_year}"
+
+    @property
+    def affected_variable(self) -> str:
+        return f"{self.variable_name}_affected"
+
+    @property
+    def affected_percentage_variable(self) -> str:
+        return f"{self.affected_variable}_percentage"
+
+    @property
     def affected_path(self):
         path, file_name = os.path.split(self.local_path)
         fname, ext = os.path.splitext(file_name)
@@ -222,26 +234,28 @@ class GdpVariable(Variable):
 
     def _compute_affected_(self, **kwargs):
         if geo.is_raster(self.local_path):
-            progress: Progress = kwargs.get('progress', Progress())
-
-            affect_task = None
-            if progress is not None:
-                affect_task = progress.add_task(
-                    description=f'[red] masking downloaded data by affected area', total=None)
-
             project = Project(os.getcwd())
-            affected_local_path = self.affected_path
-            ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
-                      creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
-                      NoDataValue=None,
-                      local_path=self.local_path, mask=project.raster_mask)
-            ds = None
-            assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
+            if project.raster_mask:
+                progress: Progress = kwargs.get('progress', Progress())
 
-            if progress is not None and affect_task is not None:
-                progress.update(affect_task, description=f'[red] computed masked data for affected area')
-                progress.remove_task(affect_task)
-            return affected_local_path
+                affect_task = None
+                if progress is not None:
+                    affect_task = progress.add_task(
+                        description=f'[red] masking downloaded data by affected area', total=None)
+
+
+                affected_local_path = self.affected_path
+                ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
+                          creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                          NoDataValue=None,
+                          local_path=self.local_path, mask=project.raster_mask)
+                ds = None
+                assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
+
+                if progress is not None and affect_task is not None:
+                    progress.update(affect_task, description=f'[red] computed masked data for affected area')
+                    progress.remove_task(affect_task)
+                return affected_local_path
 
     def interpolate_target_year(self, local_sources: List[str]):
         target_year = self.target_year
@@ -287,13 +301,11 @@ class GdpVariable(Variable):
         """
         make zonal statistics for variable. compute affected variable if project has mask layer.
         """
-        variable_name = f"{self.name}_{self.target_year}"
-
         progress: Progress = kwargs.get('progress', Progress())
         evaluate_task = None
         if progress is not None:
             evaluate_task = progress.add_task(
-                description=f'[red] Going to evaluate {variable_name} in {self.component} component', total=None)
+                description=f'[red] Going to evaluate {self.variable_name} in {self.component} component', total=None)
 
         dst_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
@@ -308,33 +320,36 @@ class GdpVariable(Variable):
             assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
 
             if progress is not None and evaluate_task is not None:
-                progress.update(evaluate_task, description=f'[red] Evaluating variable {variable_name} using zonal stats')
+                progress.update(evaluate_task, description=f'[red] Evaluating variable {self.variable_name} using zonal stats')
 
             # raster variable, run zonal stats
             src_rasters = [self.local_path]
-            var_ops = [(variable_name, self.operator)]
+            var_ops = [(self.variable_name, self.operator)]
 
             if project.raster_mask is not None:
                 affected_local_path = self.affected_path
                 src_rasters.append(affected_local_path)
-                var_ops.append((f'{variable_name}_affected', self.operator))
+                var_ops.append((self.affected_variable, self.operator))
 
             gdf = zst(src_rasters=src_rasters,
                       polygon_ds=project.geopackage_file_path,
                       polygon_layer=polygons_layer, vars_ops=var_ops
                       )
 
-            if progress is not None and evaluate_task is not None:
-                progress.update(evaluate_task, description=f'[red] Evaluated variable {variable_name} using zonal stats')
+            if project.raster_mask:
+                percentage = self.percentage
+                if percentage:
+                    gdf.eval(f"{self.affected_percentage_variable}={self.affected_variable}/{self.variable_name}*100",
+                                   inplace=True)
 
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task,
-                                description=f'[red] Writing {variable_name} to {project.geopackage_file_path}:{dst_layer}')
+                                description=f'[red] Writing {self.variable_name} to {project.geopackage_file_path}:{dst_layer}')
 
             gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG", overwrite=True)
         else:
             progress.update(evaluate_task,
-                            description=f'[red] {variable_name} was skipped because of lack of operator definition.')
+                            description=f'[red] {self.variable_name} was skipped because of lack of operator definition.')
 
         if progress and evaluate_task:
             progress.remove_task(evaluate_task)

@@ -28,10 +28,11 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
         ca-certificates curl gnupg nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-     npm install -g configurable-http-proxy
+    npm install -g configurable-http-proxy
 
 # install azure-cli
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+#RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+
 
 WORKDIR /app
 
@@ -42,7 +43,9 @@ COPY README.md README.md
 # install dev and jupyter dependencies
 ENV PIPENV_VENV_IN_PROJECT=1
 RUN pipenv install --python 3 && \
-    pipenv run pip install .[dev,jupyter]
+    pipenv run pip install .[dev,jupyter] && \
+    pipenv run pip install playwright && \
+    pipenv run playwright install chromium --with-deps
 ENV VIRTUAL_ENV=/app/.venv
 
 # copy tippecanoe to production docker image

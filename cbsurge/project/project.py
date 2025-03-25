@@ -14,7 +14,7 @@ import geopandas
 import h3
 from osgeo import gdal, ogr, osr
 from pyproj import CRS as pCRS
-from azure.storage.fileshare import ShareClient
+from azure.storage.fileshare import ShareClient, ShareDirectoryClient
 
 from cbsurge import constants
 from cbsurge.admin.osm import fetch_admin
@@ -257,12 +257,6 @@ class Project:
         return (os.path.exists(self.path) and os.access(self.path, os.W_OK)
                 and os.path.exists(self.config_file)) and os.path.getsize(self.config_file) > 0
 
-    def delete(self, force=False):
-        if not force and not click.confirm(f'Are you sure you want to delete {self.name} located in {self.path}?',
-                                           abort=True):
-            return
-
-        shutil.rmtree(self.path)
 
     def save(self):
         os.makedirs(self.data_folder, exist_ok=True)
@@ -308,9 +302,8 @@ class Project:
                         for name in files:
                             src_path = os.path.join(root, name)
                             sfc = dc.get_file_client(name)
-                            web_path = os.path.join(account_url, share_name, dc.directory_path, name)
-                            if sfc.exists and not overwrite:
-                                raise FileExistsError(f'{web_path} already exists. Set overwrite=True to overwrite')
+                            if sfc.exists() and not overwrite:
+                                raise FileExistsError(f'{sfc.url} already exists. Set overwrite=True to overwrite')
                             size = os.path.getsize(src_path)
                             with open(src_path, 'rb') as src:
                                 if progress:
@@ -319,6 +312,66 @@ class Project:
                                         up.progress.remove_task(up.task)
                                 else:
                                     dc.upload_file(name, src_path, max_concurrency=max_concurrency)
+
+
+    def delete(self, yes=False):
+        """
+        Delete a project by name from Azure File Share
+
+        :param name: name of the project
+        :param yes: optional, default = false, whether to skip confirmation to answer Yes for all.
+        """
+
+        def delete_directory_recursive(sc: ShareClient, dir_name: str):
+            """
+            Recursively delete all contents inside a directory before deleting the directory itself.
+            """
+            dir_client = sc.get_directory_client(dir_name)
+
+            for item in dir_client.list_directories_and_files():
+                item_path = f"{dir_name}/{item.name}"
+                if item.is_directory:
+                    delete_directory_recursive(sc, item_path)
+                else:
+                    file_client = dir_client.get_file_client(item.name)
+                    file_client.delete_file()
+                    logger.debug(f"Deleted {file_client.url}")
+            dir_client.delete_directory()
+            logger.debug(f"Deleted {dir_client.url}")
+
+
+        project_name = self._cfg_["name"]
+
+        with Session() as session:
+            share_name = session.get_file_share_name()
+            account_url = session.get_file_share_account_url()
+            with ShareClient(account_url=account_url, share_name=share_name,
+                             credential=session.get_credential(), token_intent='backup') as sc:
+                # check if the project exists in Azure File Share
+                target_project = None
+                logger.info(f"Searching for the project '{project_name}' in Azure...")
+
+                for entry in sc.list_directories_and_files(name_starts_with=project_name):
+                    if entry.is_directory:
+                        if entry.name == project_name:
+                            target_project = entry.name
+
+                if target_project is None:
+                    logger.warning(f'Project: {project_name} not found in Azure.')
+                else:
+                    if yes or click.confirm(f"Project: {project_name} was found. Yes to continue deleting it, or No/Enter to exit. ",
+                                     default=False):
+                        delete_directory_recursive(sc, target_project)
+                        logger.info(f'Successfully deleted the project from Azure: {project_name}.')
+                    else:
+                        logger.info(f'Cancelled to delete the project from Azure: {project_name}.')
+
+        if yes or click.confirm(
+                f'Do want to continue deleting {self.name} located in {self.path} locally?',
+                default=False):
+            shutil.rmtree(self.path)
+            logger.info(f'Successfully deleted the project folder: {self.path} from local storage.')
+
 
     def publish(self, yes=False):
         """

@@ -2,6 +2,7 @@ import os
 from collections import deque
 from azure.storage.fileshare import ShareClient
 import logging
+import click
 from cbsurge.session import Session
 from cbsurge.util.setup_logger import setup_logger
 
@@ -14,9 +15,8 @@ def list_projects():
     :return: name of the folders
     """
     with Session() as session:
-        account_name = session.get_account_name()
         share_name = session.get_file_share_name()
-        account_url = f'https://{account_name}.file.core.windows.net'
+        account_url = session.get_file_share_account_url()
         with ShareClient(account_url=account_url,share_name=share_name,
                          credential=session.get_credential(), token_intent='backup') as sc:
             for entry in sc.list_directories_and_files():
@@ -79,6 +79,8 @@ def download_project(name:str=None, dst_folder=None, progress=None, overwrite=Fa
     if tasks and progress:
        for _ in range(len(tasks)):
             progress.remove_task(tasks.pop())
+
+
 if __name__ == '__main__':
     logger = setup_logger(name='rapida')
 

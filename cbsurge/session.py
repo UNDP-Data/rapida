@@ -300,39 +300,7 @@ class Session(object):
         ac_name = account_name if account_name is not None else self.get_account_name()
         return f"https://{ac_name}.blob.core.windows.net"
 
-    def get_share_service_client(self, account_name: str = None, share_name: str = None) -> ShareServiceClient:
-        """
-        get ShareServiceClient for account url
-
-        If the parameter is not set, use default account name from config.
-
-        Usage example:
-            with Session() as session:
-                share_service_client = session.get_share_service_client(
-                    account_name="undpgeohub",
-                    share_name="cbrapida"
-                )
-
-        Parameters:
-            account_name (str): name of storage account.
-            share_name (str): name of file share.
-
-            both parameters are equivalent to the below URL's bracket places.
-
-            https://{account_name}.file.core.windows.net/{share_name}
-        Returns:
-            ShareServiceClient
-        """
-        credential = self.get_credential()
-        account_url = self.get_file_share_account_url(account_name, share_name)
-        share_service_client = ShareServiceClient(
-            account_url=account_url,
-            credential=credential,
-            token_intent='backup'
-        )
-        return share_service_client
-
-    def get_file_share_account_url(self, account_name: str = None, share_name: str = None) -> str:
+    def get_file_share_account_url(self, account_name: str = None) -> str:
         """
         get blob service account URL
 
@@ -340,11 +308,9 @@ class Session(object):
 
         Parameters:
             account_name (str): Optional. name of storage account url. If the parameter is not set, use default account name from config.
-            share_name (str): name of file share. If the parameter is not set, use default account name from config.
         """
         ac_name = account_name if account_name is not None else self.get_account_name()
-        sh_name = share_name if share_name is not None else self.get_file_share_name()
-        return f"https://{ac_name}.file.core.windows.net/{sh_name}"
+        return f"https://{ac_name}.file.core.windows.net"
 
     def get_components(self):
         """

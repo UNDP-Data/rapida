@@ -282,14 +282,14 @@ class Project:
 
     def upload(self, progress=None, overwrite=False, max_concurrency=8):
         """
-            Uploads a folder representing a rapida propject to the Azure  account and file share set through
-            rapida init
-            :param project_folder: str, the full path to the project folder
-            :param progress: optional, instance of rich progress to report upload status
-            :param overwrite: bool, default = false, whether the files in the project located remotely should be overwritten
-            :param max_concurrency: int, the number of threads to use in low level azure api when uploading
-            in case they already exists
-            :return: None
+        Uploads a folder representing a rapida propject to the Azure account and file share set through rapida init
+
+        :param project_folder: str, the full path to the project folder
+        :param progress: optional, instance of rich progress to report upload status
+        :param overwrite: bool, default = false, whether the files in the project located remotely should be overwritten
+        :param max_concurrency: int, the number of threads to use in low level azure api when uploading
+        in case they already exists
+        :return: None
         """
         with Session() as session:
             account_name = session.get_account_name()

@@ -5,7 +5,6 @@ from cbsurge.admin import admin
 from cbsurge.project import create, list, upload, download, publish, delete
 from cbsurge.initialize import init
 from cbsurge.assess import assess
-from cbsurge.stats import stats
 import click
 
 
@@ -24,7 +23,6 @@ def cli(ctx):
 cli.add_command(admin)
 cli.add_command(init)
 cli.add_command(assess)
-cli.add_command(stats)
 cli.add_command(create)
 cli.add_command(list)
 cli.add_command(upload)

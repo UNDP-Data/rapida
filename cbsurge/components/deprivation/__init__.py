@@ -13,7 +13,6 @@ from cbsurge.session import Session
 from cbsurge.util import geo
 from cbsurge.util.download_geodata import download_raster
 from cbsurge.util.resolve_url import resolve_geohub_url
-from cbsurge.stats.zst import zst
 from osgeo_utils.gdal_calc import Calc
 from cbsurge.constants import GTIFF_CREATION_OPTIONS
 

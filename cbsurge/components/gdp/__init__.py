@@ -14,7 +14,7 @@ from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
-from cbsurge.stats.zst import zst
+from cbsurge.stats.raster_zonal_stats import zst
 from cbsurge.util import geo
 from cbsurge.util.download_geodata import download_raster
 logger = logging.getLogger(__name__)

@@ -2,7 +2,7 @@ import logging
 
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.admin import admin
-from cbsurge.project import create, list, upload, download, publish
+from cbsurge.project import create, list, upload, download, publish, delete
 from cbsurge.initialize import init
 from cbsurge.assess import assess
 from cbsurge.stats import stats
@@ -29,6 +29,7 @@ cli.add_command(create)
 cli.add_command(list)
 cli.add_command(upload)
 cli.add_command(download)
+cli.add_command(delete)
 cli.add_command(publish)
 
 

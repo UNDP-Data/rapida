@@ -9,7 +9,7 @@ from cbsurge.session import Session
 
 logger = logging.getLogger('rapida')
 
-class NaturalEnvironmentComponent(Component):
+class LanduseComponent(Component):
     def __call__(self, variables: List[str], **kwargs):
         if not variables:
             variables = self.variables
@@ -27,7 +27,7 @@ class NaturalEnvironmentComponent(Component):
             for var_name in variables:
                 var_data = variable_data[var_name]
 
-                v = NaturalEnvironmentVariable(
+                v = LanduseVariable(
                     name=var_name,
                     component=self.component_name,
                     **var_data
@@ -36,7 +36,7 @@ class NaturalEnvironmentComponent(Component):
 
 
 
-class NaturalEnvironmentVariable(Variable):
+class LanduseVariable(Variable):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         project = Project(path=os.getcwd())
@@ -45,7 +45,6 @@ class NaturalEnvironmentVariable(Variable):
     def __call__(self, *args, **kwargs):
         force_compute = kwargs.get('force_compute', False)
         progress = kwargs.get('progress', False)
-
 
 
     def download(self):

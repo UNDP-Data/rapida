@@ -15,7 +15,7 @@ from osgeo_utils.gdal_calc import Calc
 from osgeo import gdal
 import click
 from cbsurge.components.population.worldpop import population_sync, process_aggregates, run_download
-from cbsurge.stats.zst import sumup, zst
+from cbsurge.stats.raster_zonal_stats import sumup, zst
 import geopandas
 from cbsurge.components.population.pop_coefficient import get_pop_coeff
 from cbsurge.az import blobstorage

@@ -5,6 +5,8 @@ import logging
 import sys
 from cbsurge.az.fileshare import list_projects, download_project
 from rich.progress import Progress
+
+from cbsurge.session import is_rapida_initialized
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
@@ -23,6 +25,9 @@ logger = setup_logger()
 
 def create(name=None, polygons=None, mask=None, comment=None):
 
+    if not is_rapida_initialized():
+        return
+
     abs_folder = os.path.abspath(name)
     if os.path.exists(abs_folder):
         logger.error(f'Folder "{name}" already exists in {os.getcwd()}')
@@ -37,6 +42,9 @@ def create(name=None, polygons=None, mask=None, comment=None):
 
 @click.command(short_help=f'list RAPIDA projects/folders located in default Azure file share')
 def list():
+    if not is_rapida_initialized():
+        return
+
     const = '-'*15
     tabs = '\t'*1
     click.echo(f'{const} Available RAPIDA projects {const}')
@@ -83,6 +91,9 @@ def upload(project=None,max_concurrency=4,overwrite=None, debug: bool =False):
         To use --overwrite, old project data in Azure File Share will be lost.
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+    if not is_rapida_initialized():
+        return
 
     if project is None:
         project = os.getcwd()
@@ -146,6 +157,9 @@ def download(project_name=None, destination_folder=None, max_concurrency=None,ov
         To use --overwrite, old project data in local storage will be lost..
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+    if not is_rapida_initialized():
+        return
 
     last_folder = destination_folder.split('/')[-1]
     project_path = destination_folder
@@ -213,6 +227,9 @@ def delete(project: str, yes: bool = False, debug: bool =False):
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
+    if not is_rapida_initialized():
+        return
+
     if project is None:
         project = os.getcwd()
     else:
@@ -253,6 +270,9 @@ def publish(project: str, yes: bool = False, debug: bool =False):
         If you answer all prompts to yes, use '--yes' option of the command.
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+    if not is_rapida_initialized():
+        return
 
     if project is None:
         project = os.getcwd()

@@ -349,6 +349,19 @@ class Session(object):
         component = self.get_component(component=component)
         return component[variable]
 
+
+def is_rapida_initialized():
+    """
+    Check if RAPIDA has been initialized
+
+    :return: boolean if True, config.json exists
+    """
+    with Session() as session:
+        if session.get_config() is None:
+            logger.warning(f"Rapida tool is not initialized. Please run `rapida init` first.")
+            return False
+    return True
+
 # for testing
 # import asyncio
 # async def main():

@@ -5,7 +5,7 @@ import importlib
 import sys
 import click
 from rich.progress import Progress
-from cbsurge.session import Session
+from cbsurge.session import Session, is_rapida_initialized
 from cbsurge.project import Project
 from cbsurge.util.setup_logger import setup_logger
 
@@ -84,6 +84,10 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
         logger = setup_logger(level=logging.DEBUG)
     else:
         logger = setup_logger()
+
+    if not is_rapida_initialized():
+        return
+
     try:
         current_folder = os.getcwd()
         project = Project(path=current_folder)

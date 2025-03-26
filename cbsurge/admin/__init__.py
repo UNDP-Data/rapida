@@ -4,6 +4,7 @@ import os
 
 from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
+from cbsurge.session import is_rapida_initialized
 from cbsurge.util.bbox_param_type import BboxParamType
 import click
 import json
@@ -37,14 +38,11 @@ def save(geojson_dict=None, dst_path=None, layer_name=None):
 
 @click.group(short_help=f'fetch administrative boundaries at various levels from OSM/OCHA')
 def admin():
-
     pass
 
 
 @admin.command(no_args_is_help=True)
-
 @click.argument('destination_path', type=click.Path())
-
 @click.option('-b', '--bbox', required=True, type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
@@ -70,17 +68,12 @@ def admin():
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
-
-
-
 @click.option('--debug',
 
     is_flag=True,
     default=False,
     help="Set log level to debug"
 )
-
-
 def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, destination_path=None, debug=False,):
     """
     Fetch admin boundaries from OSM
@@ -108,6 +101,9 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     if debug:
         logger.setLevel(logging.DEBUG)
 
+    if not is_rapida_initialized():
+        return
+
     geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
     if not geojson:
         logger.error('Could not extract admin boundaries from OSM for the provided bbox')
@@ -117,9 +113,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
 
 @admin.command(no_args_is_help=True)
-
 @click.argument('destination_path', type=click.Path())
-
 @click.option('-b', '--bbox', required=True, type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
 @click.option('-l','--admin_level',
@@ -127,7 +121,6 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
                 type=click.IntRange(min=0, max=2, clamp=False),
                 help='UNDP admin level from where to extract the admin features'
                 )
-
 @click.option('--clip',
 
     is_flag=True,
@@ -141,18 +134,12 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
-
-
-
-
 @click.option('--debug',
 
     is_flag=True,
     default=False,
     help="Set log level to debug"
 )
-
-
 def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, destination_path=None, debug=False ):
     """
     Fetch admin boundaries from OCHA COD
@@ -177,6 +164,10 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, destination_
     logger = logging.getLogger('rapida')
     if debug:
         logger.setLevel(logging.DEBUG)
+
+    if not is_rapida_initialized():
+        return
+
     geojson = fetch_ocha_admin(bbox=bbox, admin_level=admin_level, clip=clip, h3id_precision=h3id_precision)
     if not geojson:
         logger.error('Could not extract admin boundaries from OCHA for the provided bbox')

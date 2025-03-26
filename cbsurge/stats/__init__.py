@@ -1,6 +1,9 @@
 import logging
 import click
+
+from cbsurge.session import is_rapida_initialized
 from cbsurge.stats.zonal_stats import ZonalStats
+from cbsurge.util.setup_logger import setup_logger
 
 
 @click.group(short_help=f'compute zonal statistics using exactextract')
@@ -77,7 +80,10 @@ def compute(
     Example: \n
         rapida stats compute ./cbsurge/stats/tests/assets/admin2.geojson ./cbsurge/stats/tests/assets/admin2_stats.fgb -r ./cbsurge/stats/tests/assets/rwa_m_5_2020_constrained_UNadj.tif -r ./cbsurge/stats/tests/assets/rwa_f_5_2020_constrained_UNadj.tif -o sum -c male_5_sum -c female_5_sum
     """
-    logging.basicConfig(level=logging.DEBUG if debug else logging.INFO)
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+    if not is_rapida_initialized():
+        return
 
     with ZonalStats(input_file, target_crs="ESRI:54009") as st:
         st.compute(raster, operations=operation, operation_cols=column)

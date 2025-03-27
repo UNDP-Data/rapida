@@ -9,12 +9,12 @@ from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.util import geo
-from cbsurge.util.download_geodata import download_raster, download_rasta
+from cbsurge.util.download_geodata import download_raster
 from cbsurge.util.resolve_url import resolve_geohub_url
-from cbsurge.stats.zst import zst
+from cbsurge.stats.raster_zonal_stats import zst
 from osgeo_utils.gdal_calc import Calc
 from cbsurge.constants import GTIFF_CREATION_OPTIONS
-from osgeo import gdal
+from osgeo import gdal, ogr
 logger = logging.getLogger(__name__)
 
 
@@ -37,6 +37,15 @@ class RwiComponent(Component):
 
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
+
+            # delete stats layer if exist
+            project = Project(path=os.getcwd())
+            geopackage_path = project.geopackage_file_path
+            with ogr.Open(geopackage_path, 1) as ds:
+                dst_layer = f"stats.{self.component_name}"
+                layer_index = ds.GetLayerByName(dst_layer)
+                if layer_index is not None:
+                    ds.DeleteLayer(dst_layer)
 
             for var_name in variables:
                 var_data = variables_data[var_name]
@@ -63,7 +72,6 @@ class RwiVariable(Variable):
         geopackage_path = project.geopackage_file_path
         output_filename = f"{self.component}.tif"
         self.local_path = os.path.join(os.path.dirname(geopackage_path), self.component, output_filename)
-        #self.local_path = os.path.join(os.path.dirname(geopackage_path), output_filename)
 
     def __call__(self, *args, **kwargs):
         """
@@ -122,21 +130,20 @@ class RwiVariable(Variable):
         if geo.is_raster(self.local_path):
 
             project = Project(os.getcwd())
-            affected_local_path = self.affected_path
-            ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
-                      creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
-                      NoDataValue=None,
-                      local_path=self.local_path, mask=project.raster_mask)
-            ds = None
-            assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
-            return affected_local_path
+            if project.raster_mask:
+                affected_local_path = self.affected_path
+                ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
+                          creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
+                          NoDataValue=None,
+                          local_path=self.local_path, mask=project.raster_mask)
+                ds = None
+                assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
+                return affected_local_path
 
     def download(self, force_compute=False, **kwargs):
-
-        if os.path.exists(self.local_path) and not force_compute:
-
-            assert os.path.exists(self.affected_path), (f'The affected version of {self.component} force not exist.'
-                                                        f'Consider assessing using --force_compute flag')
+        if force_compute == False and os.path.exists(self.local_path):
+            if not os.path.exists(self.affected_path):
+                self._compute_affected_()
             return self.local_path
 
         logger.info(f'Downloading {self.component}')
@@ -144,10 +151,11 @@ class RwiVariable(Variable):
 
         if not os.path.exists(out_folder):
             os.makedirs(out_folder)
+
         project = Project(os.getcwd())
         progress = kwargs.pop('progress', None)
         local_path = os.path.join(project.data_folder, self.component, f'{self.component}_downloaded.tif')
-        download_rasta(
+        download_raster(
             src_dataset_path=self.source,
             src_band=1,
             dst_dataset_path=local_path,
@@ -179,37 +187,6 @@ class RwiVariable(Variable):
         assert force_compute, f'invalid force_compute={force_compute}'
         return self.download(force_compute=force_compute, **kwargs)
 
-    # def download(self, **kwargs):
-    #     """
-    #     Download RWI data source
-    #     """
-    #     project = Project(path=os.getcwd())
-    #     geopackage_path = project.geopackage_file_path
-    #     cog_url = self.source
-    #
-    #     force_compute = kwargs.get('force_compute', False)
-    #
-    #     if force_compute == True or not os.path.exists(self.local_path):
-    #         self.local_path = download_raster(
-    #             dataset_url=cog_url,
-    #             geopackage_path=geopackage_path,
-    #             output_filename=os.path.basename(self.local_path),
-    #             progress=kwargs.get('progress', None)
-    #         )
-    #
-    #     if project.raster_mask is not None and geo.is_raster(self.local_path):
-    #         affected_local_path = self.affected_path
-    #         if force_compute == True or not os.path.exists(affected_local_path):
-    #             geo.clip_raster_with_mask(
-    #                 source=self.local_path,
-    #                 mask=project.raster_mask,
-    #                 output_path=affected_local_path,
-    #                 progress=kwargs.get('progress', None)
-    #             )
-
-    # def compute(self, **kwargs):
-    #     pass
-
     def resolve(self, **kwargs):
         pass
 
@@ -221,7 +198,7 @@ class RwiVariable(Variable):
         evaluate_task = None
         if progress is not None:
             evaluate_task = progress.add_task(
-                description=f'[red]Going to evaluate {self.name} in {self.component} component', total=None)
+                description=f'[red] Going to evaluate {self.name} in {self.component} component', total=None)
 
         dst_layer = f'stats.{self.component}'
         project = Project(path=os.getcwd())
@@ -236,7 +213,7 @@ class RwiVariable(Variable):
             assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
 
             if progress is not None and evaluate_task is not None:
-                progress.update(evaluate_task, description=f'Evaluating variable {self.name} using zonal stats')
+                progress.update(evaluate_task, description=f'[red] Evaluating variable {self.name} using zonal stats')
 
             # raster variable, run zonal stats
             src_rasters = [self.local_path]
@@ -253,16 +230,16 @@ class RwiVariable(Variable):
                       )
 
             if progress is not None and evaluate_task is not None:
-                progress.update(evaluate_task, description=f'Evaluated variable {self.name} using zonal stats')
+                progress.update(evaluate_task, description=f'[red] Evaluated variable {self.name} using zonal stats')
 
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task,
-                                description=f'Writing {self.name} to {project.geopackage_file_path}:{dst_layer}')
+                                description=f'[red] Writing {self.name} to {project.geopackage_file_path}:{dst_layer}')
 
-            gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG")
+            gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG", overwrite=True)
         else:
             progress.update(evaluate_task,
-                            description=f'{self.name} was skipped because of lack of operator definition.')
+                            description=f'[red] {self.name} was skipped because of lack of operator definition.')
 
         if progress and evaluate_task:
             progress.remove_task(evaluate_task)

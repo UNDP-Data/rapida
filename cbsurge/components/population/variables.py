@@ -41,6 +41,9 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
     :param age_groups:
     :return:
     """
+    license = "Creative Commons Attribution 4.0 International"
+    attribution = "WorldPop"
+
     with Session() as session:
         # if root is same with UNDP_AZURE_WPOP_PATH, replace account name and container name from session object
         if root == UNDP_AZURE_WPOP_PATH:
@@ -61,31 +64,31 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
                 path_template = os.path.join(root, sex, age_group, fname_template)
                 sources.append(path_template)
 
-            variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
+            variables[name] = dict(title=title, source=source, sources=sources, operator='sum', license=license, attribution=attribution)
 
             #age group aggregates
             name = f'{age_group}_{aggregate}'
             title = f'{age_group.capitalize()} population'
             source = os.path.join(aggregate_root, f'{{country}}_{age_group}_{aggregate}.tif')
             sources = '+'.join([f'{e}_{age_group}' for e in sexes])
-            variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
+            variables[name] = dict(title=title, source=source, sources=sources, operator='sum', license=license, attribution=attribution)
         # sex group aggregates
         name = f'{sex}_{aggregate}'
         title = f'{sex.capitalize()} population'
         source = os.path.join(aggregate_root, f'{{country}}_{sex}_{aggregate}.tif')
         sources = '+'.join([f'{sex}_{e[0]}' for e in age_groups])
-        variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
+        variables[name] = dict(title=title, source=source, sources=sources, operator='sum', license=license, attribution=attribution)
     #total aggregate
     name = aggregate
     title = f'{aggregate.capitalize()} population'
     source = os.path.join(aggregate_root, f'{{country}}_{aggregate}.tif')
     sources = '+'.join([f'{e}_{aggregate}' for e in SEXES])
-    variables[name] = dict(title=title, source=source, sources=sources, operator='sum')
+    variables[name] = dict(title=title, source=source, sources=sources, operator='sum', license=license, attribution=attribution)
 
     #dependencies
-    variables['dependency'] = dict(title='Total dependency ratio', sources='((child_total+elderly_total)/active_total)*100')
-    variables['child_dependency'] = dict(title='Child dependency ratio', sources='(child_total/active_total)*100')
-    variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100' )
+    variables['dependency'] = dict(title='Total dependency ratio', sources='((child_total+elderly_total)/active_total)*100', license=license, attribution=attribution)
+    variables['child_dependency'] = dict(title='Child dependency ratio', sources='(child_total/active_total)*100', license=license, attribution=attribution)
+    variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100', license=license, attribution=attribution)
     return variables
 
 

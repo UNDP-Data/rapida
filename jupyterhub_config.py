@@ -1,3 +1,4 @@
+import os
 # Configuration file for jupyterhub.
 
 c = get_config()  #noqa
@@ -1625,7 +1626,7 @@ c.Authenticator.allow_all = True
 #      allowing override of 'default' env variables,
 #      such as JUPYTERHUB_API_URL.
 #  Default: {}
-# c.Spawner.environment = {}
+c.Spawner.environment.update(os.environ.items())
 
 ## Override specific traitlets based on group membership of the user.
 #

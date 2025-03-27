@@ -24,7 +24,7 @@ ENV DATA_DIR $DATA_DIR
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get update && \
     apt-get install -y python3-pip pipenv \
-        gcc cmake libgeos-dev git vim \
+        gcc cmake libgeos-dev git vim sudo \
         ca-certificates curl gnupg nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
@@ -42,6 +42,7 @@ COPY README.md README.md
 
 # install dev and jupyter dependencies
 ENV PIPENV_VENV_IN_PROJECT=1
+ENV PLAYWRIGHT_BROWSERS_PATH=0
 RUN pipenv install --python 3 && \
     pipenv run pip install .[dev,jupyter] && \
     pipenv run pip install playwright && \

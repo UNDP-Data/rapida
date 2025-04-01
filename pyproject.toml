@@ -41,7 +41,8 @@ dependencies = [
     "pydantic",
     "pmtiles",
     "msal",
-    "playwright"
+    "playwright",
+    "pystac_client",
 ]
 
 [project.optional-dependencies]

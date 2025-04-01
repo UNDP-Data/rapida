@@ -7,6 +7,9 @@ from datetime import datetime, timedelta, UTC
 import os
 from os.path import expanduser
 import logging
+
+from sqlalchemy import True_
+
 from cbsurge.az.surgeauth import SurgeTokenCredential
 from playwright.sync_api import sync_playwright
 from playwright.async_api import async_playwright
@@ -15,7 +18,7 @@ from cbsurge.util.in_notebook import in_notebook
 from requests_oauthlib import OAuth2Session
 import requests
 logger = logging.getLogger(__name__)
-
+import codecs
 # cache file path
 TOKEN_CACHE_FIlE = 'token_cache.json'
 
@@ -110,13 +113,16 @@ class MsalTokenCredential(TokenCredential):
 @click.command()
 @click.option('-c', '--cache_dir', default=None, type=click.Path(),
               help="Optional. Folder path to store token_cache.json. Default is ~/.cbsurge folder to store cache file.")
+
 def authenticate(cache_dir):
     """
-    Authenticate with MSAL locally to UNDP account
+    Authenticate with  UNDP account
     """
-    credential = SurgeTokenCredential()
-    token = credential.get_token()
-    print(token)
+
+
+    credential = SurgeTokenCredential(cache_dir=cache_dir)
+    token, exp_ts = credential.get_token("https://storage.azure.com/.default",)
+
     # # Connect to Azure Blob Storage
     # blob_service_client = BlobServiceClient(
     #     account_url="https://undpgeohub.blob.core.windows.net",

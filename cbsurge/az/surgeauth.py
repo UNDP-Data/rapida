@@ -1,4 +1,5 @@
-
+import click
+import playwright.sync_api
 from azure.storage.blob import BlobServiceClient
 import time
 from urllib.parse import urlparse, parse_qs
@@ -10,22 +11,16 @@ import hashlib
 import base64
 from os.path import expanduser
 import logging
+
+from oauthlib.oauth2 import OAuth2Error
 from playwright.sync_api import sync_playwright
+
 from cbsurge.util.in_notebook import in_notebook
 from requests_oauthlib import OAuth2Session
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import json
 logger = logging.getLogger(__name__)
-
-# Secure AES-256 key (store in a vault or HSM in production)
-KEY = os.urandom(32)  # WARNING: Don't regenerate every time! Use a fixed key.
-
-# Secure RAM-based storage location
-SHM_DIR = "/dev/shm/cbcurge"
-
-# Ensure secure directory exists (only accessible by the owner)
-os.makedirs(SHM_DIR, mode=0o700, exist_ok=True)  # Owner-only access
 
 
 def derive_key_from_username(username: str) -> bytes:
@@ -35,13 +30,13 @@ def derive_key_from_username(username: str) -> bytes:
     return key
 
 
-def encrypt_json(json_data: dict, username: str, shm_path: str = None):
-    """Encrypt a JSON object and store it securely in /dev/shm/ as a binary file."""
+def encrypt_json(json_data: dict, username: str, cache_file_path: str = None):
+    """Encrypt a JSON object and store it securely as a binary file."""
     # Derive AES key from username
     key = derive_key_from_username(username)
 
     # Initialize AES-GCM with the derived key
-    aesgcm = AESGCM(key)
+    aes_gcm = AESGCM(key)
 
     # Generate a 96-bit (12-byte) nonce for AES-GCM
     nonce = os.urandom(12)
@@ -50,24 +45,24 @@ def encrypt_json(json_data: dict, username: str, shm_path: str = None):
     plaintext = json.dumps(json_data).encode('utf-8')
 
     # Encrypt the plaintext using AES-GCM
-    ciphertext = aesgcm.encrypt(nonce, plaintext, None)
+    ciphertext = aes_gcm.encrypt(nonce, plaintext, None)
 
     # Write the nonce and ciphertext to the specified file path
-    with open(shm_path, "wb") as f:
+    with open(cache_file_path, "wb") as f:
         f.write(nonce + ciphertext)
 
     # Ensure the file exists and restrict access to owner-only
-    assert os.path.exists(shm_path)
-    os.chmod(shm_path, 0o600)
+    assert os.path.exists(cache_file_path)
+    os.chmod(cache_file_path, 0o600)
 
 
-def decrypt_json(username: str, shm_path: str) -> dict:
+def decrypt_json(username: str, cache_file_path: str) -> dict:
     """Decrypt a JSON object stored in a binary file and return it as a Python dictionary."""
     # Derive AES key from username
     key = derive_key_from_username(username)
 
     # Read the encrypted file and extract the nonce and ciphertext
-    with open(shm_path, "rb") as f:
+    with open(cache_file_path, "rb") as f:
         data = f.read()
 
     # First 12 bytes are the nonce
@@ -77,20 +72,34 @@ def decrypt_json(username: str, shm_path: str) -> dict:
     ciphertext = data[12:]
 
     # Initialize AES-GCM with the derived key
-    aesgcm = AESGCM(key)
+    aes_gcm = AESGCM(key)
 
     # Decrypt the ciphertext
-    decrypted_data = aesgcm.decrypt(nonce, ciphertext, None)
+    decrypted_data = aes_gcm.decrypt(nonce, ciphertext, None)
 
     # Convert the decrypted bytes back to a Python dictionary (JSON)
     json_data = json.loads(decrypted_data.decode('utf-8'))
 
     return json_data
+
+
+
+
+def is_called_from_click():
+    try:
+        return click.get_current_context(silent=True) is not None
+    except RuntimeError:
+        return False  # Happens if Click is not in use
+
+
+
 class SurgeTokenCredential(TokenCredential):
 
     KEY = derive_key_from_username(os.environ.get('USER', None))
     TOKEN_FILE_NAME = f'{base64.urlsafe_b64encode(KEY).decode('utf-8')[:25]}.bin'
-    def __init__(self, cache_dir=SHM_DIR):
+    STORAGE_SCOPE = ["https://storage.azure.com/.default"]
+
+    def __init__(self, cache_dir=None):
         # Azure AD Configuration
         # UNDP tenant ID
         self.token = None
@@ -104,68 +113,89 @@ class SurgeTokenCredential(TokenCredential):
         self.token_url = f"{self.authority}/oauth2/v2.0/token"
 
         # cache file path
-        if cache_dir is None:
-            cache_dir = os.path.join(expanduser("~"),'.cbsurge')
-        self._cache_file_ = os.path.join(cache_dir,self.TOKEN_FILE_NAME)
+        self._cache_dir_ = cache_dir
+        if self._cache_dir_ is None:
+            self._cache_dir_ = os.path.join(expanduser("~"), '.cbsurge')
+        self._cache_file_ = os.path.join(self._cache_dir_,self.TOKEN_FILE_NAME)
+        self._load_from_cache_()
 
-        # if os.path.exists(self._cache_file_):
-        #     os.remove(self._cache_file_)
-        self._load_cache_()
 
-        #self.app = PublicClientApplication(client_id=self.client_id , authority=self.authority, token_cache=self._cache_)
-
-    def _load_cache_(self):
+    def _load_from_cache_(self):
         if os.path.exists(self._cache_file_):
-            self.token = decrypt_json(username=os.environ.get('USER', None), shm_path=self._cache_file_)
-    def _save_cache_(self):
-        encrypt_json(json_data=self.token, username=os.environ.get('USER', None), shm_path=self._cache_file_)
+            self.token = decrypt_json(username=os.environ.get('USER', None), cache_file_path=self._cache_file_)
 
-    def fetch_token(self, *scope, email=None, passwd=None, **kwargs):
+    def _save_to_cache_(self):
+        if not os.path.exists(self._cache_dir_):
+            os.makedirs(self._cache_dir_, mode=0o700, exist_ok=True)
+        encrypt_json(json_data=self.token, username=os.environ.get('USER', None), cache_file_path=self._cache_file_)
+
+    def fetch_token(self, *scope, username=None, password=None, mfa_confirmation_widget=None):
+
         # Start OAuth session
         oauth = OAuth2Session(self.client_id, redirect_uri=self.redirect_uri, scope=scope)
         # Step 1: Get authorization URL
         auth_url, state = oauth.authorization_url(self.auth_url)
-        response = requests.get(auth_url, allow_redirects=False)
         auth_code = None
+
         with sync_playwright() as p:
-            for i in range(3):
+            with p.chromium.launch(headless=True, args=["--no-sandbox"]) as browser: # Use headless=True for invisible mode
+                error_msg = None
+
+                page = browser.new_page()
+                page.goto(auth_url)
+                # # Wait for the password field to appear and fill it in
+                page.wait_for_selector(selector='input[type="email"]', timeout=.5 * 60 * 1000)
+                # Fill in the username
+                page.fill(selector='input[type="email"]', value=str(username))
+                page.click('input[type="submit"]')  # Click the next button
+
+                error_selector = '#usernameError'  # This should match the ID of the error message element
                 try:
-                    browser = p.chromium.launch(headless=True,
-                                                args=["--no-sandbox"])  # Use headless=True for invisible mode
-                    page = browser.new_page()
-                    page.goto(url=auth_url)
-                    # Fill in the username
-                    page.fill(selector='input[type="email"]', value=email)
-                    page.click('input[type="submit"]')  # Click the next button
-
-                    # Wait for the password field to appear and fill it in
-                    page.wait_for_selector(selector='input[type="password"]', timeout=.5 * 60 * 1000)
-                    page.fill(selector='input[type="password"]', value=passwd)
-                    page.click('input[type="submit"]')  # Click the sign-in button
-                    # # Wait for the element containing the number to appear
-                    page.wait_for_selector(selector='#idRichContext_DisplaySign', timeout=.5 * 60 * 1000)
-                    ds = page.locator("#idRichContext_DisplaySign")
-
-                    number = int(ds.text_content())
-
-                    print(f"Enter {number} into Authenticator App")
-                    # Wait for the redirection to complete
-                    page.wait_for_url("**/*code=*",
-                                      timeout=.5 * 60 * 1000)  # Adjust the pattern to match the expected redirect URL
-
-                    # Get the current URL after redirection
-                    final_url = page.url
-                    parsed_url = urlparse(final_url)
-                    query_params = parse_qs(parsed_url.query)
-                    auth_code = query_params.get("code", [None])[0]
+                    page.wait_for_selector(selector=error_selector,timeout=1000)  # Wait up to 10 seconds for the error message
+                    error_message = page.inner_text(error_selector)  # Capture the text of the error message
+                    error_msg = f'Failed to authenticate using username "{username}". {error_message} '
                 except Exception as e:
-                    print(e)
+                    pass
+                if error_msg is not None:
+                    raise OAuth2Error(description=error_msg,status_code=None)
+
+                # Wait for the password field to appear and fill it in
+                page.wait_for_selector(selector='input[type="password"]', timeout=3.5 * 60 * 1000)
+                page.fill(selector='input[type="password"]', value=str(password))
+                page.click('input[type="submit"]')  # Click the sign-in button
+
+                error_selector = '#passwordError'  # This should match the ID of the error message element
+                try:
+                    page.wait_for_selector(selector=error_selector,
+                                           timeout=1000)  # Wait up to 10 seconds for the error message
+                    error_msg = page.inner_text(error_selector)  # Capture the text of the error message
+                except Exception as e:
+                    pass
+                if error_msg is not None:
+                    raise OAuth2Error(description=error_msg)
 
 
+                # Wait for the element containing the number to appear
+                page.wait_for_selector(selector='#idRichContext_DisplaySign', timeout=.5 * 60 * 1000)
+                ds = page.locator("#idRichContext_DisplaySign")
 
-            # Close the browser
+                number = int(ds.text_content())
+                if mfa_confirmation_widget is None:
+                    logger.info(f"Your MFA input code is: {number}. Please input it into the  Authenticator App on your mobile")
+                else:
+                    mfa_confirmation_widget.value = number
 
-            browser.close()
+                # Wait for the redirection to complete
+                page.wait_for_url("**/*code=*",
+                                  timeout=.5 * 60 * 1000)  # Adjust the pattern to match the expected redirect URL
+
+                # Get the current URL after redirection
+                final_url = page.url
+                parsed_url = urlparse(final_url)
+                query_params = parse_qs(parsed_url.query)
+                auth_code = query_params.get("code", [None])[0]
+
+
         # Step 3: Exchange authorization code for access token
         token_data = {
             "client_id": self.client_id,
@@ -177,47 +207,75 @@ class SurgeTokenCredential(TokenCredential):
 
         token_response = requests.post(self.token_url, data=token_data)
         token_data = token_response.json()
-        token_data['expires_in'] = int(token_data['expires_in'] + time.time())
-        token_data['cached_at'] = int(time.time())
+        now = time.time()
+        token_data['expires_at'] = int(token_data['expires_in'] + now)
+        token_data['cached_at'] = int(now)
         return token_data
 
-    def refresh_token(self):
+    def refresh_token(self, *scope):
         data = {
             'client_id': self.client_id,
             'grant_type': 'refresh_token',
             'refresh_token': self.token['refresh_token'],
-            'scope': self.token['scope']
+            'scope': list(scope)
         }
+
 
         response = requests.post(self.token_url, data=data)
 
         if response.status_code == 200:
             token_data = response.json()
-            token_data['expires_in'] = int(token_data['expires_in'] + time.time())
-            token_data['cached_at'] = int(time.time())
+            now = time.time()
+            token_data['expires_at'] = int(token_data['expires_in'] + now)
+            token_data['cached_at'] = int(now)
             return token_data
         else:
-            logger.info("Failed to refresh token:", response.json())
 
+            logger.info(f"Failed to refresh token: {response.json()} " )
 
-    def get_token(self, *scopes, mfa_widget=None) -> AccessToken:
-        'get the access token, aither from cache, fetched or refreshed'
-        if self.token:
-            expires_at = datetime.fromtimestamp(self.token["expires_in"])
+    @property
+    def authenticated(self):
+        if self.token is not None:
+            expires_at = datetime.fromtimestamp(self.token["expires_at"])
             expires_in = expires_at - datetime.now()
             expires_in_secs = expires_in.total_seconds()
+            return expires_in_secs > 15
+        return False
 
+
+
+    def get_token(self, *scopes, auth_widget=None) -> AccessToken:
+        """
+        get the access token, either from cache, fetched or refreshed
+        :param scopes:
+
+        :return:
+        """
+
+
+        if self.token:
+            expires_at = datetime.fromtimestamp(self.token["expires_at"])
+            expires_in = expires_at - datetime.now()
+            expires_in_secs = expires_in.total_seconds()
+            logger.info(
+                f'Token cached at {self._cache_file_} will expire in {expires_in_secs} secs')
             if expires_in_secs < 15*60:
-                logger.debug(f'Token cached at {self._cache_file_} will expire in {expires_in_secs} secs and is going ot be refreshed')
-                self.token = self.refresh_token()
-                self._save_cache_()
+                logger.info(f'Refreshing token')
+                new_token = self.refresh_token(*scopes)
+                if new_token is not None and 'access_token' in new_token:
+                    self.token = new_token
+                    self._save_to_cache_()
 
         else :
-            logger.info("Token not found in cache. Acquiring...")
-            """
-            FOR DOCKER, or an env without browser
-            """
-            self.token = self.fetch_token(*scopes, mfa_widget=mfa_widget)
-            self._save_cache_()
+            logger.info(f"Attempting to authenticate with {self.auth_url}")
 
-        return AccessToken(self.token["access_token"], self.token['expires_in'])
+            if is_called_from_click():
+                email = os.environ.get('RAPIDA_USER', None) or click.prompt('Your UNDP email address please...', type=str)
+                password = os.environ.get('RAPIDA_PASSWORD', None) or click.prompt('Your password...', type=str,
+                                                                                   hide_input=True)
+            else:
+                pass
+            self.token = self.fetch_token(*scopes, username=email, password=password, mfa_confirmation_widget=None)
+            self._save_to_cache_()
+
+        return AccessToken(self.token["access_token"], self.token['expires_at'])

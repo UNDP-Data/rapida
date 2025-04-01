@@ -1,16 +1,17 @@
-# Build felt/tippecanoe
-# Dockerfile from https://github.com/felt/tippecanoe/blob/main/Dockerfile
-FROM ubuntu:22.04 AS tippecanoe-builder
+# Stage 1: Build Tippecanoe
+FROM debian:bookworm-slim AS tippecanoe-builder
 
 RUN apt-get update \
-  && apt-get -y install build-essential libsqlite3-dev zlib1g-dev git
+  && apt-get install -y --no-install-recommends build-essential libsqlite3-dev zlib1g-dev git \
+  && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/felt/tippecanoe
-WORKDIR tippecanoe
-RUN make
+RUN git clone --depth 1 https://github.com/felt/tippecanoe
+WORKDIR /tippecanoe
+RUN make \
+  && strip tippecanoe tile-join \
+  && rm -rf .git *.o
 
-
-# Use the GDAL image as the base
+# Stage 2: Final Image
 FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 
 ARG GROUP_NAME="cbsurge"
@@ -21,39 +22,32 @@ ENV GROUP_NAME $GROUP_NAME
 ENV DATA_DIR $DATA_DIR
 
 # Install necessary tools and Python packages
-RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get update && \
-    apt-get install -y python3-pip pipenv \
-        gcc cmake libgeos-dev git vim sudo \
-        ca-certificates curl gnupg nodejs && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/* && \
-    npm install -g configurable-http-proxy
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip pipenv gcc cmake libgeos-dev curl gnupg nodejs \
+  && rm -rf /var/lib/apt/lists/*
 
-# install azure-cli
-#RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
-
+# Install Node.js and NPM packages efficiently
+RUN npm install -g --omit=dev configurable-http-proxy
 
 WORKDIR /app
 
-# copy pyproject.toml to install dependencies
-COPY pyproject.toml pyproject.toml
-COPY README.md README.md
+# Copy only necessary dependency files first to leverage Docker caching
+COPY pyproject.toml README.md ./
 
-# install dev and jupyter dependencies
+# Set up virtual environment and install dependencies
 ENV PIPENV_VENV_IN_PROJECT=1
 ENV PLAYWRIGHT_BROWSERS_PATH=0
-RUN pipenv install --python 3 && \
+RUN pipenv install --python 3 --deploy --ignore-pipfile && \
     pipenv run pip install .[dev,jupyter] && \
     pipenv run pip install playwright && \
     pipenv run playwright install chromium --with-deps
 ENV VIRTUAL_ENV=/app/.venv
 
-# copy tippecanoe to production docker image
+# Copy Tippecanoe binaries from the build stage
 COPY --from=tippecanoe-builder /tippecanoe/tippecanoe* /usr/local/bin/
 COPY --from=tippecanoe-builder /tippecanoe/tile-join /usr/local/bin/
 
-# copy rest of files to the image.
+# Copy remaining application files
 COPY . .
 
 # Conditional installation based on PRODUCTION variable
@@ -63,16 +57,13 @@ RUN if [ -z "$PRODUCTION" ]; then \
         pipenv run pip install . ; \
     fi
 
-# Create a group and set permissions for /app
+# Set up user group and permissions
 RUN groupadd ${GROUP_NAME} && \
     usermod -aG ${GROUP_NAME} root && \
-    mkdir -p /app && \
-    chown -R :${GROUP_NAME} /app && \
-    chmod -R g+rwx /app && \
-    mkdir -p $DATA_DIR && \
-    chown -R :${GROUP_NAME} $DATA_DIR
+    mkdir -p /app $DATA_DIR && \
+    chown -R :${GROUP_NAME} /app $DATA_DIR && \
+    chmod -R g+rwx /app $DATA_DIR
 
-RUN chmod +x /app/create_user.sh
-RUN chmod +x /app/entrypoint.sh
+RUN chmod +x /app/create_user.sh /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]

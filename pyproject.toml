@@ -41,7 +41,7 @@ dependencies = [
     "pydantic",
     "pmtiles",
     "msal",
-    "playwright"
+    "requests-oauthlib"
 ]
 
 [project.optional-dependencies]

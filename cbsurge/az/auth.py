@@ -1,31 +1,41 @@
 
 from azure.storage.blob import BlobServiceClient
+from urllib.parse import urlparse, parse_qs
 from msal import PublicClientApplication, SerializableTokenCache
 from azure.core.credentials import AccessToken, TokenCredential
 from datetime import datetime, timedelta, UTC
 import os
 from os.path import expanduser
 import logging
+
+from sqlalchemy import True_
+
+from cbsurge.az.surgeauth import SurgeTokenCredential
 from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 import click
-
-
+from cbsurge.util.in_notebook import in_notebook
+from requests_oauthlib import OAuth2Session
+import requests
 logger = logging.getLogger(__name__)
-
+import codecs
 # cache file path
 TOKEN_CACHE_FIlE = 'token_cache.json'
 
-class PlaywrightAuthenticator():
 
-    def  authenticate(self, url=None, auth_code=None):
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)  # Use headless=True for invisible mode
-            page = browser.new_page()
-            page.goto(url=url)
-            page.wait_for_url(url)
-            e = page.get_by_label('Code')
-            print(e)
-            browser.close()
+
+#
+# class PlaywrightAuthenticator():
+#
+#     def  authenticate(self, url=None, auth_code=None):
+#         with sync_playwright() as p:
+#             browser = p.chromium.launch(headless=False)  # Use headless=True for invisible mode
+#             page = browser.new_page()
+#             page.goto(url=url)
+#             page.wait_for_url(url)
+#             e = page.get_by_label('Code')
+#             print(e)
+#             browser.close()
 
 
 class MsalTokenCredential(TokenCredential):
@@ -103,25 +113,27 @@ class MsalTokenCredential(TokenCredential):
 @click.command()
 @click.option('-c', '--cache_dir', default=None, type=click.Path(),
               help="Optional. Folder path to store token_cache.json. Default is ~/.cbsurge folder to store cache file.")
+
 def authenticate(cache_dir):
     """
-    Authenticate with MSAL locally to UNDP account
+    Authenticate with  UNDP account
     """
-    if cache_dir is None:
-        cache_dir = f"{expanduser("~")}/.cbsurge/"
-    credential = MsalTokenCredential(device_auth=False, cache_dir=cache_dir)
 
-    # Connect to Azure Blob Storage
-    blob_service_client = BlobServiceClient(
-        account_url="https://undpgeohub.blob.core.windows.net",
-        credential=credential
-    )
 
-    # List containers in the storage account
-    cc = blob_service_client.get_container_client(container='stacdata')
-    for blob in cc.list_blobs(name_starts_with='worldpop/2020/ABW'):
-        blob_client = cc.get_blob_client(blob)
-        print(blob_client.blob_name)
+    credential = SurgeTokenCredential(cache_dir=cache_dir)
+    token, exp_ts = credential.get_token("https://storage.azure.com/.default",)
+
+    # # Connect to Azure Blob Storage
+    # blob_service_client = BlobServiceClient(
+    #     account_url="https://undpgeohub.blob.core.windows.net",
+    #     credential=credential
+    # )
+    #
+    # # List containers in the storage account
+    # cc = blob_service_client.get_container_client(container='stacdata')
+    # for blob in cc.list_blobs(name_starts_with='worldpop/2020/ABW'):
+    #     blob_client = cc.get_blob_client(blob)
+    #     print(blob_client.blob_name)
 
 
 if __name__ == '__main__':

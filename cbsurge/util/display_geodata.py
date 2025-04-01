@@ -1,151 +1,146 @@
-import leafmap
 from IPython.core.display_functions import display
 import ipywidgets as widgets
+import leafmap
+import rasterio
 
 
-
-def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification_method='EqualInterval', show_legend=True):
+def display_data(gdf=None, raster=None, col=None, cmap='viridis', classification_method='EqualInterval'):
     """
-    This function is going to be used to display a geodataframe on a leafmap map.
-    :param classification_method:
-    :param show_legend: show legend
-    :param gdf: geodataframe
-    :param raster: raster data
-    :param col: column to be used for coloring
-    :param cmap: colormap
-    :return:
+    Displays a GeoDataFrame or raster on a Leafmap map.
     """
     m = leafmap.Map()
+    classifiers = ['EqualInterval', 'FisherJenks', 'NaturalBreaks', 'Quantiles']
 
-    classifiers = [
-        'EqualInterval',
-        'FisherJenks',
-        'NaturalBreaks',
-        'Quantiles',
-    ]
-
-    columns = [
-        col for col in gdf.columns if col not in ['geometry']
-    ]
+    if gdf is not None:
+        columns = [c for c in gdf.columns if c != 'geometry']
+    else:
+        columns = []
 
     visualization_params = {
         'layer_name': 'vector_layer',
-        'column': columns[0],
+        'column': col or (columns[0] if columns else None),
         'cmap': cmap,
-        'scheme': classifiers[0],
-        'add_legend':True,
-        'info_mode': None
+        'scheme': classification_method or classifiers[0],
+        'add_legend': True,
+        'info_mode': None,
+        'raster_min': None,
+        'raster_max': None,
     }
 
+    column_selector = widgets.Dropdown(options=columns, description='Column:', value=visualization_params['column'])
+    colormap_selector = widgets.Dropdown(options=leafmap.list_palettes(), description='Colormap:', value=cmap)
+    classification_selector = widgets.Dropdown(options=classifiers, description='Classification:',
+                                               value=classification_method)
 
-    column_selector = widgets.Dropdown(
-        options=columns,
-        description='Column:',
-        disabled=False,
-        value=columns[0],
-    )
-    colormap_selector = widgets.Dropdown(
-        options=leafmap.list_palettes(),
-        description='Colormap:',
-        disabled=False,
-        value='viridis'
-    )
-
-    classification_method_selector = widgets.Dropdown(
-        options=classifiers,
-        description='Classification method:',
-        disabled=False,
-        value='EqualInterval',
-    )
-
-    def __switch_column(b):
-        try:
-            visualization_params['column'] = b['new']
-            if gdf[visualization_params['column']].apply(lambda x: isinstance(x, (int, float))).all():
-                # all values in the column are numeric
-                if classification_method_selector.layout.visibility != 'visible':
-                    classification_method_selector.layout.visibility = 'visible'
-            else:
-                # hide the classification method selector
-                classification_method_selector.layout.visibility = 'hidden'
-            # if all the values are the same, don't apply classification
-            if len(gdf[visualization_params['column']].unique()) == 1:
-                # just show the data as is without classification
+    def update_map():
+        """ Updates the map visualization. """
+        if gdf is not None:
+            try:
                 m.remove(m.legend_control)
-                m.remove(m.find_layer('vector_layer'))
-                m.add_data(data=gdf, column=visualization_params['column'], cmap=visualization_params['cmap'], add_legend=True, info_mode=None, layer_name="vector_layer")
-                return
+            except:
+                pass
+
+            m.remove(m.find_layer('vector_layer'))
+            m.add_data(gdf, **visualization_params)
+        if raster:
+            with rasterio.open(raster) as src:
+                no_data = src.nodata
+                m.remove(m.find_layer('raster_layer'))
+                m.add_raster(
+                    source=raster,
+                    colormap=visualization_params['cmap'],
+                    layer_name='raster_layer',
+                    nodata=no_data,
+                    vmax=visualization_params['raster_max'],
+                    vmin=visualization_params['raster_min'],
+                )
+
+    def on_column_change(change):
+        visualization_params['column'] = change['new']
+        is_numeric = gdf[visualization_params['column']].apply(lambda x: isinstance(x, (int, float))).all()
+        classification_selector.layout.visibility = 'visible' if is_numeric else 'hidden'
+        if gdf is not None and len(gdf[visualization_params['column']].unique()) == 1:
+            # just show the data as is without classification
             m.remove(m.legend_control)
             m.remove(m.find_layer('vector_layer'))
-        except:
-            pass
-        finally:
-            m.add_data(gdf, **visualization_params)
+            m.add_data(data=gdf, column=visualization_params['column'], cmap=visualization_params['cmap'],
+                       add_legend=True, info_mode=None, layer_name="vector_layer")
+            return
+        update_map()
 
-
-    def __switch_classification_method(b):
-        try:
-            visualization_params['scheme'] = b['new']
+    def on_classification_change(change):
+        visualization_params['scheme'] = change['new']
+        update_map()
+        if gdf is not None and len(gdf[visualization_params['column']].unique()) == 1:
+            # just show the data as is without classification
             m.remove(m.legend_control)
             m.remove(m.find_layer('vector_layer'))
-        except:
-            pass
-        finally:
-            m.add_data(gdf, **visualization_params)
+            m.add_data(data=gdf, column=visualization_params['column'], cmap=visualization_params['cmap'],
+                       add_legend=True, info_mode=None, layer_name="vector_layer")
+            return
 
-    def __switch_colormap(b):
-        try:
-            visualization_params['cmap'] = b['new']
+    def on_colormap_change(change):
+        visualization_params['cmap'] = change['new']
+        if gdf is not None and len(gdf[visualization_params['column']].unique()) == 1:
+            # just show the data as is without classification
             m.remove(m.legend_control)
             m.remove(m.find_layer('vector_layer'))
-        except:
-            pass
-        finally:
-            m.add_data(gdf, **visualization_params)
+            m.add_data(data=gdf, column=visualization_params['column'], cmap=visualization_params['cmap'],
+                       add_legend=True, info_mode=None, layer_name="vector_layer")
+            return
+        update_map()
 
-
-    column_selector.observe(
-        __switch_column,
-        names='value'
-    )
-    colormap_selector.observe(
-        __switch_colormap,
-        names='value'
-    )
-    classification_method_selector.observe(
-        __switch_classification_method,
-        names='value'
-    )
-
-
-    controls = widgets.HBox(
-        [column_selector, colormap_selector, classification_method_selector]
-    )
+    column_selector.observe(on_column_change, names='value')
+    classification_selector.observe(on_classification_change, names='value')
+    colormap_selector.observe(on_colormap_change, names='value')
 
     if gdf is not None:
-        # all gdf center and zoom
-        dissolved = gdf.to_crs(4326).dissolve()
-        centroid = dissolved.geometry.centroid.iloc[0]
-        lat, lon = centroid.y, centroid.x
+        controls = widgets.HBox([column_selector, colormap_selector, classification_selector])
+    elif raster:
+        controls = widgets.HBox([colormap_selector])
+    else:
+        controls = widgets.HBox([colormap_selector, classification_selector])
 
-        m.set_center(
-            lat=lat,
-            lon=lon,
-            zoom=10
-        )
-
-        # don't apply classification if data in column is not numeric
+    if gdf is not None:
+        centroid = gdf.to_crs(4326).dissolve().geometry.centroid.iloc[0]
+        m.set_center(lat=centroid.y, lon=centroid.x, zoom=10)
+        update_map()
         if not gdf[visualization_params['column']].apply(lambda x: isinstance(x, (int, float))).all():
             visualization_params['method'] = None
             # hide the classification method selector
-            classification_method_selector.layout.visibility = 'hidden'
+            classification_selector.layout.visibility = 'hidden'
 
-        m.add_data(gdf, **visualization_params)
 
-        if raster is not None:
-            m.add_raster(raster, colormap="viridis", layer_name='raster_layer', layer_control=True)
+    if raster:
+        with rasterio.open(raster) as src:
+            no_data = src.nodata
+            visualization_params['raster_min'] = src.read(1).min()
+            visualization_params['raster_max'] = src.read(1).max()
+            min_max_slider = widgets.FloatRangeSlider(
+                min=visualization_params['raster_min'],
+                max=visualization_params['raster_max'])
+            min_max_label = widgets.Label(value='Min/Max:')
+            def on_values_change(change):
+                visualization_params['raster_min'] = change['new'][0]
+                visualization_params['raster_max'] = change['new'][1]
+                update_map()
+
+
+            min_max_slider.observe(on_values_change, names='value')
+
+            leafmap.cog_validate(raster, verbose=True)
+
+            m.add_raster(source=raster,
+                         colormap=visualization_params['cmap'],
+                         layer_name='raster_layer',
+                         zoom_to_layer=True,
+                         nodata=no_data,
+                         vmax=visualization_params['raster_max'],
+                         vmin=visualization_params['raster_min'],
+                         attribution="United Nations Development Programme (UNDP)"
+                         )
+            controls = widgets.HBox([min_max_label, min_max_slider, controls])
+
     display(controls, m)
-    # return the m object just to make it available in the notebook when this function is called.
-    # NOTE: To prevent double maps, use this function as follows:
-    # m = display_data(**kwargs)
     return m
+

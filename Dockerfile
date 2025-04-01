@@ -2,10 +2,20 @@
 FROM debian:bookworm-slim AS tippecanoe-builder
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends build-essential libsqlite3-dev zlib1g-dev git \
+  && apt-get install -y --no-install-recommends build-essential libsqlite3-dev zlib1g-dev curl unzip \
+  && curl -L https://github.com/felt/tippecanoe/archive/refs/heads/main.zip -o tippecanoe.zip \
+  && unzip tippecanoe.zip \
+  && mv tippecanoe-main tippecanoe \
+  && rm tippecanoe.zip \
+  && apt-get remove -y unzip \
   && rm -rf /var/lib/apt/lists/*
 
-RUN git clone --depth 1 https://github.com/felt/tippecanoe
+WORKDIR /tippecanoe
+RUN make \
+  && strip tippecanoe tile-join \
+  && rm -rf .git *.o
+
+
 WORKDIR /tippecanoe
 RUN make \
   && strip tippecanoe tile-join \

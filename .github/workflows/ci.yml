@@ -66,6 +66,25 @@ jobs:
           sudo chown -R 1000:1000 ${{ github.workspace }}
           docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ steps.image_tag.outputs.TAG }} -c "make test"
 
+  free-disk-space:
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Free Disk Space (Ubuntu)
+      uses: jlumbroso/free-disk-space@main
+      with:
+        # this might remove tools that are actually needed,
+        # when set to "true" but frees about 6 GB
+        tool-cache: true
+
+        # all of these default to true, but feel free to set to
+        # "false" if necessary for your workflow
+        android: true
+        dotnet: true
+        haskell: true
+        large-packages: true
+        swap-storage: true
+
   deploy-acr:
     name: Build and deploy to Azure Container Registry
     runs-on: ubuntu-latest

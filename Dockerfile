@@ -7,9 +7,7 @@ RUN apt-get update \
   && unzip tippecanoe.zip \
   && mv tippecanoe-main tippecanoe \
   && rm tippecanoe.zip \
-  && apt-get remove -y unzip \
-  && rm -rf /var/lib/apt/lists/*
-
+  && apt-get remove -y unzip
 WORKDIR /tippecanoe
 RUN make \
   && strip tippecanoe tile-join \

@@ -1,29 +1,18 @@
-# Stage 1: Build Tippecanoe with Nix
-FROM nixos/nix as tippecanoe-builder
+# Build felt/tippecanoe
+# Dockerfile from https://github.com/felt/tippecanoe/blob/main/Dockerfile
+FROM ubuntu:22.04 AS tippecanoe-builder
 
-# Install dependencies using Nix
-RUN nix-env -iA nixpkgs.gcc \
-    nixpkgs.sqlite \
-    nixpkgs.zlib \
-    nixpkgs.git \
-    nixpkgs.make \
-    nixpkgs.curl \
-    nixpkgs.unzip
+RUN apt-get update \
+  && apt-get -y install build-essential libsqlite3-dev zlib1g-dev git
 
-# Download Tippecanoe and build it
-RUN curl -L https://github.com/felt/tippecanoe/archive/refs/heads/main.zip -o tippecanoe.zip && \
-    unzip tippecanoe.zip && \
-    mv tippecanoe-main tippecanoe && \
-    rm tippecanoe.zip && \
-    cd tippecanoe && \
-    make && \
-    strip tippecanoe tile-join && \
-    rm -rf .git *.o
+RUN git clone https://github.com/felt/tippecanoe
+WORKDIR tippecanoe
+RUN make
 
-# Stage 2: Final image using Nix for environment management
-FROM nixos/nix as final-image
 
-# Set environment variables
+# Use the GDAL image as the base
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
+
 ARG GROUP_NAME="cbsurge"
 ARG DATA_DIR='/data'
 ARG PRODUCTION
@@ -31,36 +20,36 @@ ARG PRODUCTION
 ENV GROUP_NAME $GROUP_NAME
 ENV DATA_DIR $DATA_DIR
 
-# Install specific versions of GDAL (3.10) and Python (3.12) via Nix
-RUN nix-env -iA nixpkgs.python3_12 \
-    nixpkgs.python3Packages.pip \
-    nixpkgs.gdal_3_10 \
-    nixpkgs.nodejs \
-    nixpkgs.cmake \
-    nixpkgs.geos \
-    nixpkgs.git \
-    nixpkgs.vim \
-    nixpkgs.sudo \
-    nixpkgs.curl \
-    nixpkgs.npm
+# Install necessary tools and Python packages
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get update && \
+    apt-get install -y python3-pip pipenv \
+        gcc cmake libgeos-dev git vim sudo \
+        ca-certificates curl gnupg nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g configurable-http-proxy
 
-# Set up the environment for Python dependencies
 WORKDIR /app
+
+# copy pyproject.toml to install dependencies
 COPY pyproject.toml pyproject.toml
 COPY README.md README.md
 
-# Install Python dependencies using Pipenv and Nix
-RUN pip install pipenv && \
-    pipenv install --python 3.12 && \
+# install dev and jupyter dependencies
+ENV PIPENV_VENV_IN_PROJECT=1
+ENV PLAYWRIGHT_BROWSERS_PATH=0
+RUN pipenv install --python 3 && \
     pipenv run pip install .[dev,jupyter] && \
     pipenv run pip install playwright && \
     pipenv run playwright install chromium --with-deps
+ENV VIRTUAL_ENV=/app/.venv
 
-# Copy Tippecanoe binaries from the build stage
+# copy tippecanoe to production docker image
 COPY --from=tippecanoe-builder /tippecanoe/tippecanoe* /usr/local/bin/
 COPY --from=tippecanoe-builder /tippecanoe/tile-join /usr/local/bin/
 
-# Copy application files
+# copy rest of files to the image.
 COPY . .
 
 # Conditional installation based on PRODUCTION variable
@@ -69,10 +58,7 @@ RUN if [ -z "$PRODUCTION" ]; then \
     else \
         pipenv run pip install . ; \
     fi
-
-# Clear unnecessary pipenv cache
 RUN pipenv --clear
-
 # Create a group and set permissions for /app
 RUN groupadd ${GROUP_NAME} && \
     usermod -aG ${GROUP_NAME} root && \

@@ -127,9 +127,8 @@ class RwiVariable(Variable):
 
 
     def _compute_affected_(self):
+        project = Project(os.getcwd())
         if geo.is_raster(self.local_path):
-
-            project = Project(os.getcwd())
             if project.raster_mask:
                 affected_local_path = self.affected_path
                 ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',

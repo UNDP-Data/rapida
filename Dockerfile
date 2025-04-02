@@ -24,14 +24,11 @@ ENV DATA_DIR $DATA_DIR
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get update && \
     apt-get install -y python3-pip pipenv \
-        gcc cmake libgeos-dev git vim \
+        gcc cmake libgeos-dev git vim sudo \
         ca-certificates curl gnupg nodejs && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* && \
-     npm install -g configurable-http-proxy
-
-# install azure-cli
-RUN curl -sL https://aka.ms/InstallAzureCLIDeb | bash
+    npm install -g configurable-http-proxy
 
 WORKDIR /app
 
@@ -41,8 +38,11 @@ COPY README.md README.md
 
 # install dev and jupyter dependencies
 ENV PIPENV_VENV_IN_PROJECT=1
+ENV PLAYWRIGHT_BROWSERS_PATH=0
 RUN pipenv install --python 3 && \
-    pipenv run pip install .[dev,jupyter]
+    pipenv run pip install .[dev,jupyter] && \
+    pipenv run pip install playwright && \
+    pipenv run playwright install chromium --with-deps
 ENV VIRTUAL_ENV=/app/.venv
 
 # copy tippecanoe to production docker image
@@ -58,7 +58,7 @@ RUN if [ -z "$PRODUCTION" ]; then \
     else \
         pipenv run pip install . ; \
     fi
-
+RUN pipenv --clear
 # Create a group and set permissions for /app
 RUN groupadd ${GROUP_NAME} && \
     usermod -aG ${GROUP_NAME} root && \

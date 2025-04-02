@@ -41,8 +41,8 @@ dependencies = [
     "pydantic",
     "pmtiles",
     "msal",
-    "playwright",
     "pystac_client",
+    "requests-oauthlib"
 ]
 
 [project.optional-dependencies]

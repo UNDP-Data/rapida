@@ -43,6 +43,7 @@ dependencies = [
     "msal",
     "playwright",
     "pystac_client",
+    "tensorflow",
 ]
 
 [project.optional-dependencies]

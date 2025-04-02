@@ -93,9 +93,11 @@ class Project:
 
 
                 gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name )
+                gdf['geometry'] = gdf['geometry'].apply(lambda geom: geom.buffer(0) if not geom.is_valid else geom)
                 proj_bounds = tuple(map(float,gdf.total_bounds))
                 cols = gdf.columns.tolist()
-                if not 'iso3' in map(lambda s: s.lower(), cols):
+
+                if not 'iso3' in cols:
                     logger.info(f'going to add country code into "iso3" column')
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
@@ -141,8 +143,11 @@ class Project:
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True)
+                    gdf = joined
+
                 else:
-                    self.countries = tuple(set(gdf['iso3']))
+                    self.countries = tuple(sorted(set(gdf['iso3'])))
+
                 if 'h3id' in cols:
                     gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name)
                     h3ids = gdf['h3id'].tolist()

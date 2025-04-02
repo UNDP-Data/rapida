@@ -84,13 +84,16 @@ def import_raster(source=None, dst=None, target_srs=None,
         format='GTiff',
         xRes=x_res,
         yRes=y_res,
-        creationOptions=constants.GTIFF_CREATION_OPTIONS,
+        creationOptions=constants.GTIFF_CREATION_OPTIONS.update({'COMPRESS':'NONE'}),
         cutlineDSName=crop_ds,
         cutlineLayer=crop_layer_name,
         cropToCutline=should_crop,
         targetAlignedPixels=True,
         outputBounds=out_bounds,
         outputBoundsSRS=out_bounds_srs,
+        warpOptions={'OPTIMIZE_SIZE':'YES'},
+        errorThreshold=2
+
 
     )
     warp_options.update(kwargs)
@@ -103,6 +106,7 @@ def import_raster(source=None, dst=None, target_srs=None,
             # reproject raster mask to target projection
             logger.debug(f'Reprojecting {source} to {target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}')
             warp_options.update(dict(dstSRS=target_srs))
+        # print(warp_options, source, dst)
         rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
         assert os.path.exists(dst), f'Failed to align {source}'
         if return_handle:

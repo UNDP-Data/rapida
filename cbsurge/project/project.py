@@ -95,7 +95,7 @@ class Project:
                 gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name )
                 proj_bounds = tuple(map(float,gdf.total_bounds))
                 cols = gdf.columns.tolist()
-                if not 'iso3' in cols:
+                if not 'iso3' in map(lambda s: s.lower(), cols):
                     logger.info(f'going to add country code into "iso3" column')
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
@@ -110,9 +110,35 @@ class Project:
                         a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
                     centroids = gdf.copy()
                     centroids["geometry"] = gdf.centroid
+
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
+                    if joined['iso3'].isna().any():
+                        # Step 2: Separate matched and unmatched points
+                        unmatched_points = joined[joined['index_right'].isna()].copy()
+
+                        matched_points = joined.dropna(subset=['index_right']).copy()
+
+                        # Step 3: Define the function to compute the average of the three closest neighbors
+                        def get_nearest_avg(point_geom):
+                            # Compute distances from this point to all matched points
+                            matched_points["distance"] = matched_points.geometry.distance(point_geom)
+
+                            # Select the three nearest neighbors
+                            nearest_neighbors = matched_points.nsmallest(3, "distance")
+
+                            # Return the average value of the attribute
+                            return nearest_neighbors["iso3"].mode()
+
+                        # Step 4: Apply the function to all unmatched points
+                        unmatched_points["iso3"] = unmatched_points.geometry.apply(get_nearest_avg)
+
+                        # Step 5: Merge the results back into the main DataFrame
+                        for col in unmatched_points.columns:
+                            joined.loc[unmatched_points.index, col] = unmatched_points[col]
+
                     self.countries = tuple(sorted(set(joined['iso3'])))
+
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True)
                 else:

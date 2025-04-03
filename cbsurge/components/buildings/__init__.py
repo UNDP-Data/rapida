@@ -379,7 +379,7 @@ class BuildingsVariable(Variable):
                     affected_var_gdf = affected_buildings_gdf.groupby('polyid', as_index=False)[affected_var_name].sum()
 
                 # Merge affected data
-                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='left').fillna(0)
+                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
                 var_gdf[affected_var_percentage_name] = (var_gdf[affected_var_name] / var_gdf[self.name]) * 100
 
         # **Remove old columns before merging**
@@ -387,7 +387,7 @@ class BuildingsVariable(Variable):
                                    col in polygons_gdf.columns], inplace=True)
 
         # **Final Merge and Save**
-        out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='left').fillna(0)
+        out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='left')
         out_gdf = out_gdf.rename(columns={'polyid': 'h3id'})
 
         out_gdf.to_file(dataset_path, layer=destination_layer, driver='GPKG', mode='w')

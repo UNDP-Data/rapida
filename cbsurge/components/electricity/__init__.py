@@ -212,7 +212,6 @@ class ElectricityVariable(Variable):
         df_polygon = gpd.read_file(self.local_path, layer=polygons_layer)
         df_line = gpd.read_file(self.local_path, layer=self.component)
 
-
         for col in [self.name, self.affected_variable, self.affected_percentage_variable]:
             if col in df_polygon.columns:
                 df_polygon.drop(columns=[col], inplace=True)

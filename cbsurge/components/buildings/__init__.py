@@ -303,7 +303,7 @@ class BuildingsVariable(Variable):
             polygons_layer = project.polygons_layer_name
 
         polygons_gdf = gpd.read_file(project.geopackage_file_path,layer=polygons_layer)
-        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+        #polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
 
         if self.name == 'nbuildings':
             var_gdf  = buildings_gdf.groupby('polyid').size().reset_index(name=self.name)
@@ -328,7 +328,7 @@ class BuildingsVariable(Variable):
 
 
         out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='inner')
-        out_gdf = out_gdf.rename(columns={'polyid':'h3id'})
+        #out_gdf = out_gdf.rename(columns={'polyid':'h3id'})
         out_gdf.to_file(dataset_path,layer=destination_layer,driver='GPKG', mode='w')
 
 

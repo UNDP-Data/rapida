@@ -115,6 +115,7 @@ class Project:
 
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     joined['geometry'] = gdf['geometry']
+
                     if joined['iso3'].isna().any():
                         # Step 2: Separate matched and unmatched points
                         unmatched_points = joined[joined['index_right'].isna()].copy()
@@ -140,9 +141,14 @@ class Project:
                             joined.loc[unmatched_points.index, col] = unmatched_points[col]
 
                     self.countries = tuple(sorted(set(joined['iso3'])))
+                    cols = joined.columns.tolist()
+
+                    for col_name in ('index_right', 'index_left'):
+                        if col_name in cols:
+                            joined.drop(columns=[col_name], inplace=True)
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
-                                 promote_to_multi=True)
+                                 promote_to_multi=True, index=False)
                     gdf = joined
 
                 else:
@@ -161,7 +167,7 @@ class Project:
                         )
                         # save it back
                         gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
-                                 promote_to_multi=True)
+                                 promote_to_multi=True, index=False)
                 else:
                     gdf['h3id'] = gdf.apply(
                         lambda g: h3.latlng_to_cell(lat=g.geometry.centroid.y, lng=g.geometry.centroid.x,
@@ -169,7 +175,7 @@ class Project:
                         axis=1
                     )
                     gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
-                                 promote_to_multi=True)
+                                 promote_to_multi=True, index=False)
                 self._cfg_['countries'] = self.countries
                 self.save()
 

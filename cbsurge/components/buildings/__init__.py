@@ -286,7 +286,7 @@ class BuildingsVariable(Variable):
         assert force_compute, f'invalid force_compute={force_compute}'
         return self.download(force_compute=force_compute, **kwargs)
 
-    def evaluate(self, **kwargs):
+    def evaluate_orig(self, **kwargs):
         destination_layer = f'stats.{self.component}'
         affected_var_name = f'{self.name}_affected'
         affected_var_percentage_name = f'{affected_var_name}_percentage'
@@ -332,6 +332,65 @@ class BuildingsVariable(Variable):
         out_gdf.to_file(dataset_path,layer=destination_layer,driver='GPKG', mode='w')
 
 
+
+    def evaluate(self, **kwargs):
+        destination_layer = f'stats.{self.component}'
+        affected_var_name = f'{self.name}_affected'
+        affected_var_percentage_name = f'{affected_var_name}_percentage'
+        project = Project(os.getcwd())
+
+        logger.info(f'Evaluating variable {self.name}')
+
+        dataset_path, layer_name = self.local_path.split('::')
+
+        # Read only necessary columns (avoid loading full geometries if not needed)
+        buildings_gdf = gpd.read_file(dataset_path, layer=layer_name, columns=['polyid', 'geometry'])
+
+        # List layers once to avoid repeated I/O operations
+        layers = pyogrio.list_layers(dataset_path)
+        layer_names = layers[:, 0]
+
+        polygons_layer = destination_layer if destination_layer in layer_names else project.polygons_layer_name
+
+        # Read only necessary columns for polygons
+        polygons_gdf = gpd.read_file(project.geopackage_file_path, layer=polygons_layer, columns=['h3id', 'geometry'])
+        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+
+        # **Efficient Building Count Calculation**
+        if self.name == 'nbuildings':
+            var_gdf = buildings_gdf['polyid'].value_counts().reset_index()
+            var_gdf.columns = ['polyid', self.name]
+        else:
+            buildings_gdf[self.name] = buildings_gdf.geometry.area
+            var_gdf = buildings_gdf.groupby('polyid', as_index=False)[self.name].sum()
+
+        # **Handle Affected Buildings**
+        if project.raster_mask is not None:
+            affected_layer_name = f'{self.component}.affected'
+            if affected_layer_name in layer_names:
+                affected_buildings_gdf = gpd.read_file(dataset_path, layer=affected_layer_name,
+                                                       columns=['polyid', 'geometry'])
+
+                if self.name == 'nbuildings':
+                    affected_var_gdf = affected_buildings_gdf['polyid'].value_counts().reset_index()
+                    affected_var_gdf.columns = ['polyid', affected_var_name]
+                else:
+                    affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
+                    affected_var_gdf = affected_buildings_gdf.groupby('polyid', as_index=False)[affected_var_name].sum()
+
+                # Merge affected data
+                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
+                var_gdf[affected_var_percentage_name] = (var_gdf[affected_var_name] / var_gdf[self.name]) * 100
+
+        # **Remove old columns before merging**
+        polygons_gdf.drop(columns=[col for col in [self.name, affected_var_name, affected_var_percentage_name] if
+                                   col in polygons_gdf.columns], inplace=True)
+
+        # **Final Merge and Save**
+        out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='left')
+        out_gdf = out_gdf.rename(columns={'polyid': 'h3id'})
+
+        out_gdf.to_file(dataset_path, layer=destination_layer, driver='GPKG', mode='w')
 
     def resolve(self, **kwargs):
         pass

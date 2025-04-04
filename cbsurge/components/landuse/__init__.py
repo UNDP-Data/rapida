@@ -8,8 +8,8 @@ from rich.progress import Progress
 import geopandas as gpd
 
 from cbsurge import constants
-from cbsurge.components.landuse.prediction import predict
 from cbsurge.components.landuse.stac import STAC_MAP, interpolate_stac_source, download_stac
+from cbsurge.components.landuse.prediction import predict
 from cbsurge.constants import GTIFF_CREATION_OPTIONS
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
@@ -170,20 +170,17 @@ class LanduseVariable(Variable):
 
     def _compute_affected_(self, **kwargs):
         if geo.is_raster(self.local_path):
-
             project = Project(os.getcwd())
             if project.raster_mask:
 
                 affected_local_path = self.affected_path
                 # create a temporary mask with resolution 10 by 10
 
-                print(self.local_path)
                 # get resolution from local_path
                 with gdal.Open(self.local_path, gdal.GA_ReadOnly) as ds:
                     if ds is not None:
                         geotransform = ds.GetGeoTransform()
 
-                        print(geotransform)
                         x_res = geotransform[1]
                         y_res = abs(geotransform[5])
 
@@ -225,11 +222,21 @@ class LanduseVariable(Variable):
                         )
                 calc_ds = None
                 assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
+
                 return affected_local_path
 
 
     def compute(self, **kwargs):
         self.download(**kwargs)
+
+        force_compute = kwargs.get('force_compute', False)
+        # run the prediction only when the force_compute or prediction image doesn't exist
+        if force_compute or not os.path.exists(self.prediction_output_image):
+            predict(
+                img_paths=self.downloaded_files,
+                output_file_path=self.prediction_output_image,
+            )
+
         progress = kwargs.get('progress', None)
         source_value = self.target_band_value
 
@@ -249,8 +256,9 @@ class LanduseVariable(Variable):
                 progress.update(variable_task, completed=int(complete * 100))
             return 1
 
-        # create a gdal expression for where(A == source_value, 1, 0)
-        expression = f"where(A == {source_value}, 1, 0)"
+        # create a gdal expression for where(A == source_value, 10, 0)
+        # I set the value to 100 because the resolution is 10 by 10 so area of each pixel would be 100
+        expression = f"where(A == {source_value}, 100, 0)"
 
         ds = Calc(
             calc=expression,
@@ -276,6 +284,7 @@ class LanduseVariable(Variable):
             evaluate_task = progress.add_task(
                 description=f'[red] Going to evaluate {self.name} in {self.component} component', total=None)
         dst_layer = f'stats.{self.component}'
+
         project = Project(path=os.getcwd())
         layers = gpd.list_layers(project.geopackage_file_path)
         lnames = layers.name.tolist()
@@ -309,6 +318,13 @@ class LanduseVariable(Variable):
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task,
                                 description=f'[red] Writing {self.name} to {project.geopackage_file_path}:{dst_layer}')
+
+            if project.raster_mask and os.path.exists(self.affected_path) and self.percentage:
+                affected_var_name = f'{self.name}_affected'
+                affected_var_percentage_name = f'{affected_var_name}_percentage'
+                gdf[affected_var_name] = gdf[affected_var_name].fillna(0)
+                gdf[affected_var_percentage_name] = gdf[affected_var_name] / gdf[self.name] * 100
+                gdf[affected_var_percentage_name] = gdf[affected_var_percentage_name].fillna(0)
 
             gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG", overwrite=True)
         else:

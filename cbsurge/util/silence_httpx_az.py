@@ -1,5 +1,6 @@
 import logging
 
+
 logger = logging.getLogger(__name__)
 def silence_httpx_az():
     #azlogger = logging.getLogger('az.core.pipeline.policies.http_logging_policy')

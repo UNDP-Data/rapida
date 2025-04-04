@@ -1,5 +1,7 @@
 import logging
 import os
+import sys
+import warnings
 from concurrent.futures import ProcessPoolExecutor
 from typing import List
 
@@ -10,7 +12,6 @@ import tensorflow as tf
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-tf.get_logger().setLevel('ERROR')
 
 def normalize(image):
     """

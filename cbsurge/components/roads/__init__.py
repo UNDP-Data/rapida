@@ -172,10 +172,21 @@ class RoadsVariable(Variable):
                     dst_layer_mode="w",
                     mask_polygons=mask_polygons,
                     progress=progress,
-                    add_polyid=True
+                    add_polyid=False
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
+
+        df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
+        road_lines = gpd.read_file(self.local_path, layer=self.component)
+        road_lines.sindex
+        df_polygon.sindex
+        poly_cols = df_polygon.columns.tolist()
+        cols_to_drop = set(poly_cols).difference(['h3id']).difference(road_lines.columns.tolist())
+        road_lines = gpd.overlay(road_lines, df_polygon, how="intersection", make_valid=True, keep_geom_type=True)
+        road_lines.drop(columns=list(cols_to_drop), inplace=True)
+        road_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
+        road_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
 
         if project.vector_mask is not None:
             if force_compute == True or self.affected_layer not in layer_names:

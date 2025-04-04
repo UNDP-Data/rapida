@@ -1,13 +1,22 @@
 import logging
 import os
 from typing import List
+
+from osgeo import gdal
+from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
+import geopandas as gpd
+
+from cbsurge import constants
+from cbsurge.components.landuse.prediction import predict
 from cbsurge.components.landuse.stac import STAC_MAP, interpolate_stac_source, download_stac
+from cbsurge.constants import GTIFF_CREATION_OPTIONS
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.project import Project
 from cbsurge.session import Session
-
+from cbsurge.stats.raster_zonal_stats import zst
+from cbsurge.util import geo
 
 logger = logging.getLogger('rapida')
 
@@ -59,6 +68,13 @@ class LanduseVariable(Variable):
         return collection
 
     @property
+    def affected_path(self):
+        path, file_name = os.path.split(self.local_path)
+        fname, ext = os.path.splitext(file_name)
+        return os.path.join(path, f'{fname}_affected{ext}')
+
+
+    @property
     def target_band_value(self)->int:
         """
         Target band value for zonal statistics
@@ -89,9 +105,22 @@ class LanduseVariable(Variable):
         assets = list(self.target_asset.values())
         return [os.path.join(output_dir, f"{asset}.tif") for asset in assets]
 
+    @property
+    def prediction_output_image(self) -> str:
+        """
+        The path to the output image
+        """
+        project = Project(os.getcwd())
+        output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
+        return os.path.join(output_dir, f"{self.component}_prediction.tif")
+
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        project = Project(path=os.getcwd())
+        geopackage_path = project.geopackage_file_path
+        output_filename = f"{self.name}.tif"
+        self.local_path = os.path.join(os.path.dirname(geopackage_path), self.component, output_filename)
 
     def __call__(self, *args, **kwargs):
         progress: Progress = kwargs.get('progress', None)
@@ -140,16 +169,154 @@ class LanduseVariable(Variable):
 
 
     def _compute_affected_(self, **kwargs):
-        # TODO: compute affected data for each band
-        pass
+        if geo.is_raster(self.local_path):
+
+            project = Project(os.getcwd())
+            if project.raster_mask:
+
+                affected_local_path = self.affected_path
+                # create a temporary mask with resolution 10 by 10
+
+                print(self.local_path)
+                # get resolution from local_path
+                with gdal.Open(self.local_path, gdal.GA_ReadOnly) as ds:
+                    if ds is not None:
+                        geotransform = ds.GetGeoTransform()
+
+                        print(geotransform)
+                        x_res = geotransform[1]
+                        y_res = abs(geotransform[5])
+
+
+                    warp_options = dict(
+                        format='GTiff',
+                        xRes=x_res,
+                        yRes=y_res,
+                        creationOptions=constants.GTIFF_CREATION_OPTIONS,
+                        outputBounds=(geotransform[0], geotransform[3] + ds.RasterYSize * geotransform[5],
+                                      geotransform[0] + ds.RasterXSize * geotransform[1], geotransform[3]),
+                    )
+
+
+                    warped_project_mask = project.raster_mask.replace('mask', 'warped_mask')
+                    temp_mask_ds = gdal.Warp(
+                        destNameOrDestDS=warped_project_mask,
+                        srcDSOrSrcDSTab=project.raster_mask,
+                        options=gdal.WarpOptions(**warp_options),
+                        outputType=gdal.GDT_Byte,
+                        outputSRS=project.target_srs,
+                        targetAlignedPixels=True,
+                        multiThread=True,
+                    )
+                    temp_mask_ds = None
+
+                calc_ds = Calc(calc='A*B',
+                          outfile=affected_local_path,
+                          projectionCheck=True,
+                          format='GTiff',
+                          creation_options=GTIFF_CREATION_OPTIONS,
+                          quiet=False,
+                          A=self.local_path,
+                          B=warped_project_mask,
+                          overwrite=True,
+                          NoDataValue=None,
+                          local_path=self.local_path,
+                          mask=warped_project_mask
+                        )
+                calc_ds = None
+                assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
+                return affected_local_path
+
 
     def compute(self, **kwargs):
-        # TODO: Predict land use by using model
+        self.download(**kwargs)
+        progress = kwargs.get('progress', None)
+        source_value = self.target_band_value
+
+        calc_creation_options = {
+            "COMPRESS": "ZSTD",
+            "PREDICTOR": 2,
+            "BIGTIFF": "IF_SAFER",
+            "BLOCKXSIZE": "256",
+            "BLOCKYSIZE": "256"
+        }
+
+        if progress:
+            variable_task = progress.add_task(f"[green]Masking computing land use for variable {self.name}", total=100)
+
+        def progress_callback(complete, message, user_data):
+            if progress and variable_task is not None:
+                progress.update(variable_task, completed=int(complete * 100))
+            return 1
+
+        # create a gdal expression for where(A == source_value, 1, 0)
+        expression = f"where(A == {source_value}, 1, 0)"
+
+        ds = Calc(
+            calc=expression,
+            outfile=self.local_path,
+            projectionCheck=True,
+            format='GTiff',
+            creation_options=calc_creation_options,
+            overwrite=True,
+            A=self.prediction_output_image,
+            NoDataValue=0,
+            progress_callback=progress_callback
+        )
+
+        ds = None
+
         # Then, compute affected area for land use
         self._compute_affected_(**kwargs)
 
     def evaluate(self, **kwargs):
-        # TODO: compute zonal statistics by using land use data
+        progress: Progress = kwargs.get('progress', Progress())
+        evaluate_task = None
+        if progress is not None:
+            evaluate_task = progress.add_task(
+                description=f'[red] Going to evaluate {self.name} in {self.component} component', total=None)
+        dst_layer = f'stats.{self.component}'
+        project = Project(path=os.getcwd())
+        layers = gpd.list_layers(project.geopackage_file_path)
+        lnames = layers.name.tolist()
+        if dst_layer in lnames:
+            polygons_layer = dst_layer
+        else:
+            polygons_layer = constants.POLYGONS_LAYER_NAME
+        if self.operator:
+            assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
+
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task, description=f'[red] Evaluating variable {self.name} using zonal stats')
+
+            # raster variable, run zonal stats
+            src_rasters = [self.local_path]
+            var_ops = [(self.name, self.operator)]
+
+            if project.raster_mask is not None:
+                affected_local_path = self.affected_path
+                src_rasters.append(affected_local_path)
+                var_ops.append((f'{self.name}_affected', self.operator))
+
+            gdf = zst(src_rasters=src_rasters,
+                      polygon_ds=project.geopackage_file_path,
+                      polygon_layer=polygons_layer, vars_ops=var_ops
+                      )
+
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task, description=f'[red] Evaluated variable {self.name} using zonal stats')
+
+            if progress is not None and evaluate_task is not None:
+                progress.update(evaluate_task,
+                                description=f'[red] Writing {self.name} to {project.geopackage_file_path}:{dst_layer}')
+
+            gdf.to_file(project.geopackage_file_path, layer=dst_layer, driver="GPKG", overwrite=True)
+        else:
+            progress.update(evaluate_task,
+                            description=f'[red] {self.name} was skipped because of lack of operator definition.')
+
+        if progress and evaluate_task:
+            progress.remove_task(evaluate_task)
         pass
 
     def resolve(self, **kwargs):

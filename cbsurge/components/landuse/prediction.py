@@ -44,7 +44,11 @@ def load_model():
     Load the model from the saved path
     This is the model from Dynamic World
     """
-    model_path = "./model/forward"
+    folder = os.path.dirname(__file__)
+
+    model_path = os.path.join(folder, 'model', 'forward')
+
+    # model_path = "./model/forward"
     model = tf.saved_model.load(model_path)
     return model
 
@@ -145,12 +149,9 @@ def predict(img_paths: List[str], output_file_path: str):
                 dst.write(original_tile.astype(np.uint8), 1,
                           window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
     logging.info("Prediction process completed successfully")
+    return output_file_path
 
 
 
 if __name__ == "__main__":
-    img_path = "/home/thuha/Desktop/UNDP/test_sentinel/stac_downloads/aligned"
-    output_file_path = "/home/thuha/Desktop/UNDP/geo-cb-surge/nairobi/data/landuse/prediction/output_huge.tif"
-    img_paths = os.listdir(img_path)
-    img_paths = [os.path.join(img_path, img) for img in img_paths if img.endswith(".tif") and "B" in img]
-    predict(img_paths=img_paths, output_file_path=output_file_path)
+    pass

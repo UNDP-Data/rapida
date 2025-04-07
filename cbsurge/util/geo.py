@@ -1,4 +1,5 @@
 import pyogrio.core
+import multiprocessing
 from cbsurge import constants
 from osgeo import gdal, ogr, osr
 from osgeo_utils.gdal_calc import Calc
@@ -35,7 +36,6 @@ is_vector = lambda src: isgdal(src=src, file_type='vector')
 
 
 def gdal_callback(complete, message, data):
-    print('in callb', complete, message, len(data))
     if data:
         progressbar, task, timeout_event = data
         if progressbar is not None and task is not None:
@@ -48,6 +48,7 @@ def import_raster(source=None, dst=None, target_srs=None,
                   x_res: int = constants.DEFAULT_MASK_RESOLUTION_METERS,
                   y_res: int = constants.DEFAULT_MASK_RESOLUTION_METERS,
                   crop_ds=None, crop_layer_name=None, return_handle=False,
+                  progress=None,
                   **kwargs
                   ):
     """
@@ -66,54 +67,75 @@ def import_raster(source=None, dst=None, target_srs=None,
 
     assert crop_layer_name not in ('', None), f'crop_layer_name: {crop_layer_name} is invalid'
     assert is_vector(crop_ds), f'{crop_ds} is not a vector dataset'
+    tout = multiprocessing.Event()
+    rtask = None
+    if progress is not None:
+        rtask = progress.add_task(f'Reprojecting {source}')
+    try:
+        should_crop = crop_ds is not None and crop_layer_name not in ('', None)
+        if should_crop:
+            info = pyogrio.core.read_info(crop_ds, layer=crop_layer_name)
+            out_bounds = list(map(float, info['total_bounds']))
+            out_bounds_srs = osr.SpatialReference()
+            out_bounds_srs.ImportFromWkt(info['crs'])
 
-    should_crop = crop_ds is not None and crop_layer_name not in ('', None)
-    if should_crop:
-        info = pyogrio.core.read_info(crop_ds, layer=crop_layer_name)
-        out_bounds = list(map(float, info['total_bounds']))
-        out_bounds_srs = osr.SpatialReference()
-        out_bounds_srs.ImportFromWkt(info['crs'])
-
-    else:
-        out_bounds = None
-        out_bounds_srs = None
-
-
-
-    warp_options = dict(
-        format='GTiff',
-        xRes=x_res,
-        yRes=y_res,
-        creationOptions=constants.GTIFF_CREATION_OPTIONS.update({'COMPRESS':'NONE'}),
-        cutlineDSName=crop_ds,
-        cutlineLayer=crop_layer_name,
-        cropToCutline=should_crop,
-        targetAlignedPixels=True,
-        outputBounds=out_bounds,
-        outputBoundsSRS=out_bounds_srs,
-        warpOptions={'OPTIMIZE_SIZE':'YES'},
-        errorThreshold=2
-
-
-    )
-    warp_options.update(kwargs)
-
-
-    with gdal.OpenEx(source, gdal.OF_RASTER | gdal.OF_READONLY) as src_ds:
-        src_srs = src_ds.GetSpatialRef()
-        prj_equal = proj_are_equal(src_srs, target_srs)
-        if not prj_equal:
-            # reproject raster mask to target projection
-            logger.debug(f'Reprojecting {source} to {target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}')
-            warp_options.update(dict(dstSRS=target_srs))
-        # print(warp_options, source, dst)
-        rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
-        assert os.path.exists(dst), f'Failed to align {source}'
-        if return_handle:
-            return rds
         else:
-            rds = None
+            out_bounds = None
+            out_bounds_srs = None
 
+
+
+        warp_options = dict(
+            format='GTiff',
+            xRes=x_res,
+            yRes=y_res,
+            creationOptions=constants.GTIFF_CREATION_OPTIONS.update({'COMPRESS':'NONE'}),
+            cutlineDSName=crop_ds,
+            cutlineLayer=crop_layer_name,
+            cropToCutline=should_crop,
+            targetAlignedPixels=True,
+            outputBounds=out_bounds,
+            outputBoundsSRS=out_bounds_srs,
+            warpOptions={'OPTIMIZE_SIZE':'YES'},
+            errorThreshold=2,
+
+
+        )
+        warp_options.update(kwargs)
+        if progress is not None and rtask is not None:
+            callback_dict = dict(
+                callback=gdal_callback,
+                callback_data = (progress, rtask, tout)
+            )
+            warp_options.update(callback_dict)
+
+
+        with gdal.OpenEx(source, gdal.OF_RASTER | gdal.OF_READONLY) as src_ds:
+            src_srs = src_ds.GetSpatialRef()
+            prj_equal = proj_are_equal(src_srs, target_srs)
+            if not prj_equal:
+                # reproject raster mask to target projection
+                logger.debug(f'Reprojecting {source} to {target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}')
+                warp_options.update(dict(dstSRS=target_srs))
+                rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
+                assert os.path.exists(dst), f'Failed to align {source}'
+                if return_handle:
+                    return rds
+                else:
+                    rds = None
+    except KeyboardInterrupt:
+        tout.set()
+        raise
+    except (RuntimeError, Exception) as re:
+        if 'user terminated' in str(re).lower():
+            logger.info(f'Reprojection was aborted. Cleaning up')
+            if os.path.exists(dst):
+                os.remove(dst)
+                os.remove(source)
+                raise KeyboardInterrupt
+    finally:
+        if progress is not None and rtask is not None:
+            progress.remove_task(rtask)
 
 def polygonize_raster_mask(raster_ds=None, band=1, dst_dataset=None, dst_layer=None, geom_type=ogr.wkbMultiPolygon):
 

@@ -27,7 +27,7 @@ async def download(blob_client:BlobClient = None, dst_path:str=None, progress=No
         task = None
         name = os.path.split(blob_props.name)[-1]
         if progress is not None:
-            task = progress.add_task(description='', total=blob_size)
+            task = progress.add_task(description=f'Downloading {name} ', total=blob_size)
         async with aiofiles.open(dst_path, "wb") as f:
             async for chunk in blob.chunks():
                 await f.write(chunk)

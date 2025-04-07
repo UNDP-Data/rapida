@@ -261,29 +261,32 @@ class BuildingsVariable(Variable):
         return self.local_path
 
     def _compute_affected_(self,  progress=None):
-        logger.info('Calculating affected buildings')
+
         project = Project(os.getcwd())
-        affected_layer_name = f'{self.component}.affected'
-        mask_buildings(
-            buildings_dataset=project.geopackage_file_path,
-            buildings_layer_name=self.component,
-            mask_ds_path=project.raster_mask,
-            masked_buildings_dataset=project.geopackage_file_path,
-            masked_buildings_layer_name=affected_layer_name,
-            horizontal_chunks=10,
-            vertical_chunks=10,
-            workers=4,
-            progress=progress,
+        if project.raster_mask is not None:
+
+            logger.info('Calculating affected buildings')
+            affected_layer_name = f'{self.component}.affected'
+            mask_buildings(
+                buildings_dataset=project.geopackage_file_path,
+                buildings_layer_name=self.component,
+                mask_ds_path=project.raster_mask,
+                masked_buildings_dataset=project.geopackage_file_path,
+                masked_buildings_layer_name=affected_layer_name,
+                horizontal_chunks=10,
+                vertical_chunks=10,
+                workers=4,
+                progress=progress,
 
 
-        )
+            )
 
 
     def compute(self, force_compute=True, **kwargs):
         assert force_compute, f'invalid force_compute={force_compute}'
         return self.download(force_compute=force_compute, **kwargs)
 
-    def evaluate(self, **kwargs):
+    def evaluate_orig(self, **kwargs):
         destination_layer = f'stats.{self.component}'
         affected_var_name = f'{self.name}_affected'
         affected_var_percentage_name = f'{affected_var_name}_percentage'
@@ -300,24 +303,24 @@ class BuildingsVariable(Variable):
             polygons_layer = project.polygons_layer_name
 
         polygons_gdf = gpd.read_file(project.geopackage_file_path,layer=polygons_layer)
-        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+        #polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
 
         if self.name == 'nbuildings':
             var_gdf  = buildings_gdf.groupby('polyid').size().reset_index(name=self.name)
         else:
             buildings_gdf[self.name] = buildings_gdf.geometry.area
             var_gdf = buildings_gdf.groupby('polyid')[self.name].sum().reset_index()
-
-        affected_layer_name = f'{self.component}.affected'
-        if affected_layer_name in layer_names:
-            affected_buildings_gdf = gpd.read_file(filename=dataset_path, layer=affected_layer_name)
-            if self.name == 'nbuildings':
-                affected_var_gdf  = affected_buildings_gdf.groupby('polyid').size().reset_index(name=affected_var_name)
-            else:
-                affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
-                affected_var_gdf = affected_buildings_gdf.groupby('polyid')[affected_var_name].sum().reset_index()
-            var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
-            var_gdf.eval(f"{affected_var_percentage_name}={f'{affected_var_name}'}/{self.name}*100", inplace=True)
+        if project.raster_mask is not None:
+            affected_layer_name = f'{self.component}.affected'
+            if affected_layer_name in layer_names:
+                affected_buildings_gdf = gpd.read_file(filename=dataset_path, layer=affected_layer_name)
+                if self.name == 'nbuildings':
+                    affected_var_gdf  = affected_buildings_gdf.groupby('polyid').size().reset_index(name=affected_var_name)
+                else:
+                    affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
+                    affected_var_gdf = affected_buildings_gdf.groupby('polyid')[affected_var_name].sum().reset_index()
+                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
+                var_gdf.eval(f"{affected_var_percentage_name}={f'{affected_var_name}'}/{self.name}*100", inplace=True)
 
         for col in [self.name, affected_var_name, affected_var_percentage_name]:
             if col in polygons_gdf.columns:
@@ -325,10 +328,69 @@ class BuildingsVariable(Variable):
 
 
         out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='inner')
-        out_gdf = out_gdf.rename(columns={'polyid':'h3id'})
+        #out_gdf = out_gdf.rename(columns={'polyid':'h3id'})
         out_gdf.to_file(dataset_path,layer=destination_layer,driver='GPKG', mode='w')
 
 
+
+    def evaluate(self, **kwargs):
+        destination_layer = f'stats.{self.component}'
+        affected_var_name = f'{self.name}_affected'
+        affected_var_percentage_name = f'{affected_var_name}_percentage'
+        project = Project(os.getcwd())
+
+        logger.info(f'Evaluating variable {self.name}')
+
+        dataset_path, layer_name = self.local_path.split('::')
+
+        # Read only necessary columns (avoid loading full geometries if not needed)
+        buildings_gdf = gpd.read_file(dataset_path, layer=layer_name, columns=['polyid', 'geometry'])
+
+        # List layers once to avoid repeated I/O operations
+        layers = pyogrio.list_layers(dataset_path)
+        layer_names = layers[:, 0]
+
+        polygons_layer = destination_layer if destination_layer in layer_names else project.polygons_layer_name
+
+        # Read only necessary columns for polygons
+        polygons_gdf = gpd.read_file(project.geopackage_file_path, layer=polygons_layer, columns=['h3id', 'geometry'])
+        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+
+        # **Efficient Building Count Calculation**
+        if self.name == 'nbuildings':
+            var_gdf = buildings_gdf['polyid'].value_counts().reset_index()
+            var_gdf.columns = ['polyid', self.name]
+        else:
+            buildings_gdf[self.name] = buildings_gdf.geometry.area
+            var_gdf = buildings_gdf.groupby('polyid', as_index=False)[self.name].sum()
+
+        # **Handle Affected Buildings**
+        if project.raster_mask is not None:
+            affected_layer_name = f'{self.component}.affected'
+            if affected_layer_name in layer_names:
+                affected_buildings_gdf = gpd.read_file(dataset_path, layer=affected_layer_name,
+                                                       columns=['polyid', 'geometry'])
+
+                if self.name == 'nbuildings':
+                    affected_var_gdf = affected_buildings_gdf['polyid'].value_counts().reset_index()
+                    affected_var_gdf.columns = ['polyid', affected_var_name]
+                else:
+                    affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
+                    affected_var_gdf = affected_buildings_gdf.groupby('polyid', as_index=False)[affected_var_name].sum()
+
+                # Merge affected data
+                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
+                var_gdf[affected_var_percentage_name] = (var_gdf[affected_var_name] / var_gdf[self.name]) * 100
+
+        # **Remove old columns before merging**
+        polygons_gdf.drop(columns=[col for col in [self.name, affected_var_name, affected_var_percentage_name] if
+                                   col in polygons_gdf.columns], inplace=True)
+
+        # **Final Merge and Save**
+        out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='left')
+        out_gdf = out_gdf.rename(columns={'polyid': 'h3id'})
+
+        out_gdf.to_file(dataset_path, layer=destination_layer, driver='GPKG', mode='w')
 
     def resolve(self, **kwargs):
         pass

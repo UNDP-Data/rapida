@@ -44,6 +44,8 @@ dependencies = [
     "playwright",
     "pystac_client",
     "tensorflow",
+    "pystac_client",
+    "requests-oauthlib"
 ]
 
 [project.optional-dependencies]

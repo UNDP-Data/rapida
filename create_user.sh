@@ -25,4 +25,6 @@ else
     mkdir -p "$USER_DATA_DIR"
     chown "$USERNAME:$GROUP_NAME" "$USER_DATA_DIR"
     echo "User $USERNAME data directory was created at $USER_DATA_DIR."
+    exit
+
 fi

@@ -178,11 +178,21 @@ class ElectricityVariable(Variable):
                     dst_layer_mode="w",
                     mask_polygons=mask_polygons,
                     progress=progress,
-                    add_polyid=True
+                    add_polyid=False
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
 
+            df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
+            el_grid_lines = gpd.read_file(self.local_path, layer=self.component)
+            el_grid_lines.sindex
+            df_polygon.sindex
+            poly_cols = df_polygon.columns.tolist()
+            cols_to_drop = set(poly_cols).difference(['h3id']).difference(el_grid_lines.columns.tolist())
+            el_grid_lines = gpd.overlay(el_grid_lines, df_polygon, how="intersection", make_valid=True, keep_geom_type=True)
+            el_grid_lines.drop(columns=list(cols_to_drop), inplace=True)
+            el_grid_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
+            el_grid_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
 
     def evaluate(self, **kwargs):
         progress = kwargs.get('progress', False)
@@ -211,6 +221,7 @@ class ElectricityVariable(Variable):
 
         df_polygon = gpd.read_file(self.local_path, layer=polygons_layer)
         df_line = gpd.read_file(self.local_path, layer=self.component)
+
 
 
         for col in [self.name, self.affected_variable, self.affected_percentage_variable]:

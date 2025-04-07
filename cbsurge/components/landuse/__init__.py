@@ -2,7 +2,6 @@ import logging
 import os
 from typing import List
 
-import rasterio
 from osgeo import gdal
 from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
@@ -18,6 +17,7 @@ from cbsurge.project import Project
 from cbsurge.session import Session
 from cbsurge.stats.raster_zonal_stats import zst
 from cbsurge.util import geo
+
 
 logger = logging.getLogger('rapida')
 

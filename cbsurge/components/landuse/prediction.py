@@ -1,5 +1,8 @@
 import logging
 import os
+import sys
+import warnings
+from concurrent.futures import ProcessPoolExecutor
 from typing import List
 
 import numpy as np
@@ -9,7 +12,6 @@ import tensorflow as tf
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-tf.get_logger().setLevel('ERROR')
 
 def normalize(image):
     """
@@ -43,7 +45,11 @@ def load_model():
     Load the model from the saved path
     This is the model from Dynamic World
     """
-    model_path = "./model/forward"
+    folder = os.path.dirname(__file__)
+
+    model_path = os.path.join(folder, 'model', 'forward')
+
+    # model_path = "./model/forward"
     model = tf.saved_model.load(model_path)
     return model
 
@@ -66,7 +72,7 @@ def create_multi_band_image(input_files, output_file):
     print(f"Multi-band image saved as {output_file}")
     return output_file
 
-def pretraining_check(img_paths: List):
+def preinference_check(img_paths: List):
     assert len(img_paths) > 0 and len(img_paths) == 9, "9 bands are required for prediction with this model"
     col_sizes = []
     row_sizes = []
@@ -85,11 +91,41 @@ def pretraining_check(img_paths: List):
     return col_sizes[0], row_sizes[0]
 
 
+def process_tile(row, col, img_paths, buffer, max_window_size, row_size, col_size):
+    logging.info(f"Processing window at row {row}, col {col}")
+    window_width = min(256 + buffer * 2, max_window_size, col_size - col)
+    window_height = min(256 + buffer * 2, max_window_size, row_size - row)
+
+    window = Window(col, row, window_width, window_height)
+    raw_data = np.empty((window_height, window_width, 9), dtype="u2")
+
+    for i, file_path in enumerate(img_paths):
+        with rasterio.open(file_path) as src:
+            raw_data[:, :, i] = src.read(1, window=window)
+
+    normalized_data = normalize(raw_data)
+    nhwc_image = tf.expand_dims(tf.cast(normalized_data, dtype=tf.float32), axis=0)
+    logging.info("Running model inference")
+    forward_model = load_model()
+    lulc_logits = forward_model(nhwc_image)
+    lulc_prob = tf.nn.softmax(lulc_logits)
+    lulc_prob = np.array(lulc_prob[0])
+    lulc_prediction = np.argmax(lulc_prob, axis=-1)
+
+    start_row_in_prediction = buffer if row > 0 else 0
+    end_row_in_prediction = window_height - buffer if row + 256 < row_size else window_height
+
+    start_col_in_prediction = buffer if col > 0 else 0
+    end_col_in_prediction = window_width - buffer if col + 256 < col_size else window_width
+
+    original_tile = lulc_prediction[start_row_in_prediction:end_row_in_prediction,
+                    start_col_in_prediction:end_col_in_prediction]
+    return (row, col, original_tile)
 
 
 def predict(img_paths: List[str], output_file_path: str):
     logging.info("Starting land use prediction")
-    col_size, row_size = pretraining_check(img_paths)
+    col_size, row_size = preinference_check(img_paths)
     buffer = 64
     max_window_size = 512
 
@@ -101,45 +137,22 @@ def predict(img_paths: List[str], output_file_path: str):
     logging.info(f"Creating output file: {output_file_path}")
     with rasterio.open(output_file_path, mode='w', driver="GTiff", dtype='uint8',
                        width=col_size, height=row_size, crs=crs, transform=dst_transform, count=1) as dst:
-        for row in range(0, row_size, 256):
-            for col in range(0, col_size, 256):
-                logging.info(f"Processing window at row {row}, col {col}")
-                window_width = min(256 + buffer * 2, max_window_size, col_size - col)
-                window_height = min(256 + buffer * 2, max_window_size, row_size - row)
+        tasks = []
+        with ProcessPoolExecutor() as executor:
+            for row in range(0, row_size, 256):
+                for col in range(0, col_size, 256):
+                    tasks.append(
+                        executor.submit(process_tile, row, col, img_paths, buffer, max_window_size, row_size, col_size))
 
-                window = Window(col, row, window_width, window_height)
-                raw_data = np.empty((window_height, window_width, 9), dtype="u2")
-
-                for i, file_path in enumerate(img_paths):
-                    logging.info(f"Reading band {i + 1} from {file_path}")
-                    with rasterio.open(file_path) as src:
-                        raw_data[:, :, i] = src.read(1, window=window)
-
-                normalized_data = normalize(raw_data)
-                nhwc_image = tf.expand_dims(tf.cast(normalized_data, dtype=tf.float32), axis=0)
-                logging.info("Running model inference")
-                forward_model = load_model()
-                lulc_logits = forward_model(nhwc_image)
-                lulc_prob = tf.nn.softmax(lulc_logits)
-                lulc_prob = np.array(lulc_prob[0])
-                lulc_prediction = np.argmax(lulc_prob, axis=-1)
-
-                start_row_in_prediction = min(buffer, row_size - row - 256)
-                end_row_in_prediction = start_row_in_prediction + 256
-                start_col_in_prediction = min(buffer, col_size - col - 256)
-                end_col_in_prediction = start_col_in_prediction + 256
-
-                original_tile = lulc_prediction[start_row_in_prediction:end_row_in_prediction,
-                                start_col_in_prediction:end_col_in_prediction]
-
+            for future in tasks:
+                row, col, original_tile = future.result()
                 logging.info(f"Writing prediction tile at row {row}, col {col}")
                 dst.write(original_tile.astype(np.uint8), 1,
                           window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
     logging.info("Prediction process completed successfully")
+    return output_file_path
+
+
 
 if __name__ == "__main__":
-    img_path = "/home/thuha/Desktop/UNDP/test_sentinel/stac_downloads/aligned"
-    output_file_path = "/home/thuha/Desktop/UNDP/test_sentinel/stac_downloads/trained_output_cbsurge/output.tif"
-    img_paths = os.listdir(img_path)
-    img_paths = [os.path.join(img_path, img) for img in img_paths if img.endswith(".tif") and "B" in img]
-    predict(img_paths, output_file_path)
+    pass

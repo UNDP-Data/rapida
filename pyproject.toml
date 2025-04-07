@@ -41,6 +41,11 @@ dependencies = [
     "pydantic",
     "pmtiles",
     "msal",
+    "playwright",
+    "pystac_client",
+    "tensorflow",
+    "pystac_client",
+    "requests-oauthlib",
     "pystac_client",
     "requests-oauthlib"
 ]

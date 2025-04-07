@@ -265,6 +265,19 @@ class SurgeTokenCredential(TokenCredential):
                 if new_token is not None and 'access_token' in new_token:
                     self.token = new_token
                     self._save_to_cache_()
+                else:
+                    logger.info(f"Attempting to authenticate with {self.auth_url}")
+
+                    if is_called_from_click():
+                        email = os.environ.get('RAPIDA_USER', None) or click.prompt('Your UNDP email address please...',
+                                                                                    type=str)
+                        password = os.environ.get('RAPIDA_PASSWORD', None) or click.prompt('Your password...', type=str,
+                                                                                           hide_input=True)
+                    else:
+                        pass
+                    self.token = self.fetch_token(*scopes, username=email, password=password,
+                                                  mfa_confirmation_widget=None)
+                    self._save_to_cache_()
 
         else :
             logger.info(f"Attempting to authenticate with {self.auth_url}")

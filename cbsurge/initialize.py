@@ -7,7 +7,7 @@ from cbsurge.components.population.variables import generate_variables as gen_po
 from cbsurge.components.buildings.variables import generate_variables as gen_bldgs_vars
 from cbsurge.components.rwi.variables import generate_variables as gen_rwi_vars
 from cbsurge.components.roads.variables import generate_variables as gen_road_vars
-from cbsurge.components.electricity.variables import generate_variables as gen_electric_vars
+from cbsurge.components.elegrid.variables import generate_variables as gen_electric_vars
 from cbsurge.components.deprivation.variables import generate_variables as gen_depriv_vars
 from cbsurge.components.landuse.variables import generate_variables as gen_landuse_vars
 from cbsurge.components.gdp.variables import generate_variables as gen_gdp_vars
@@ -88,7 +88,7 @@ def setup_prompt(session: Session):
             "roads": gen_road_vars(),
             "rwi": gen_rwi_vars(),
             "deprivation": gen_depriv_vars(),
-            "electricity": gen_electric_vars(),
+            "elegrid": gen_electric_vars(),
             "landuse": gen_landuse_vars(),
             "gdp": gen_gdp_vars(),
         }

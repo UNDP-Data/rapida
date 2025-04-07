@@ -22,12 +22,12 @@ from cbsurge.util.resolve_url import resolve_geohub_url
 
 logger = logging.getLogger(__name__)
 
-class ElectricityComponent(Component, ABC):
+class ElegridComponent(Component, ABC):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-        # get parent package name for electricity
+        # get parent package name for electricity grid
         current_dir = Path(__file__).resolve().parent
         parent_package_name = current_dir.parents[0].name
 
@@ -124,7 +124,7 @@ class ElectricityVariable(Variable):
 
     @property
     def affected_layer(self):
-        return f"{self.component}_affected"
+        return f"{self.component}.affected"
 
     @property
     def affected_variable(self):
@@ -193,6 +193,8 @@ class ElectricityVariable(Variable):
             el_grid_lines.drop(columns=list(cols_to_drop), inplace=True)
             el_grid_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
             el_grid_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
+            self._compute_affected()
+            return self.local_path
 
     def evaluate(self, **kwargs):
         progress = kwargs.get('progress', False)
@@ -214,10 +216,6 @@ class ElectricityVariable(Variable):
             polygons_layer = destination_layer
         else:
             polygons_layer = constants.POLYGONS_LAYER_NAME
-
-        if project.vector_mask is not None:
-            self._compute_affected()
-
 
         df_polygon = gpd.read_file(self.local_path, layer=polygons_layer)
         df_line = gpd.read_file(self.local_path, layer=self.component)
@@ -256,8 +254,8 @@ class ElectricityVariable(Variable):
 
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task, description=f'[green]Computed {self.name}.')
-
             if project.vector_mask is not None and self.affected_layer in layer_names:
+
                 if progress is not None and evaluate_task is not None:
                     progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
                 df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer)

@@ -426,7 +426,7 @@ class PopulationVariable(Variable):
         ds = gdal.Translate(destName=self.local_path,srcDS=vrtds )
         vrtds = None
         ds = None
-        imported_file_path = self.import_raster(source=self.local_path, )
+        imported_file_path = self.import_raster(source=self.local_path, progress=progress )
         assert imported_file_path == self.local_path, f'The local_path differs from {imported_file_path}'
         self._compute_affected_()
 

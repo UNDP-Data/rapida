@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 def generate_variables():
     """
-    Generate electricity variables dict
+    Generate electricity grid variables dict
     :return:
     """
 
@@ -15,12 +15,12 @@ def generate_variables():
     license = "Creative Commons BY 4.0"
     attribution = "World Bank Group, University of Oxford"
 
-    for operator in ['sum', 'count', 'density']:
+    for operator in ['sum', 'density']:
         name = operator
         if operator == 'sum':
             name = 'length'
-        variables[f'electricity_{name}'] = dict(
-            title=f'Total {name} of electricity',
+        variables[f'elegrid_{name}'] = dict(
+            title=f'Total {name} of electricity grid',
             source='geohub:/api/datasets/310aadaa61ea23811e6ecd75905aaf29',
             operator=operator,
             percentage=True if operator != 'density' else False,

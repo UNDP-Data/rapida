@@ -30,7 +30,7 @@ gdal.UseExceptions()
 class Project:
     config_file_name = 'rapida.json'
     data_folder_name = 'data'
-    projection: str = 'ESRI:54009'
+    projection: str = 'ESRI:54034'
     _instance = None
     polygons_layer_name = constants.POLYGONS_LAYER_NAME
     def __new__(cls, *args, **kwargs):

@@ -89,6 +89,7 @@ class Project:
                     dst_dataset=self.geopackage_file_path,
                     dst_layer=self.polygons_layer_name,
                     target_srs=self.target_srs,
+                    access_mode='overwrite'
                 )
 
 
@@ -216,7 +217,7 @@ class Project:
                         raster_ds=raster_mask_local_path,
                         dst_dataset=self.geopackage_file_path,
                         dst_layer=vector_mask_layer,
-                        geom_type=ogr.wkbMultiPolygon
+                        geom_type=ogr.wkbPolygon
                     )
 
                 if geo.is_vector(mask):

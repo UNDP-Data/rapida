@@ -111,6 +111,8 @@ def import_raster(source=None, dst=None, target_srs=None,
         assert os.path.exists(dst), f'Failed to align {source}'
         if return_handle:
             return rds
+        else:
+            rds = None
 
 
 def polygonize_raster_mask(raster_ds=None, band=1, dst_dataset=None, dst_layer=None, geom_type=ogr.wkbMultiPolygon):
@@ -148,6 +150,8 @@ def import_vector(src_dataset=None, src_layer=0, dst_dataset=None, dst_layer=Non
     :param return_handle:
     :return:
     """
+    if clip_dataset is not None:
+        assert clip_layer is not None, f'clip_layer is required with clip_dataset'
     layer_creation_options = ['OVERWRITE=YES']
     with gdal.OpenEx(src_dataset, gdal.OF_VECTOR|gdal.OF_READONLY) as src_ds:
         try:

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -193,6 +194,96 @@ def download_from_https(
 
             if os.path.exists(tmp_file):
                 os.remove(tmp_file)
+    logging.debug("Downloaded file saved to %s", download_file)
+    return download_file
+
+
+async def download_from_https_async(
+        file_url: str,
+        target: str,
+        target_srs: str,
+        no_data_value: int = 64536,
+        progress=None,
+) -> str:
+    logging.debug("Starting download: %s", file_url)
+    extension = os.path.splitext(file_url)[1]
+    download_file = f"{target}.tif"
+
+    if os.path.exists(download_file):
+        return download_file
+
+    tmp_file = f"{target}{extension}.tmp"
+    pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
+    match = re.search(pattern, file_url)
+    if match:
+        year, month, day = map(int, match.groups())
+        acquisition_date = datetime(year, month, day)
+        logging.debug("Extracted acquisition date: %s", acquisition_date)
+    else:
+        logging.error("Failed to extract date from file_url: %s", file_url)
+        raise ValueError(f"Could not extract date from URL: {file_url}")
+
+    cutoff = datetime(2022, 1, 25)
+    download_task = None
+    if progress is not None:
+        download_task = progress.add_task(
+            description=f'[blue] Downloading {file_url}', total=None)
+
+    async with httpx.AsyncClient() as client:
+        async with client.stream("GET", file_url) as response:
+            response.raise_for_status()
+            total = int(response.headers.get("content-length", 0))
+
+            if progress is not None and download_task is not None:
+                progress.update(download_task, total=total)
+
+            with open(tmp_file, "wb") as f:
+                async for chunk in response.aiter_bytes(chunk_size=8192):
+                    f.write(chunk)
+                    if progress is not None and download_task is not None:
+                        progress.update(download_task, advance=len(chunk))
+
+    if progress and download_task:
+        progress.remove_task(download_task)
+
+    logging.debug("Downloaded %s to %s", file_url, target)
+
+    with rasterio.open(tmp_file) as src:
+        data = src.read()
+        dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
+
+        if acquisition_date >= cutoff:
+            data = harmonize_to_old(data)  # Ensure harmonize_to_old is defined
+
+        transform, width, height = calculate_default_transform(
+            src.crs, dst_crs, src.width, src.height, *src.bounds
+        )
+
+        profile = src.profile.copy()
+        profile.update({
+            "crs": dst_crs,
+            "transform": transform,
+            "width": width,
+            "height": height,
+            "driver": "GTiff",
+            "compress": "ZSTD",
+            "tiled": True,
+            "nodata": profile.get("nodata", no_data_value),
+        })
+
+        with rasterio.open(download_file, "w", **profile) as dst:
+            for i in range(1, src.count + 1):
+                reproject(
+                    source=data[i - 1],
+                    destination=rasterio.band(dst, i),
+                    src_transform=src.transform,
+                    src_crs=src.crs,
+                    dst_transform=transform,
+                    dst_crs=dst_crs,
+                    resampling=Resampling.nearest
+                )
+
+    os.remove(tmp_file)
     logging.debug("Downloaded file saved to %s", download_file)
     return download_file
 
@@ -410,12 +501,12 @@ def download_stac(
             if not os.path.exists(download_dir):
                 os.makedirs(download_dir)
 
-            downloaded_file = download_from_https(
+            downloaded_file = asyncio.run(download_from_https_async(
                 file_url=url,
                 target=os.path.join(download_dir, band_name),
                 progress=progress,
                 target_srs=target_srs,
-            )
+            ))
 
             if progress is not None and stac_task is not None:
                 progress.update(stac_task, description=f"[red] File saved to {downloaded_file}", advance=1)

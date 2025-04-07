@@ -103,9 +103,6 @@ def import_raster(source=None, dst=None, target_srs=None,
         )
         warp_options.update(kwargs)
         if progress is not None and rtask is not None:
-
-            logger.info('Using callback')
-
             callback_dict = dict(
                 callback=gdal_callback,
                 callback_data = (progress, rtask, tout)
@@ -131,7 +128,11 @@ def import_raster(source=None, dst=None, target_srs=None,
         raise
     except (RuntimeError, Exception) as re:
         if 'user terminated' in str(re).lower():
-            logger.info(f'Failed to reproject {source}')
+            logger.info(f'Reprojection was aborted. Cleaning up')
+            if os.path.exists(dst):
+                os.remove(dst)
+                os.remove(source)
+                raise KeyboardInterrupt
     finally:
         if progress is not None and rtask is not None:
             progress.remove_task(rtask)

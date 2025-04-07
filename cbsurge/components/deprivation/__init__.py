@@ -69,9 +69,10 @@ class DeprivationVariable(RwiVariable):
 
 
     def _compute_affected_(self):
-        if geo.is_raster(self.local_path):
+        project = Project(os.getcwd())
+        if geo.is_raster(self.local_path) and project.raster_mask is not None:
 
-            project = Project(os.getcwd())
+
             affected_local_path = self.affected_path
             ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
                       creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
@@ -82,11 +83,11 @@ class DeprivationVariable(RwiVariable):
             return affected_local_path
 
     def download(self, force_compute=False, **kwargs):
-
+        project = Project(os.getcwd())
         if os.path.exists(self.local_path) and not force_compute:
-
-            assert os.path.exists(self.affected_path), (f'The affected version of {self.component} force not exist.'
-                                                        f'Consider assessing using --force_compute flag')
+            if project.raster_mask is not None:
+                assert os.path.exists(self.affected_path), (f'The affected version of {self.component} force not exist.'
+                                                            f'Consider assessing using --force_compute flag')
             return self.local_path
 
         logger.info(f'Downloading {self.component}')
@@ -94,7 +95,7 @@ class DeprivationVariable(RwiVariable):
 
         if not os.path.exists(out_folder):
             os.makedirs(out_folder)
-        project = Project(os.getcwd())
+
         progress = kwargs.pop('progress', None)
         local_path = os.path.join(project.data_folder, self.component, f'{self.component}_downloaded.tif')
         download_raster(

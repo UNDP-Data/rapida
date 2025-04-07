@@ -33,6 +33,7 @@ def vector_line_zonal_stats(df_polygon,
 
     df_output = df_polygon.copy()
     df_line_cloned = df_line.copy()
+
     intersects = gpd.sjoin(df_line_cloned, df_output, predicate="intersects", how="inner")
 
     line_stats = intersects.groupby("index_right")["geometry"].apply(selected_operator)

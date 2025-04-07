@@ -349,7 +349,8 @@ class PopulationVariable(Variable):
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
                     gdf.loc[gdf['iso3'] == country, self.name] *= coeff
-                    gdf.loc[gdf['iso3'] == country, f'{self.name}_affected'] *= coeff
+                    if project.raster_mask is not None:
+                        gdf.loc[gdf['iso3'] == country, f'{self.name}_affected'] *= coeff
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
@@ -357,13 +358,14 @@ class PopulationVariable(Variable):
                 expr = f'{self.name}={self.sources}'
                 gdf.eval(expr, inplace=True)
                 # affected
-                affected_sources = ''
-                for vname in self.dep_vars:
-                    v = affected_sources or self.sources
-                    affected_sources = v.replace(vname, f'{vname}_affected')
+                if project.raster_mask is not None:
+                    affected_sources = ''
+                    for vname in self.dep_vars:
+                        v = affected_sources or self.sources
+                        affected_sources = v.replace(vname, f'{vname}_affected')
 
-                expr = f'{self.name}_affected={affected_sources}'
-                gdf.eval(expr, inplace=True)
+                    expr = f'{self.name}_affected={affected_sources}'
+                    gdf.eval(expr, inplace=True)
 
 
 
@@ -393,7 +395,8 @@ class PopulationVariable(Variable):
         progress = kwargs.get('progress', None)
         self.local_path = os.path.join(self._source_folder_, f'{self.name}.tif')
         if os.path.exists(self.local_path):
-            assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
+            if project.raster_mask is not None:
+                assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
             return self.local_path
         sources = list()
 
@@ -449,9 +452,9 @@ class PopulationVariable(Variable):
         return source
 
     def _compute_affected_(self):
-        if geo.is_raster(self.local_path):
+        project = Project(os.getcwd())
+        if geo.is_raster(self.local_path) and project.raster_mask is not None :
 
-            project = Project(os.getcwd())
             affected_local_path = self.affected_path
             ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
                       creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,

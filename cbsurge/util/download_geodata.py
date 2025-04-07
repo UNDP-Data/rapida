@@ -184,14 +184,21 @@ def download_vector(
                                 for i, record in enumerate(batch.to_pylist()):
                                     geom = record.get("wkb_geometry", None)
                                     fid = record.get("OGC_FID", None)
-                                    if geom is None:
-                                        logger.info("Empty geometry")
+                                    if geom is None or len(geom) == 0:
+                                        logger.debug("Empty geometry")
+                                        mask[i] = True
                                         continue
 
                                     if fid in written_features:
                                         mask[i] = True
+                                        continue
                                     else:
-                                        shapely_geom = wkb.loads(geom)
+                                        try:
+                                            shapely_geom = wkb.loads(geom)
+                                        except Exception as se:
+                                            logger.error(f'Failed to parse {geom}.')
+                                            mask[i] = True
+                                            continue
                                         if will_reproject:
                                             reprojected_geom = transform(transformer.transform, shapely_geom)
                                             geom_wkb = reprojected_geom.wkb
@@ -199,6 +206,7 @@ def download_vector(
                                             geom_wkb = shapely_geom.wkb
                                         written_features.add(fid)
                                         new_geometries.append(geom_wkb)
+
                                 if mask[mask].size > 0:
                                     batch = batch.filter(~mask)
 

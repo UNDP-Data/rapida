@@ -178,61 +178,61 @@ class LanduseVariable(Variable):
                 # create a temporary mask with resolution 10 by 10
 
                 # get resolution from local_path
-                # with gdal.Open(self.local_path, gdal.GA_ReadOnly) as ds:
-                #     if ds is not None:
-                #         geotransform = ds.GetGeoTransform()
-                #
-                #         x_res = geotransform[1]
-                #         y_res = abs(geotransform[5])
-                #
-                #
-                #     vrt_path = '/vsimem/warped_project_mask.vrt'
-                #
-                #     options = gdal.BuildVRTOptions(
-                #         outputBounds=(geotransform[0], geotransform[3] + ds.RasterYSize * geotransform[5],
-                #                       geotransform[0] + ds.RasterXSize * geotransform[1], geotransform[3]),
-                #         xRes=x_res,
-                #         yRes=y_res,
-                #
-                #     )
-                #     with gdal.BuildVRT(vrt_path, [project.raster_mask], options=options) as vrt:
-                        # warp_options = dict(
-                        #     format='GTiff',
-                        #     xRes=x_res,
-                        #     yRes=y_res,
-                        #     creationOptions=constants.GTIFF_CREATION_OPTIONS,
-                        #     outputBounds=(geotransform[0], geotransform[3] + ds.RasterYSize * geotransform[5],
-                        #                   geotransform[0] + ds.RasterXSize * geotransform[1], geotransform[3]),
-                        # )
-                        #
-                        #
-                        # warped_project_mask = project.raster_mask.replace('mask', 'warped_mask')
-                        # temp_mask_ds = gdal.Warp(
-                        #     destNameOrDestDS=warped_project_mask,
-                        #     srcDSOrSrcDSTab=project.raster_mask,
-                        #     options=gdal.WarpOptions(**warp_options),
-                        #     outputType=gdal.GDT_Byte,
-                        #     outputSRS=project.target_srs,
-                        #     targetAlignedPixels=True,
-                        #     multiThread=True,
-                        # )
-                        # temp_mask_ds = None
+                with gdal.Open(self.local_path, gdal.GA_ReadOnly) as ds:
+                    if ds is not None:
+                        geotransform = ds.GetGeoTransform()
 
-                with rasterio.open(self.local_path) as src, rasterio.open(project.raster_mask) as mask:
-                    x_res, y_res = src.res
-                    m_xres, m_yres = mask.res
-                    if x_res < m_xres and y_res < m_yres:
-                        xres = int(x_res)
-                        yres = int(y_res)
-                        vrt_mask = f"vrt://{project.raster_mask}?tr={x_res},{y_res}&projwin={src.bounds.left},{src.bounds.top},{src.bounds.right},{src.bounds.bottom}"
-                    else:
-                        # xres = int(m)
-                        vrt_mask = f"vrt://{project.raster_mask}"
+                        x_res = geotransform[1]
+                        y_res = abs(geotransform[5])
 
-                    with rasterio.open(vrt_mask) as vrt_ds:
-                        print(vrt_ds)
-                        print(src.width, src.height, vrt_ds.width, vrt_ds.height)
 
+                    vrt_path = '/vsimem/warped_project_mask.vrt'
+
+                    options = gdal.BuildVRTOptions(
+                        outputBounds=(geotransform[0], geotransform[3] + ds.RasterYSize * geotransform[5],
+                                      geotransform[0] + ds.RasterXSize * geotransform[1], geotransform[3]),
+                        xRes=x_res,
+                        yRes=y_res,
+
+                    )
+                    with gdal.BuildVRT(vrt_path, [project.raster_mask], options=options) as vrt:
+                        warp_options = dict(
+                            format='GTiff',
+                            xRes=x_res,
+                            yRes=y_res,
+                            creationOptions=constants.GTIFF_CREATION_OPTIONS,
+                            outputBounds=(geotransform[0], geotransform[3] + ds.RasterYSize * geotransform[5],
+                                          geotransform[0] + ds.RasterXSize * geotransform[1], geotransform[3]),
+                        )
+
+
+                        warped_project_mask = project.raster_mask.replace('mask', 'warped_mask')
+                        temp_mask_ds = gdal.Warp(
+                            destNameOrDestDS=warped_project_mask,
+                            srcDSOrSrcDSTab=project.raster_mask,
+                            options=gdal.WarpOptions(**warp_options),
+                            outputType=gdal.GDT_Byte,
+                            outputSRS=project.target_srs,
+                            targetAlignedPixels=True,
+                            multiThread=True,
+                        )
+                        temp_mask_ds = None
+
+                # with rasterio.open(self.local_path) as src, rasterio.open(project.raster_mask) as mask:
+                #     x_res, y_res = src.res
+                #     m_xres, m_yres = mask.res
+                #     if x_res < m_xres and y_res < m_yres:
+                #         xres = int(x_res)
+                #         yres = int(y_res)
+                #         vrt_mask = f"vrt://{project.raster_mask}?tr={x_res},{y_res}&projwin={src.bounds.left},{src.bounds.top},{src.bounds.right},{src.bounds.bottom}"
+                #     else:
+                #         # xres = int(m)
+                #         vrt_mask = f"vrt://{project.raster_mask}"
+                #
+                #     with rasterio.open(vrt_mask) as vrt_ds:
+                #         print(vrt_ds)
+                #         print(src.width, src.height, vrt_ds.width, vrt_ds.height)
+                #
                     calc_ds = Calc(calc='A*B',
                               outfile=affected_local_path,
                               projectionCheck=True,
@@ -240,11 +240,9 @@ class LanduseVariable(Variable):
                               creation_options=GTIFF_CREATION_OPTIONS,
                               quiet=False,
                               A=self.local_path,
-                              B=vrt_mask,
+                              B=warped_project_mask,
                               overwrite=True,
                               NoDataValue=None,
-                              local_path=self.local_path,
-                              mask=vrt_mask
                             )
                     calc_ds = None
                 assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'

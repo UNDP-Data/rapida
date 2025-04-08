@@ -251,8 +251,6 @@ class LanduseVariable(Variable):
 
 
     def compute(self, **kwargs):
-        self.download(**kwargs)
-
         force_compute = kwargs.get('force_compute', False)
         # run the prediction only when the force_compute or prediction image doesn't exist
         if force_compute or not os.path.exists(self.prediction_output_image):

@@ -55,7 +55,6 @@ def create_date_range(target_year: int) -> str:
     end_of_year = date(target_year, 12, 31)
     today = date.today()
 
-    # 今日の日付と年末を比較して早い方を使う
     end_date = min(today, end_of_year)
 
     return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
@@ -385,6 +384,7 @@ def crop_asset_files(base_dir,
             x_res=xRes, y_res=yRes,
             crop_ds=geopackage_file_path, crop_layer_name=polygons_layer_name,
             return_handle=False,
+            progress=progress,
             warpMemoryLimit=1024,
         )
 

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from typing import List
@@ -158,7 +159,7 @@ class LanduseVariable(Variable):
             # if all files already exist, skip download
             pass
         else:
-            download_stac(stac_url=self.stac_url,
+            asyncio.run(download_stac(stac_url=self.stac_url,
                           collection_id=self.collection_id,
                           geopackage_file_path=project.geopackage_file_path,
                           polygons_layer_name=project.polygons_layer_name,
@@ -166,7 +167,7 @@ class LanduseVariable(Variable):
                           target_year=self.target_year,
                           target_assets=self.target_asset,
                           target_srs=project.target_srs,
-                          progress=progress)
+                          progress=progress))
 
 
     def _compute_affected_(self, **kwargs):

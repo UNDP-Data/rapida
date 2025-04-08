@@ -4,6 +4,8 @@ import os
 import re
 from glob import glob
 from collections import defaultdict
+from typing import Dict
+
 from osgeo import gdal
 from datetime import datetime, date
 from rich.progress import Progress
@@ -15,7 +17,7 @@ from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
 from cbsurge.util import geo
-
+from cbsurge.util.chunker import chunker
 
 logger = logging.getLogger('rapida')
 
@@ -402,16 +404,16 @@ def crop_asset_files(base_dir,
     return output_files
 
 
-def download_stac(
-        stac_url: str,
-        collection_id: str,
-        geopackage_file_path: str,
-        polygons_layer_name: str,
-        output_dir: str,
-        target_year: int,
-        target_assets: dict[str, str],
-        target_srs,
-        progress: Progress = None,
+async def download_stac(
+    stac_url: str,
+    collection_id: str,
+    geopackage_file_path: str,
+    polygons_layer_name: str,
+    output_dir: str,
+    target_year: int,
+    target_assets: dict[str, str],
+    target_srs,
+    progress: Progress = None,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -427,22 +429,19 @@ def download_stac(
     :param progress: rich progress object
     :return the list of output files
     """
+
     stac_task = None
+    if progress:
+        stac_task = progress.add_task(f"[cyan]Connecting to {stac_url}/{collection_id}", total=None)
 
-    if progress is not None:
-        stac_task = progress.add_task(
-            description=f'[red] Donwloading data from {stac_url}/{collection_id}', total=None)
-
-    client = pystac_client.Client.open(
-        url=stac_url
-    )
+    client = pystac_client.Client.open(stac_url)
 
     df_polygon = gpd.read_file(geopackage_file_path, layer=polygons_layer_name)
     df_polygon.to_crs(epsg=4326, inplace=True)
     bbox = df_polygon.total_bounds
 
-    if progress is not None and stac_task is not None:
-        progress.update(stac_task, description=f'[red] Searching data for project extent...')
+    if progress and stac_task:
+        progress.update(stac_task, description="[yellow]Searching for STAC items...")
 
     datetime = create_date_range(target_year)
     search = client.search(
@@ -453,77 +452,85 @@ def download_stac(
     )
 
     items = list(search.items())
-    if progress is not None and stac_task is not None:
-        progress.update(stac_task, description=f"[red] Found {len(items)} items in search results.")
-
-    assets = list(target_assets.keys())
-    num_assets = len(assets)
+    if progress and stac_task:
+        progress.update(stac_task, description=f"[green]Found {len(items)} items.")
 
     latest_per_tile = {}
-    unique_key = "grid:code"
     for item in items:
-        tile_id = item.properties.get(unique_key)
-        cloud_cover = item.properties.get("eo:cloud_cover")
-        if tile_id is not None and (tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime):
-            # check if all assets are included in an item
-            assets_data = []
-            for key in assets:
-                if key in item.assets:
-                    assets_data.append(item.assets[key])
+        tile_id = item.properties.get("grid:code")
+        if tile_id is None:
+            continue
 
-            if len(assets_data) != num_assets:
-                logger.debug(f"Skipped item: {item.id} | Tile: {tile_id} | Cloud Cover: {cloud_cover} because of lack of assets data")
-                continue
-
-            latest_per_tile[tile_id] = item
-            logging.debug("Processing item: %s | Tile: %s | Cloud Cover: %s", item.id, tile_id, cloud_cover)
-        else:
-            logging.debug("Skipped item: %s | Tile: %s | Cloud Cover: %s", item.id, tile_id, cloud_cover)
+        if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
+            if all(asset in item.assets for asset in target_assets):
+                latest_per_tile[tile_id] = item
 
     asset_urls = []
     for item in latest_per_tile.values():
-        tile_id = item.properties.get(unique_key)
-        for asset_key, asset in item.assets.items():
-            asset_urls.append((asset.href, asset_key, tile_id))
+        tile_id = item.properties["grid:code"]
+        for key, asset in item.assets.items():
+            if key in target_assets:
+                asset_urls.append((asset.href, key, tile_id))
 
-    assert len(asset_urls) > 0, f"No assets found in {stac_url} for target area"
+    if not asset_urls:
+        raise RuntimeError(f"No assets found in {stac_url} for target area")
 
-    if progress is not None and stac_task is not None:
-        progress.update(stac_task, description=f"[red] Found {len(asset_urls)} assets to download.", total=len(asset_urls))
+    if progress and stac_task:
+        progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
 
-    for url, asset_key, tile_id in asset_urls:
-        if asset_key in target_assets:
-            logging.debug("Downloading %s from url %s", asset_key, url)
+    for chunk in chunker(asset_urls, 5):
+        download_tasks = {}
+        for url, asset_key, tile_id in chunk:
             url = s3_to_http(url)
             band_name = target_assets[asset_key]
             download_dir = os.path.join(output_dir, tile_id)
+            os.makedirs(download_dir, exist_ok=True)
 
-            if not os.path.exists(download_dir):
-                os.makedirs(download_dir)
+            task = asyncio.create_task(
+                download_from_https_async(
+                    file_url=url,
+                    target=os.path.join(download_dir, band_name),
+                    target_srs=target_srs,
+                    progress=progress,
+                ),
+                name=f"{tile_id}:{band_name}",
+            )
+            download_tasks[band_name] = task
 
-            downloaded_file = asyncio.run(download_from_https_async(
-                file_url=url,
-                target=os.path.join(download_dir, band_name),
-                progress=progress,
-                target_srs=target_srs,
-            ))
+        done, pending = await asyncio.wait(download_tasks.values(), return_when=asyncio.ALL_COMPLETED)
 
-            if progress is not None and stac_task is not None:
-                progress.update(stac_task, description=f"[red] File saved to {downloaded_file}", advance=1)
-        else:
-            if progress is not None and stac_task is not None:
-                progress.update(stac_task, advance=1)
+        for task in done:
+            try:
+                band_name = task.get_name()
+                result = await task
+                if progress and stac_task:
+                    progress.update(stac_task, description=f"[green]Saved {band_name}", advance=1)
+                logging.debug(f"Downloaded {band_name} to {result}")
+            except Exception as e:
+                band_name = task.get_name()
+                logging.error(f"Failed to download {band_name}: {e}")
 
-    if progress is not None and stac_task is not None:
-        progress.update(stac_task, description=f"[red] Downloaded all assets")
-
-    output_files = crop_asset_files(base_dir=output_dir,
-                                    target_srs=target_srs,
-                                    geopackage_file_path=geopackage_file_path,
-                                    polygons_layer_name=polygons_layer_name,
-                                    progress=progress,)
+        for task in pending:
+            band_name = task.get_name()
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                logging.warning(f"Cancelled download for {band_name}")
 
     if progress and stac_task:
+        progress.update(stac_task, description="[magenta]Cropping downloaded assets...")
+
+    output_files = crop_asset_files(
+        base_dir=output_dir,
+        target_srs=target_srs,
+        geopackage_file_path=geopackage_file_path,
+        polygons_layer_name=polygons_layer_name,
+        progress=progress,
+    )
+
+    if progress and stac_task:
+        progress.update(stac_task, description="[bold green]Download and crop complete!")
         progress.remove_task(stac_task)
 
     return output_files

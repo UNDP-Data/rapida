@@ -180,9 +180,9 @@ class LanduseVariable(Variable):
 
                 # get resolution from local_path
                 with gdal.Open(self.local_path, gdal.GA_ReadOnly) as ds:
+
                     if ds is not None:
                         geotransform = ds.GetGeoTransform()
-
                         x_res = geotransform[1]
                         y_res = abs(geotransform[5])
 
@@ -219,21 +219,7 @@ class LanduseVariable(Variable):
                         )
                         temp_mask_ds = None
 
-                # with rasterio.open(self.local_path) as src, rasterio.open(project.raster_mask) as mask:
-                #     x_res, y_res = src.res
-                #     m_xres, m_yres = mask.res
-                #     if x_res < m_xres and y_res < m_yres:
-                #         xres = int(x_res)
-                #         yres = int(y_res)
-                #         vrt_mask = f"vrt://{project.raster_mask}?tr={x_res},{y_res}&projwin={src.bounds.left},{src.bounds.top},{src.bounds.right},{src.bounds.bottom}"
-                #     else:
-                #         # xres = int(m)
-                #         vrt_mask = f"vrt://{project.raster_mask}"
-                #
-                #     with rasterio.open(vrt_mask) as vrt_ds:
-                #         print(vrt_ds)
-                #         print(src.width, src.height, vrt_ds.width, vrt_ds.height)
-                #
+
                     calc_ds = Calc(calc='A*B',
                               outfile=affected_local_path,
                               projectionCheck=True,

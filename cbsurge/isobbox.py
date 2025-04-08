@@ -2,7 +2,6 @@
 import httpx
 import logging
 from cbsurge.admin.osm import get_admin0_bbox, OVERPASS_API_URL
-from cbsurge  import util
 from osm2geojson import json2geojson
 import geopandas
 

@@ -1,5 +1,3 @@
-import logging
-
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.admin import admin
 from cbsurge.project import create, list, upload, download, publish, delete

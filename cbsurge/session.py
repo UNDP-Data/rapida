@@ -1,11 +1,8 @@
 import logging
 import os
 import json
-
-from azure.identity import DefaultAzureCredential, AzureAuthorityHosts
 from azure.core.exceptions import ClientAuthenticationError
 from azure.storage.blob.aio import BlobServiceClient, ContainerClient
-from azure.storage.fileshare.aio import ShareServiceClient
 from cbsurge.az.auth import MsalTokenCredential, TOKEN_CACHE_FIlE
 from cbsurge.az.surgeauth import SurgeTokenCredential
 

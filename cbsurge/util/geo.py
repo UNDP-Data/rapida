@@ -118,11 +118,14 @@ def import_raster(source=None, dst=None, target_srs=None,
                 logger.debug(f'Reprojecting {source} to {target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}')
                 warp_options.update(dict(dstSRS=target_srs))
                 rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
-                assert os.path.exists(dst), f'Failed to align {source}'
-                if return_handle:
-                    return rds
-                else:
-                    rds = None
+            else:
+                rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
+
+            assert os.path.exists(dst), f'Failed to align {source}'
+            if return_handle:
+                return rds
+            else:
+                rds = None
     except KeyboardInterrupt:
         tout.set()
         raise

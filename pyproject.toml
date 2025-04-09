@@ -43,9 +43,6 @@ dependencies = [
     "msal",
     "playwright",
     "pystac_client",
-    "pystac_client",
-    "requests-oauthlib",
-    "pystac_client",
     "requests-oauthlib"
 ]
 

@@ -42,8 +42,6 @@ dependencies = [
     "pmtiles",
     "msal",
     "playwright",
-    "tensorflow",
-    "requests-oauthlib",
     "pystac_client",
     "requests-oauthlib"
 ]

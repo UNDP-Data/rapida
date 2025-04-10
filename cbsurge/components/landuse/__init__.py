@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from typing import List
@@ -158,7 +159,7 @@ class LanduseVariable(Variable):
             # if all files already exist, skip download
             pass
         else:
-            download_stac(stac_url=self.stac_url,
+            asyncio.run(download_stac(stac_url=self.stac_url,
                           collection_id=self.collection_id,
                           geopackage_file_path=project.geopackage_file_path,
                           polygons_layer_name=project.polygons_layer_name,
@@ -166,7 +167,7 @@ class LanduseVariable(Variable):
                           target_year=self.target_year,
                           target_assets=self.target_asset,
                           target_srs=project.target_srs,
-                          progress=progress)
+                          progress=progress))
 
 
     def _compute_affected_(self, **kwargs):
@@ -179,9 +180,9 @@ class LanduseVariable(Variable):
 
                 # get resolution from local_path
                 with gdal.Open(self.local_path, gdal.GA_ReadOnly) as ds:
+
                     if ds is not None:
                         geotransform = ds.GetGeoTransform()
-
                         x_res = geotransform[1]
                         y_res = abs(geotransform[5])
 
@@ -218,21 +219,7 @@ class LanduseVariable(Variable):
                         )
                         temp_mask_ds = None
 
-                # with rasterio.open(self.local_path) as src, rasterio.open(project.raster_mask) as mask:
-                #     x_res, y_res = src.res
-                #     m_xres, m_yres = mask.res
-                #     if x_res < m_xres and y_res < m_yres:
-                #         xres = int(x_res)
-                #         yres = int(y_res)
-                #         vrt_mask = f"vrt://{project.raster_mask}?tr={x_res},{y_res}&projwin={src.bounds.left},{src.bounds.top},{src.bounds.right},{src.bounds.bottom}"
-                #     else:
-                #         # xres = int(m)
-                #         vrt_mask = f"vrt://{project.raster_mask}"
-                #
-                #     with rasterio.open(vrt_mask) as vrt_ds:
-                #         print(vrt_ds)
-                #         print(src.width, src.height, vrt_ds.width, vrt_ds.height)
-                #
+
                     calc_ds = Calc(calc='A*B',
                               outfile=affected_local_path,
                               projectionCheck=True,
@@ -251,8 +238,6 @@ class LanduseVariable(Variable):
 
 
     def compute(self, **kwargs):
-        self.download(**kwargs)
-
         force_compute = kwargs.get('force_compute', False)
         # run the prediction only when the force_compute or prediction image doesn't exist
         if force_compute or not os.path.exists(self.prediction_output_image):

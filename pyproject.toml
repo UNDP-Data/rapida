@@ -43,8 +43,7 @@ dependencies = [
     "msal",
     "playwright",
     "pystac_client",
-    "requests-oauthlib",
-    "tensorflow-cpu"
+    "requests-oauthlib"
 ]
 
 [project.optional-dependencies]

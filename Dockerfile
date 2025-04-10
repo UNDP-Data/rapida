@@ -8,12 +8,33 @@ RUN apt-get update && apt-get install -y \
     python3-gdal \
     python3-pip \
     pipenv \
+    nodejs \
+    npm \
+    curl \
+    sudo \
+    git \
+    build-essential \
+    libssl-dev \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && apt-get clean \
+    && npm install -g configurable-http-proxy
 
 # Optional: Set GDAL and PROJ_LIB environment variables
 ENV GDAL_DATA=/usr/share/gdal
 ENV PROJ_LIB=/usr/share/proj
+
+WORKDIR /app
+
+
+
+
+
+
+
+
+
+
 
 # Verify the GDAL installation
 CMD gdalinfo --version

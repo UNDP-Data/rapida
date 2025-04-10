@@ -25,7 +25,7 @@ from cbsurge.util.dataset2pmtiles import dataset2pmtiles
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-
+gdal.BuildVRTOptions()
 
 class Project:
     config_file_name = 'rapida.json'

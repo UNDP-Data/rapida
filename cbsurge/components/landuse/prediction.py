@@ -6,7 +6,11 @@ from typing import List
 import numpy as np
 import rasterio
 from rasterio.windows import Window
-import tensorflow as tf
+try:
+    import tensorflow as tf
+except Exception as ie:
+    tf = None
+
 
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

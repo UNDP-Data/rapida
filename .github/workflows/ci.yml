@@ -21,8 +21,8 @@ jobs:
 #          # Define cache dir
 #          ARCH=${{ runner.arch }}
 #          CACHE_PATH="/tmp/docker_cache_${ARCH,,}"
-#          # Get Dockerfile hash for image cache
-#          IMAGE_HASH="${{ hashFiles('./Dockerfile') }}"
+#          # Get Dockerfile.jupyter hash for image cache
+#          IMAGE_HASH="${{ hashFiles('./Dockerfile.jupyter') }}"
 #          # Create image tag
 #          VARIANT="$(TZ=UTC-9 date +%Y%m%d)_${IMAGE_HASH:0:7}"
 #          IMAGE_NAME="geo_cb_surge_${ARCH,,}"
@@ -97,7 +97,7 @@ jobs:
       with:
         push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
         context: .
-        file: Dockerfile
+        file: Dockerfile.jupyter
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         build-args: |
@@ -135,7 +135,7 @@ jobs:
 #        uses: docker/build-push-action@v6
 #        with:
 #          context: .
-#          file: Dockerfile
+#          file: Dockerfile.jupyter
 #          push: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
 #          tags: ${{ steps.meta.outputs.tags }}
 #          labels: ${{ steps.meta.outputs.labels }}

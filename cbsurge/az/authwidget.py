@@ -1,4 +1,4 @@
-
+import datetime
 import logging
 import ipywidgets as widgets
 import asyncio
@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 class AuthWidget:
     def __init__(self):
         self.credential = SurgeTokenCredential()
-
         # Widgets
         self.email_w = widgets.Text(
             placeholder='...enter your UNDP email address',
@@ -102,8 +101,15 @@ class AuthWidget:
         except Exception as e:
             self.feedback_html.value = f"<b style='color:red'>Authentication failed: {e}</b>"
         finally:
-            self.auth_button.description = "Authenticate"
+            #self.auth_button.description = "Authenticate"
             self.auth_button.disabled = False
 
     def on_click(self, btn):
+        if self.credential.authenticated:
+            local_tz = datetime.datetime.now().astimezone().tzinfo
+            dt = datetime.datetime.fromtimestamp(self.credential.token['expires_at'], tz=local_tz)
+            self.feedback_html.value = (f"<b style='color:brown'>You are authenticated until "
+                                        f"{dt.strftime("%Y-%m-%d %H:%M:%S %Z%z")}</b>")
+            return
         asyncio.ensure_future(self.authenticate())
+

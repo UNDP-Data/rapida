@@ -11,12 +11,19 @@ services:
       - ./cbsurge:/app/cbsurge # mount app folder to container
       - ./tests:/app/tests
       # uncomment to mount token info from local
-      # - ~/.cbsurge/token_cache.json:/root/.cbsurge/token_cache.json
+      # - ~/.cbsurge:/root/.cbsurge
+      # uncomment to mount data folder from local
+      # - ./data:/data
     entrypoint: "/app/entrypoint.sh"
-#    entrypoint: "pipenv run jupyterhub"
     ports:
       - 8100:8000
     environment:
       - JUPYTER_USERS=${JUPYTER_USERS:-''}
       - TENANT_ID=${TENANT_ID:-''}
       - CLIENT_ID=${CLIENT_ID:-''}
+      - USER=${USER:-''}
+      - AZURE_STORAGE_ACCOUNT=${AZURE_STORAGE_ACCOUNT:-''}
+      - AZURE_PUBLISH_CONTAINER_NAME=${AZURE_PUBLISH_CONTAINER_NAME:-''}
+      - AZURE_STAC_CONTAINER_NAME=${AZURE_STAC_CONTAINER_NAME:-''}
+      - AZURE_FILE_SHARE_NAME=${AZURE_FILE_SHARE_NAME:-''}
+      - GEOHUB_ENDPOINT=${GEOHUB_ENDPOINT:-''}

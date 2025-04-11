@@ -188,7 +188,7 @@ class SurgeTokenCredential(TokenCredential):
             # Get the MFA number
             number = await page.inner_text('#idRichContext_DisplaySign')
             mfa_msg = f"Your MFA input code is: {number}. Please input it into the Authenticator App on your mobile"
-            logger.info(mfa_msg)
+            logger.debug(mfa_msg)
 
             if mfa_confirmation_widget is not  None:
                 mfa_confirmation_widget.value = f'<b>Your MFA input code is: <span style="color:red">{number}</span>. Please input it into the Authenticator App on your mobile</b>'
@@ -322,7 +322,7 @@ class SurgeTokenCredential(TokenCredential):
             return token_data
         else:
 
-            logger.info(f"Failed to refresh token: {response.json()} " )
+            logger.error(f"Failed to refresh token: {response.json()} " )
 
 
     async def refresh_token_async(self, *scope):
@@ -346,7 +346,7 @@ class SurgeTokenCredential(TokenCredential):
                     token_data['cached_at'] = int(now)
                     return token_data
                 else:
-                    logger.info(f"Failed to refresh token: {response.json()} ")
+                    logger.error(f"Failed to refresh token: {response.json()} ")
             except httpx.RequestError as e:
                 logger.error(f"An error occurred while requesting the token: {e}")
             except Exception as e:
@@ -376,13 +376,13 @@ class SurgeTokenCredential(TokenCredential):
                     self.token = new_token
                     self._save_to_cache_()
                 else:
-                    logger.info(f"Attempting to authenticate with {self.auth_url}")
+                    logger.debug(f"Attempting to authenticate with {self.auth_url}")
                     self.token = await self.fetch_token_async(*scopes, username=email, password=password,
                                                   mfa_confirmation_widget=mfa_widget)
                     self._save_to_cache_()
 
         else :
-            logger.info(f"Attempting to authenticate with at {self.auth_url} and {email}:{password}")
+            logger.debug(f"Attempting to authenticate at {self.auth_url}")
             self.token = await self.fetch_token_async(*scopes, username=email, password=password,
                                                       mfa_confirmation_widget=mfa_widget)
             self._save_to_cache_()
@@ -412,7 +412,7 @@ class SurgeTokenCredential(TokenCredential):
                     self.token = new_token
                     self._save_to_cache_()
                 else:
-                    logger.info(f"Attempting to authenticate with {self.auth_url}")
+                    logger.info(f"Attempting to authenticate at {self.auth_url}")
 
                     email = os.environ.get('RAPIDA_USER', None) or click.prompt('Your UNDP email address please...',
                                                                                 type=str)
@@ -422,7 +422,7 @@ class SurgeTokenCredential(TokenCredential):
                     self._save_to_cache_()
 
         else :
-            logger.info(f"Attempting to authenticate with at {self.auth_url}")
+            logger.info(f"Attempting to authenticate at {self.auth_url}")
             email = os.environ.get('RAPIDA_USER', None) or click.prompt('Your UNDP email address please...', type=str)
             password = os.environ.get('RAPIDA_PASSWORD', None) or click.prompt('Your password...', type=str,
                                                                                hide_input=True)

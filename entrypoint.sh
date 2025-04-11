@@ -24,6 +24,13 @@ if [ ! -z "$JUPYTER_USERS" ]; then
             # Now copy the cell hook
             cp /app/cbsurge/az/cell_hook.py /home/$username/.ipython/profile_default/startup/cell_hook.py
             chown $username:$username /home/$username/.ipython/profile_default/startup/cell_hook.py
+
+            #/usr/local/share/jupyter/notebook/static/custom/
+            mkdir -p /usr/local/share/jupyter/notebook/static/custom/
+            cp /app/custom.js /usr/local/share/jupyter/notebook/static/custom/custom.js
+            chmod 644 /usr/local/share/jupyter/notebook/static/custom/custom.js
+
+
         else
             echo "Invalid user format: $user_info"
         fi

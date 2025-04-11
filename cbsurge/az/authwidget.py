@@ -1,105 +1,109 @@
-import ipywidgets
-import jwt
-import ipywidgets as widgets
-from IPython.display import display
-from cbsurge.util.in_notebook import in_notebook
-from cbsurge.az.surgeauth import SurgeTokenCredential
+
 import logging
+import ipywidgets as widgets
 import asyncio
+import jwt
+from cbsurge.az.surgeauth import SurgeTokenCredential
+from IPython.display import display
+
+
+
 logger = logging.getLogger(__name__)
 
-#out = widgets.Output(layout={'padding': '25px'})
-
-user_name_w = widgets.Text(
-    value='',
-    placeholder='...enter your UNDP email address',
-    description='Email:',
-    disabled=False,
-    layout=widgets.Layout(visibility='visible')
-)
-
-password_w = widgets.Password(
-    value='',
-    placeholder='Enter password',
-    description='Password:',
-    disabled=False
-)
-
-auth_button = widgets.Button(
-    description='Authenticate',
-    disabled=False,
-    button_style='', # 'success', 'info', 'warning', 'danger' or ''
-    tooltip='Click to authenticate',
-    icon='user' # (FontAwesome names without the `fa-` prefix)
-)
 
 
+class AuthWidget:
+    def __init__(self):
+        self.credential = SurgeTokenCredential()
 
+        # Widgets
+        self.email_w = widgets.Text(
+            placeholder='...enter your UNDP email address',
+            description='Email:',
+            layout=widgets.Layout(width='250px')
+        )
 
-mfa_number_w = widgets.IntText(
-    value=None,
-    description='Any:',
-    disabled=True
-)
+        self.password_w = widgets.Password(
+            placeholder='Enter password',
+            description='Password:',
+            layout=widgets.Layout(width='250px')
+        )
 
-feedback_html = widgets.HTML(value="", layout={'border': '0px solid grey', 'background':'silver', 'padding':'5px'})
+        self.auth_button = widgets.Button(
+            description='Authenticate',
+            button_style='info',
+            icon='user'
+        )
 
-auth_widget = widgets.HBox(children=[user_name_w, password_w, auth_button], layout=widgets.Layout(padding='2px', justify_content='flex-end', align_items='center'))
-auth_container = widgets.VBox(
-    children=[auth_widget,feedback_html],
-    layout=widgets.Layout(
-        align_items='flex-end',  # Aligns the children (feedback_html and auth_widget) to the right
-        justify_content='flex-start',  # Aligns the children vertically at the top
-        width='100%'  # Ensures the container stretches across the available space
-    )
-)
+        self.feedback_html = widgets.HTML(
+            value="", layout={'border': '0px', 'background': 'whitesmoke', 'padding': '5px'}
+        )
 
+        # Layout
+        self.auth_widget = widgets.HBox(
+            children=[self.email_w, self.password_w, self.auth_button],
+            layout=widgets.Layout(justify_content='flex-end', align_items='center', padding='4px')
+        )
 
+        self.container = widgets.VBox(
+            children=[self.auth_widget, self.feedback_html],
+            layout=widgets.Layout(width='100%', align_items='flex-end', justify_content='flex-start')
+        )
 
-#@out.capture(clear_output=True)
-async def authenticate():
-    email, passwd = user_name_w.value, password_w.value
-    if email and passwd:
-        assert '@' in email, f'Invalid email address "{email}"'
-        assert passwd not in ('', None), f'Invalid password'
-        credential = SurgeTokenCredential()
-        res = await credential.get_token_async(credential.STORAGE_SCOPE, email=email, password=passwd, mfa_widget=feedback_html)
-        feedback_html.value=''
-        info = decode_id_token(credential.token['id_token'])
-        auth_button.description = f'{info["name"]}'
-        # auth_button.layout.visibility = 'hidden'
-        user_name_w.layout = widgets.Layout(display='none')
-        password_w.layout = widgets.Layout(display='none')
+        self.auth_button.on_click(self.on_click)
 
-def on_click(b):
-    asyncio.ensure_future(authenticate())
+    def render(self):
+        display(self.container)
+        if self.credential.authenticated:
+            self._handle_authenticated()
 
-#@out.capture(clear_output=True)
-def decode_id_token(id_token):
-    """Decodes an Azure AD ID token and extracts user details."""
-    try:
-        return jwt.decode(id_token, options={"verify_signature": False})
-    except Exception as e:
-        print("Error decoding token:", e)
+    def _decode_token(self, token):
+        try:
+            return jwt.decode(token, options={"verify_signature": False})
+        except Exception as e:
+            self.feedback_html.value = f"<b style='color:red'>Token decode error: {e}</b>"
+            return {}
 
-auth_button.on_click(on_click)
+    def _handle_authenticated(self):
+        info = self._decode_token(self.credential.token['id_token'])
+        self.email_w.layout.display = 'none'
+        self.password_w.layout.display = 'none'
+        self.auth_button.description = f"{info.get('name', 'Logged in')}"
+        self.auth_button.button_style = 'success'
+        self.feedback_html.value = ""
 
-def load_ui():
-    credential = SurgeTokenCredential()
-    display(auth_container)
-    if credential.authenticated:
-        info = decode_id_token(credential.token['id_token'])
-        auth_button.description = f'{info["name"]}'
-        #auth_button.layout.visibility = 'hidden'
-        user_name_w.layout = widgets.Layout(display='none')
-        password_w.layout = widgets.Layout(display='none')
-        #feedback_html.value = f'<b>UNDP user:  {info["name"]}</b> '
+    async def authenticate(self):
+        email = self.email_w.value.strip()
+        passwd = self.password_w.value.strip()
 
-    else:
-        if auth_button.disabled:
-            auth_button.disabled = False
-        if auth_button.description != 'Authenticate':
-            auth_button.description = 'Authenticate'
+        self.auth_button.description = "Authenticating..."
+        self.auth_button.disabled = True
 
+        if not email or not passwd:
+            self.feedback_html.value = "<b style='color:red'>Please enter both email and password.</b>"
+            self.auth_button.description = "Authenticate"
+            self.auth_button.disabled = False
+            return
 
+        if '@' not in email:
+            self.feedback_html.value = f"<b style='color:brown'>Invalid email {email}</b>"
+            self.auth_button.description = "Authenticate"
+            self.auth_button.disabled = False
+            return
 
+        try:
+            await self.credential.get_token_async(
+                self.credential.STORAGE_SCOPE,
+                email=email,
+                password=passwd,
+                mfa_widget=self.feedback_html
+            )
+            self._handle_authenticated()
+        except Exception as e:
+            self.feedback_html.value = f"<b style='color:red'>Authentication failed: {e}</b>"
+        finally:
+            self.auth_button.description = "Authenticate"
+            self.auth_button.disabled = False
+
+    def on_click(self, btn):
+        asyncio.ensure_future(self.authenticate())

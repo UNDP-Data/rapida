@@ -7,6 +7,7 @@ def pre_cell_execution(exec_info):
         aui = AuthWidget()
         aui.render()
 
+
 # Get the current IPython shell
 ip = get_ipython()
 

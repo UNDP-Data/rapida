@@ -3,58 +3,95 @@ import logging
 import ipywidgets as widgets
 import asyncio
 import jwt
+
+
 from cbsurge.az.surgeauth import SurgeTokenCredential
-from IPython.display import display
-
-
+from IPython.display import display, HTML, Javascript
+import logging
 
 logger = logging.getLogger(__name__)
 
 
 
+
+
 class AuthWidget:
+    _instance = None
+    _rendered = False
+    def __new__(cls, *args, **kwargs):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
     def __init__(self):
         self.credential = SurgeTokenCredential()
-        # Widgets
+
+        # Consistent layout and label alignment
+        text_input_layout = widgets.Layout(width='200px')
+        input_style = {'description_width': '100px'}
+
         self.email_w = widgets.Text(
             placeholder='...enter your UNDP email address',
             description='Email:',
-            layout=widgets.Layout(width='250px')
+            layout=text_input_layout,
+
         )
 
         self.password_w = widgets.Password(
             placeholder='Enter password',
             description='Password:',
-            layout=widgets.Layout(width='250px')
+            layout=text_input_layout,
+
         )
 
         self.auth_button = widgets.Button(
             description='Authenticate',
             button_style='info',
-            icon='user'
+            icon='user',
+            layout=widgets.Layout(width='150px', align_self='flex-end')
         )
 
-        self.feedback_html = widgets.HTML(
-            value="", layout={'border': '0px', 'background': 'whitesmoke', 'padding': '5px'}
-        )
+        self.feedback_html = widgets.HTML(value="",
+                                     layout={'border': '0px solid grey', 'background': 'silver', 'padding': '5px'})
 
-        # Layout
-        self.auth_widget = widgets.HBox(
-            children=[self.email_w, self.password_w, self.auth_button],
-            layout=widgets.Layout(justify_content='flex-end', align_items='center', padding='4px')
-        )
-
+        self.auth_widget = widgets.HBox(children=[self.email_w, self.password_w, self.auth_button],
+                                   layout=widgets.Layout(padding='2px', justify_content='flex-end',
+                                                         align_items='center'))
         self.container = widgets.VBox(
             children=[self.auth_widget, self.feedback_html],
-            layout=widgets.Layout(width='100%', align_items='flex-end', justify_content='flex-start')
+            layout=widgets.Layout(
+                align_items='flex-end',  # Aligns the children (feedback_html and auth_widget) to the right
+                justify_content='flex-start',  # Aligns the children vertically at the top
+                width='100%'  # Ensures the container stretches across the available space
+            )
         )
-
         self.auth_button.on_click(self.on_click)
 
+
+    def display(self):
+        if not self.__class__._rendered:
+            # Display the widget container
+            display(self.container)
+            self.__class__._rendered = True
+
+
     def render(self):
-        display(self.container)
+        self.display()
+        self.handle()
+
+    def handle(self):
+
         if self.credential.authenticated:
             self._handle_authenticated()
+        else:
+            self._prepare_to_authenticate()
+            if self.credential.token:
+                asyncio.ensure_future(self.credential.get_token_async())
+
+
+            if self.credential.authenticated:
+                self._handle_authenticated()
+
 
     def _decode_token(self, token):
         try:
@@ -69,6 +106,13 @@ class AuthWidget:
         self.password_w.layout.display = 'none'
         self.auth_button.description = f"{info.get('name', 'Logged in')}"
         self.auth_button.button_style = 'success'
+        self.feedback_html.value = ""
+
+    def _prepare_to_authenticate(self):
+        self.email_w.layout.display = 'block'
+        self.password_w.layout.display = 'block'
+        self.auth_button.description = f"Authenticate"
+        self.auth_button.button_style = 'info'
         self.feedback_html.value = ""
 
     async def authenticate(self):
@@ -100,6 +144,8 @@ class AuthWidget:
             self._handle_authenticated()
         except Exception as e:
             self.feedback_html.value = f"<b style='color:red'>Authentication failed: {e}</b>"
+            self.auth_button.style = 'info'
+            self.auth_button.description = "Authenticate"
         finally:
             #self.auth_button.description = "Authenticate"
             self.auth_button.disabled = False

@@ -15,6 +15,11 @@ from cbsurge.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
 
+AZURE_STORAGE_ACCOUNT=os.environ.get("AZURE_STORAGE_ACCOUNT", "undpgeohub")
+AZURE_PUBLISH_CONTAINER_NAME=os.environ.get("AZURE_PUBLISH_CONTAINER_NAME", "rapida")
+AZURE_STAC_CONTAINER_NAME=os.environ.get("AZURE_STAC_CONTAINER_NAME", "stacdata")
+AZURE_FILE_SHARE_NAME=os.environ.get("AZURE_FILE_SHARE_NAME", "cbrapida")
+GEOHUB_ENDPOINT=os.environ.get("GEOHUB_ENDPOINT", "https://geohub.data.undp.org")
 
 def setup_prompt(session: Session):
     auth = session.authenticate()
@@ -53,32 +58,20 @@ def setup_prompt(session: Session):
     session.set_root_data_folder(root_data_folder)
 
     # azure blob container setting
-    account_name = click.prompt('Please enter account name for UNDP Azure. Enter to skip if use default value',
-                                type=str, default='undpgeohub')
-    session.set_account_name(account_name)
-    click.echo(f"account name: {account_name}")
-
-    publish_container_name = click.prompt('Please enter UNDP Azure container name of publishing project outcome. Enter to skip if use default value',
-                                  type=str, default='rapida')
-    session.set_publish_container_name(publish_container_name)
-    click.echo(f"publish container name: {publish_container_name}")
-
-    stac_container_name = click.prompt('Please enter container name for UNDP Azure STAC. Enter to skip if use default value',
-                                  type=str, default='stacdata')
-    session.set_stac_container_name(stac_container_name)
-    click.echo(f"stac container name: {stac_container_name}")
+    session.set_account_name(AZURE_STORAGE_ACCOUNT)
+    logger.debug(f"account name: {session.get_account_name()}")
+    session.set_publish_container_name(AZURE_PUBLISH_CONTAINER_NAME)
+    logger.debug(f"publish container name: {session.get_publish_container_name()}")
+    session.set_stac_container_name(AZURE_STAC_CONTAINER_NAME)
+    logger.debug(f"stac container name: {session.get_stac_container_name()}")
 
     # azure file share setting
-    share_name = click.prompt('Please enter share name for UNDP Azure. Enter to skip if use default value',
-                              type=str, default='cbrapida')
-    session.set_file_share_name(share_name)
-    click.echo(f"file share name: {share_name}")
+    session.set_file_share_name(AZURE_FILE_SHARE_NAME)
+    logger.debug(f"file share name: {session.get_file_share_name()}")
 
     # geohub endpoint setting
-    geohub_endpoint = click.prompt('Please enter URL of GeoHub endpoint. Enter to skip if use default value',
-                              type=str, default='https://geohub.data.undp.org')
-    session.set_geohub_endpoint(geohub_endpoint)
-    click.echo(f"GeoHub endpoint: {geohub_endpoint}")
+    session.set_geohub_endpoint(GEOHUB_ENDPOINT)
+    logger.debug(f"GeoHub endpoint: {session.get_geohub_endpoint()}")
 
     session.save_config()
     vars_dict = {

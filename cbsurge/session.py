@@ -85,24 +85,6 @@ class Session(object):
         self.config[key] = value
 
 
-    def set_root_data_folder(self, folder_name):
-        self.set_config_value_by_key("root_data_folder", folder_name)
-
-    def get_root_data_folder(self, is_absolute_path=True):
-        """
-        get root data folder
-
-        Parameters:
-            is_absolute_path (bool): Optional. If true, return absolute path, otherwise relative path. Default is True.
-        Returns:
-            root data folder path (str)
-        """
-        root_data_folder = self.get_config_value_by_key("root_data_folder")
-        if is_absolute_path:
-            return  os.path.expanduser(root_data_folder)
-        else:
-            return root_data_folder
-
     def set_account_name(self, account_name: str):
         self.set_config_value_by_key("account_name", account_name)
 
@@ -137,8 +119,6 @@ class Session(object):
         """
         Save config.json under user directory as ~/.cbsurge/config.json
         """
-        if self.get_root_data_folder() is None:
-            raise RuntimeError(f"root_data_folder is not set")
         if self.get_account_name() is None:
             raise RuntimeError(f"account_name is not set")
         if self.get_stac_container_name() is None:

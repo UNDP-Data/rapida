@@ -5,7 +5,8 @@ from cbsurge.session import is_rapida_initialized
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
-logger = setup_logger()
+logger = logging.getLogger(__name__)
+
 
 
 @click.command(short_help=f'publish RAPIDA project results to Azure and GeoHub')

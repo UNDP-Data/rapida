@@ -73,22 +73,15 @@ available_variables = getVariables()
 
 @click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
               help=f'Force recomputation from sources that are files')
-
-@click.option('--debug', '-d', default=False, show_default=True, is_flag=True,
-              help=f'Turn on debug mode')
-
-
-
-
+@click.option('--debug',
+              is_flag=True,
+              default=False,
+              help="Set log level to debug"
+              )
 @click.pass_context
 def assess(ctx, components=None,  variables=None, year=None, force_compute=False, debug=False):
-    """Assess the effect of natural or social hazard """
     """ Asses/evaluate a specific geospatial exposure components/variables"""
-
-    if debug:
-        logger = setup_logger(level=logging.DEBUG)
-    else:
-        logger = setup_logger()
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

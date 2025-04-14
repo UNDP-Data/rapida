@@ -1,3 +1,4 @@
+import logging
 import os
 import click
 import sys
@@ -5,7 +6,7 @@ from cbsurge.session import is_rapida_initialized
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
-logger = setup_logger()
+logger = logging.getLogger(__name__)
 
 
 @click.command(no_args_is_help=True, short_help='create a RAPIDA project in a new folder')
@@ -17,8 +18,13 @@ logger = setup_logger()
               help='Full path to the mask dataset in any GDAL/OGR supported format. Can be vector or raster' )
 @click.option('-c', '--comment', required=False, type=str,
               help='Any comment you might want to add into the project config' )
-
-def create(name=None, polygons=None, mask=None, comment=None):
+@click.option('--debug',
+              is_flag=True,
+              default=False,
+              help="Set log level to debug"
+              )
+def create(name=None, polygons=None, mask=None, comment=None, debug=False):
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

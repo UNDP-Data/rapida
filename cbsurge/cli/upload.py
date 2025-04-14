@@ -7,7 +7,7 @@ from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
 
-logger = setup_logger()
+logger = logging.getLogger(__name__)
 
 
 @click.command(short_help=f'upload a RAPIDA project to Azure file share')

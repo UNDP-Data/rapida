@@ -23,16 +23,41 @@ AZURE_FILE_SHARE_NAME=os.environ.get("AZURE_FILE_SHARE_NAME", "cbrapida")
 GEOHUB_ENDPOINT=os.environ.get("GEOHUB_ENDPOINT", "https://geohub.data.undp.org")
 
 def setup_prompt(session: Session):
-    auth = session.authenticate()
-    if auth is None:
-        if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
-            click.echo("Initialization will continue without authentication. Please authenticate later.")
-        else:
-            click.echo("rapida init was cancelled. Please authenticate later.")
-            return
-    else:
-        click.echo("Authentication successful.")
+    ## i have just commented authentication out for now
+    # auth = session.authenticate()
+    # if auth is None:
+    #     if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
+    #         click.echo("Initialization will continue without authentication. Please authenticate later.")
+    #     else:
+    #         click.echo("rapida init was cancelled. Please authenticate later.")
+    #         return
+    # else:
+    #     click.echo("Authentication successful.")
+    #
+    # click.echo("We need more information to setup from you.")
 
+    # project root data folder
+    root_data_folder = None
+    absolute_root_data_folder = None
+    while not(root_data_folder is not None and os.path.exists(absolute_root_data_folder)):
+        data_folder = click.prompt("Please enter project root folder to store all data. Enter to skip if use default value", default="~/cbsurge")
+        absolute_root_data_folder = os.path.expanduser(data_folder)
+
+        if os.path.exists(absolute_root_data_folder):
+            if click.confirm("The folder already exists. Yes to overwrite, No/Enter to use existing folder", default=False):
+                shutil.rmtree(absolute_root_data_folder)
+                click.echo(f"Removed folder {absolute_root_data_folder}")
+                os.makedirs(absolute_root_data_folder)
+                click.echo(f"The project root folder was created at {absolute_root_data_folder}")
+                root_data_folder = data_folder
+            else:
+                click.echo(f"Use {absolute_root_data_folder} as the root folder.")
+                root_data_folder = data_folder
+        else:
+            os.makedirs(absolute_root_data_folder)
+            click.echo(f"The project root folder was created at {absolute_root_data_folder}")
+            root_data_folder = data_folder
+    session.set_root_data_folder(root_data_folder)
 
     # azure blob container setting
     session.set_account_name(AZURE_STORAGE_ACCOUNT)

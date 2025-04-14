@@ -1,11 +1,8 @@
 import click
-import playwright.sync_api
-from azure.storage.blob import BlobServiceClient
 import time
 from urllib.parse import urlparse, parse_qs
-from msal import PublicClientApplication, SerializableTokenCache
 from azure.core.credentials import AccessToken, TokenCredential
-from datetime import datetime, timedelta, UTC
+from datetime import datetime
 import os
 import hashlib
 import base64
@@ -15,7 +12,6 @@ import logging
 from oauthlib.oauth2 import OAuth2Error
 from playwright.sync_api import sync_playwright
 
-from cbsurge.util.in_notebook import in_notebook
 from requests_oauthlib import OAuth2Session
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM

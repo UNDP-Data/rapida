@@ -1,7 +1,7 @@
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.util.download_geodata import download_vector
-from cbsurge.project import  Project
+from cbsurge.project.project import  Project
 from cbsurge.session import Session
 import os
 import logging

@@ -8,7 +8,7 @@ from pyogrio import write_dataframe
 from cbsurge.constants import POLYGONS_LAYER_NAME,GTIFF_CREATION_OPTIONS
 from cbsurge.util import geo
 from cbsurge.core.component import Component
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.session import Session
 from cbsurge.core.variable import Variable
 from osgeo_utils.gdal_calc import Calc

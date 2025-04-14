@@ -12,7 +12,6 @@ from cbsurge.components.landuse.variables import generate_variables as gen_landu
 from cbsurge.components.gdp.variables import generate_variables as gen_gdp_vars
 from cbsurge.util.setup_logger import setup_logger
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -66,6 +65,7 @@ def setup_prompt(session: Session):
     session.config.update(vars_dict)
     session.save_config()
     click.echo(f"Initialization was done. config file was saved to {session.get_config_file_path()}")
+
 
 
 

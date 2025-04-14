@@ -144,7 +144,7 @@ class SurgeTokenCredential(TokenCredential):
 
 
             # Wait for the email field to appear and fill it in
-            await page.wait_for_selector('input[type="email"]', timeout=3 * 1000)
+            await page.wait_for_selector('input[type="email"]', timeout=30 * 1000)
             await page.fill('input[type="email"]', value=str(username))
             await page.click('input[type="submit"]')  # Click the next button
 
@@ -152,7 +152,7 @@ class SurgeTokenCredential(TokenCredential):
             # Error handling for username
             error_selector = '#usernameError'  # Match the ID of the error message element
             try:
-                await page.wait_for_selector(error_selector, timeout=1000)  # Wait for error message
+                await page.wait_for_selector(error_selector, timeout=3000)  # Wait for error message
                 error_message = await page.inner_text(error_selector)  # Capture the error message
                 error_msg = f'Failed to authenticate using username "{username}". {error_message}'
             except Exception:
@@ -162,14 +162,14 @@ class SurgeTokenCredential(TokenCredential):
                 raise OAuth2Error(description=error_msg, status_code=None)
 
             # Wait for the password field to appear and fill it in
-            await page.wait_for_selector('input[type="password"]', timeout=3.5 * 60 * 1000)
+            await page.wait_for_selector('input[type="password"]', timeout=30 * 1000)
             await page.fill('input[type="password"]', value=str(password))
             await page.click('input[type="submit"]')  # Click the sign-in button
 
             # Error handling for password
             error_selector = '#passwordError'  # Match the ID of the error message element
             try:
-                await page.wait_for_selector(error_selector, timeout=1000)  # Wait for error message
+                await page.wait_for_selector(error_selector, timeout=3000)  # Wait for error message
                 error_msg = await page.inner_text(error_selector)  # Capture the error message
             except Exception:
                 pass  # Ignore error if the selector is not found
@@ -231,14 +231,14 @@ class SurgeTokenCredential(TokenCredential):
                 page = browser.new_page()
                 page.goto(auth_url)
                 # # Wait for the password field to appear and fill it in
-                page.wait_for_selector(selector='input[type="email"]', timeout=.5 * 60 * 1000)
+                page.wait_for_selector(selector='input[type="email"]', timeout=30 * 1000)
                 # Fill in the username
                 page.fill(selector='input[type="email"]', value=str(username))
                 page.click('input[type="submit"]')  # Click the next button
 
                 error_selector = '#usernameError'  # This should match the ID of the error message element
                 try:
-                    page.wait_for_selector(selector=error_selector,timeout=1000)  # Wait up to 10 seconds for the error message
+                    page.wait_for_selector(selector=error_selector,timeout=3000)  # Wait up to 10 seconds for the error message
                     error_message = page.inner_text(error_selector)  # Capture the text of the error message
                     error_msg = f'Failed to authenticate using username "{username}". {error_message} '
                 except Exception as e:
@@ -247,14 +247,14 @@ class SurgeTokenCredential(TokenCredential):
                     raise OAuth2Error(description=error_msg,status_code=None)
 
                 # Wait for the password field to appear and fill it in
-                page.wait_for_selector(selector='input[type="password"]', timeout=3.5 * 60 * 1000)
+                page.wait_for_selector(selector='input[type="password"]', timeout=30 * 1000)
                 page.fill(selector='input[type="password"]', value=str(password))
                 page.click('input[type="submit"]')  # Click the sign-in button
 
                 error_selector = '#passwordError'  # This should match the ID of the error message element
                 try:
                     page.wait_for_selector(selector=error_selector,
-                                           timeout=1000)  # Wait up to 10 seconds for the error message
+                                           timeout=3000)  # Wait up to 10 seconds for the error message
                     error_msg = page.inner_text(error_selector)  # Capture the text of the error message
                 except Exception as e:
                     pass
@@ -263,7 +263,7 @@ class SurgeTokenCredential(TokenCredential):
 
 
                 # Wait for the element containing the number to appear
-                page.wait_for_selector(selector='#idRichContext_DisplaySign', timeout=.5 * 60 * 1000)
+                page.wait_for_selector(selector='#idRichContext_DisplaySign', timeout=30 * 1000)
                 ds = page.locator("#idRichContext_DisplaySign")
 
                 number = int(ds.text_content())
@@ -272,7 +272,7 @@ class SurgeTokenCredential(TokenCredential):
 
                 # Wait for the redirection to complete
                 page.wait_for_url("**/*code=*",
-                                  timeout=.5 * 60 * 1000)  # Adjust the pattern to match the expected redirect URL
+                                  timeout=30 * 1000)  # Adjust the pattern to match the expected redirect URL
 
                 # Get the current URL after redirection
                 final_url = page.url

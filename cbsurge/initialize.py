@@ -17,17 +17,18 @@ logger = logging.getLogger(__name__)
 
 
 def setup_prompt(session: Session):
-    auth = session.authenticate()
-    if auth is None:
-        if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
-            click.echo("Initialization will continue without authentication. Please authenticate later.")
-        else:
-            click.echo("rapida init was cancelled. Please authenticate later.")
-            return
-    else:
-        click.echo("Authentication successful.")
-
-    click.echo("We need more information to setup from you.")
+    ## i have just commented authentication out for now
+    # auth = session.authenticate()
+    # if auth is None:
+    #     if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
+    #         click.echo("Initialization will continue without authentication. Please authenticate later.")
+    #     else:
+    #         click.echo("rapida init was cancelled. Please authenticate later.")
+    #         return
+    # else:
+    #     click.echo("Authentication successful.")
+    #
+    # click.echo("We need more information to setup from you.")
 
     # project root data folder
     root_data_folder = None

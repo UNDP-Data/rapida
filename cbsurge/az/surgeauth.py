@@ -1,23 +1,18 @@
-import asyncio
+
 import httpx
 import click
-
-from azure.storage.blob import BlobServiceClient
 import time
 from urllib.parse import urlparse, parse_qs
-from msal import PublicClientApplication, SerializableTokenCache
 from azure.core.credentials import AccessToken, TokenCredential
-from datetime import datetime, timedelta, UTC
+from datetime import datetime
 import os
 import hashlib
 import base64
 from os.path import expanduser
 from cbsurge.util.setup_logger import setup_logger
-
 from oauthlib.oauth2 import OAuth2Error
 from playwright.sync_api import sync_playwright
 from playwright.async_api import async_playwright
-from cbsurge.util.in_notebook import in_notebook
 from requests_oauthlib import OAuth2Session
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -398,7 +393,6 @@ class SurgeTokenCredential(TokenCredential):
         :return:
         """
 
-
         if self.token:
             expires_at = datetime.fromtimestamp(self.token["expires_at"])
             expires_in = expires_at - datetime.now()
@@ -407,7 +401,7 @@ class SurgeTokenCredential(TokenCredential):
                 f'Token cached at {self._cache_file_} will expire in {expires_in_secs} secs')
             if expires_in_secs < 15*60:
                 logger.info(f'Refreshing token')
-                new_token = self.refresh_token(*scopes)
+                new_token = self.refresh_token(*scopes) # 97hrs/
                 if new_token is not None and 'access_token' in new_token:
                     self.token = new_token
                     self._save_to_cache_()

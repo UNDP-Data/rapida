@@ -1,12 +1,9 @@
 import datetime
-import logging
 import ipywidgets as widgets
 import asyncio
 import jwt
-
-
 from cbsurge.az.surgeauth import SurgeTokenCredential
-from IPython.display import display, HTML, Javascript
+from IPython.display import display
 import logging
 
 logger = logging.getLogger(__name__)
@@ -80,7 +77,7 @@ class AuthWidget:
         self.handle()
 
     def handle(self):
-
+        
         if self.credential.authenticated:
             self._handle_authenticated()
         else:

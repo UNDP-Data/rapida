@@ -1,6 +1,6 @@
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.cli.admin import admin
-from cbsurge.cli.auth import authenticate
+from cbsurge.cli.auth import auth
 from cbsurge.cli.init import init
 from cbsurge.cli.assess import assess
 from cbsurge.cli.create import create
@@ -27,7 +27,7 @@ def cli(ctx):
 cli.add_command(admin)
 cli.add_command(init)
 cli.add_command(assess)
-cli.add_command(authenticate)
+cli.add_command(auth)
 cli.add_command(create)
 cli.add_command(list)
 cli.add_command(upload)

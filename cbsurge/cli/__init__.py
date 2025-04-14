@@ -12,7 +12,7 @@ from cbsurge.cli.publish import publish
 import click
 
 
-@click.group
+@click.group(context_settings=dict(help_option_names=['-h', '--help']))
 @click.pass_context
 def cli(ctx):
     """UNDP Crisis Bureau Rapida tool.

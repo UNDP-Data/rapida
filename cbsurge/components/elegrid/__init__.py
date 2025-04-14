@@ -59,9 +59,9 @@ class ElegridComponent(Component, ABC):
                                        component=self.component_name,
                                        **var_data)
 
-                if nvars > 1 and kwargs['force_compute'] is True:
+                if nvars > 1 and kwargs['force'] is True:
                     if var_index > 0:
-                        kwargs['force_compute'] = False
+                        kwargs['force'] = False
                 # assess
                 v(**kwargs)
 
@@ -81,7 +81,7 @@ class ElectricityVariable(Variable):
                 :param kwargs:
                 :return:
                 """
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', None)
 
         if progress is not None:
@@ -89,7 +89,7 @@ class ElectricityVariable(Variable):
                 description=f'[blue]Assessing {self.component}->{self.name}', total=None)
 
         if not self.dep_vars:  # simple variable,
-            if not force_compute:
+            if not force:
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
                     progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
@@ -101,7 +101,7 @@ class ElectricityVariable(Variable):
 
         else:
             if self.operator:
-                if not force_compute:
+                if not force:
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:
                         progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
@@ -138,11 +138,11 @@ class ElectricityVariable(Variable):
     def download(self, **kwargs):
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', False)
         layers = pyogrio.list_layers(geopackage_path)
         layer_names = layers[:, 0]
-        if force_compute or self.component not in layer_names:
+        if force or self.component not in layer_names:
             with gdal.OpenEx(geopackage_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
                 lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
                 try:
@@ -321,9 +321,9 @@ class ElectricityVariable(Variable):
         affected_df.to_file(self.local_path, driver='GPKG', layer=affected_layer)
 
 
-    def compute(self, force_compute=True, **kwargs):
-        assert force_compute, f'invalid force_compute={force_compute}'
-        return self.download(force_compute=force_compute, **kwargs)
+    def compute(self, force=True, **kwargs):
+        assert force, f'invalid force={force}'
+        return self.download(force=force, **kwargs)
 
     def resolve(self, **kwargs):
         pass

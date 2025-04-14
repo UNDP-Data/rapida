@@ -59,7 +59,7 @@ def getVariables():
 available_variables = getVariables()
 
 
-@click.command(short_help='assess the effect of natural or social hazards')
+@click.command(short_help='assess the effect of natural or social hazards', no_args_is_help=True)
 @click.option(
     '--components', '-c', required=False, multiple=True,
     type=click.Choice(available_components, case_sensitive=False),
@@ -70,17 +70,16 @@ available_variables = getVariables()
               help=f'The variable/s to be assessed. Valid input example: {" ".join([f"-v {var}" for var in available_variables[:2]])}' )
 @click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
               show_default=True,help=f'The year for which to compute population' )
-
-@click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
-              help=f'Force recomputation from sources that are files')
+@click.option('--force', '-f', default=False, show_default=True,is_flag=True,
+              help=f'Force assess components. Downloaded data or computed data will be ignored and recomputed.')
 @click.option('--debug',
               is_flag=True,
               default=False,
               help="Set log level to debug"
               )
 @click.pass_context
-def assess(ctx, components=None,  variables=None, year=None, force_compute=False, debug=False):
-    """ Asses/evaluate a specific geospatial exposure components/variables"""
+def assess(ctx, components=None,  variables=None, year=None, force=False, debug=False):
+    """ Assess/evaluate a specific geospatial exposure components/variables"""
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
@@ -121,7 +120,7 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
                         fqcn = f'{get_parent_package()}.components.{component_name}.{class_name}'
                         cls = import_class(fqcn=fqcn)
                         component = cls()
-                        component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)
+                        component(progress=progress, variables=variables, target_year=year, force=force)
 
                         #progress.update(components_task,  advance=1, )
 

@@ -144,7 +144,7 @@ class LanduseVariable(Variable):
             progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
 
 
-    def download(self, force_compute=False, **kwargs):
+    def download(self, force=False, **kwargs):
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', None)
 
@@ -155,7 +155,7 @@ class LanduseVariable(Variable):
         for asset in asset_files:
             if os.path.exists(asset):
                 exists += 1
-        if force_compute == False and exists == len(asset_files):
+        if force == False and exists == len(asset_files):
             # if all files already exist, skip download
             pass
         else:
@@ -238,9 +238,9 @@ class LanduseVariable(Variable):
 
 
     def compute(self, **kwargs):
-        force_compute = kwargs.get('force_compute', False)
-        # run the prediction only when the force_compute or prediction image doesn't exist
-        if force_compute or not os.path.exists(self.prediction_output_image):
+        force = kwargs.get('force', False)
+        # run the prediction only when the force or prediction image doesn't exist
+        if force or not os.path.exists(self.prediction_output_image):
             predict(
                 img_paths=self.downloaded_files,
                 output_file_path=self.prediction_output_image,

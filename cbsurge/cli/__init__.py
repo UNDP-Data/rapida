@@ -12,7 +12,12 @@ from cbsurge.cli.publish import publish
 import click
 
 
-@click.group(context_settings=dict(help_option_names=['-h', '--help']))
+class RapidaCommandGroup(click.Group):
+    def list_commands(self, ctx):
+        return self.commands.keys()
+
+
+@click.group(cls=RapidaCommandGroup, context_settings=dict(help_option_names=['-h', '--help']))
 @click.pass_context
 def cli(ctx):
     """UNDP Crisis Bureau Rapida tool.
@@ -23,20 +28,17 @@ def cli(ctx):
     """
     logger = setup_logger(name='rapida', make_root=False)
 
-
-cli.add_command(admin)
 cli.add_command(init)
-cli.add_command(assess)
 cli.add_command(auth)
+cli.add_command(admin)
 cli.add_command(create)
+cli.add_command(assess)
 cli.add_command(list)
-cli.add_command(upload)
 cli.add_command(download)
-cli.add_command(delete)
+cli.add_command(upload)
 cli.add_command(publish)
+cli.add_command(delete)
 
 
 if __name__ == '__main__':
-
-
     cli()

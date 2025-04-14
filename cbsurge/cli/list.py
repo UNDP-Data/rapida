@@ -20,8 +20,19 @@ def list(debug=False):
     if not is_rapida_initialized():
         return
 
-    const = '-'*15
-    tabs = '\t'*1
-    click.echo(f'{const} Available RAPIDA projects {const}')
+    project_names = []
     for project_name in list_projects():
-        click.echo(f'{tabs}"{project_name}"')
+        project_names.append(project_name)
+
+    if len(project_names) == 0:
+        click.echo("No projects found.")
+        return
+
+    header = "Project"
+    max_len = max(len(name) for name in project_names)
+    line_len = max(len(header), max_len, 10)
+
+    click.echo(header)
+    click.echo('-' * line_len)
+    for project_name in project_names:
+        click.echo(project_name)

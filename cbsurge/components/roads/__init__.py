@@ -6,6 +6,7 @@ from cbsurge import constants
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.session import Session
+from cbsurge.util.gpd_overlay import run_overlay
 from cbsurge.util.resolve_url import resolve_geohub_url
 from cbsurge.util.download_geodata import download_vector
 from cbsurge.util.proj_are_equal import proj_are_equal
@@ -179,11 +180,11 @@ class RoadsVariable(Variable):
 
                 df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
                 road_lines = gpd.read_file(self.local_path, layer=self.component)
-                road_lines.sindex
-                df_polygon.sindex
+
                 poly_cols = df_polygon.columns.tolist()
                 cols_to_drop = set(poly_cols).difference(['h3id']).difference(road_lines.columns.tolist())
-                road_lines = gpd.overlay(road_lines, df_polygon, how="intersection", make_valid=True, keep_geom_type=True)
+                road_lines = run_overlay(polygons_df=df_polygon, overlay_df=road_lines, progress=progress)
+
                 road_lines.drop(columns=list(cols_to_drop), inplace=True)
                 road_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
                 road_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')

@@ -22,16 +22,18 @@ AZURE_FILE_SHARE_NAME=os.environ.get("AZURE_FILE_SHARE_NAME", "cbrapida")
 GEOHUB_ENDPOINT=os.environ.get("GEOHUB_ENDPOINT", "https://geohub.data.undp.org")
 
 def setup_prompt(session: Session):
-    auth = session.authenticate()
-    if auth is None:
-        if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
-            click.echo("Initialization will continue without authentication. Please authenticate later.")
-        else:
-            click.echo("rapida init was cancelled. Please authenticate later.")
-            return
-    else:
-        click.echo("Authentication successful.")
-
+    ## i have just commented authentication out for now
+    # auth = session.authenticate()
+    # if auth is None:
+    #     if click.confirm("Authentication failed. Do you want to continue initializing the tool? Yes/Enter to continue, No to cancel.", default=True):
+    #         click.echo("Initialization will continue without authentication. Please authenticate later.")
+    #     else:
+    #         click.echo("rapida init was cancelled. Please authenticate later.")
+    #         return
+    # else:
+    #     click.echo("Authentication successful.")
+    #
+    # click.echo("We need more information to setup from you.")
 
     # azure blob container setting
     session.set_account_name(AZURE_STORAGE_ACCOUNT)

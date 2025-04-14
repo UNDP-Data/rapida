@@ -11,7 +11,7 @@ from pydantic import BaseModel, FilePath
 from sympy.parsing.sympy_parser import parse_expr
 from cbsurge.constants import ARROWTYPE2OGRTYPE
 
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()

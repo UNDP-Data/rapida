@@ -13,7 +13,7 @@ from osgeo import gdal, osr
 from cbsurge import constants
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.session import Session
 from cbsurge.stats.vector_zonal_stats import vector_line_zonal_stats
 from cbsurge.util.download_geodata import download_vector

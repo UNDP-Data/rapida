@@ -10,7 +10,7 @@ from cbsurge.util.gpd_overlay import run_overlay
 from cbsurge.util.resolve_url import resolve_geohub_url
 from cbsurge.util.download_geodata import download_vector
 from cbsurge.util.proj_are_equal import proj_are_equal
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.stats.vector_zonal_stats import vector_line_zonal_stats
 from osgeo import gdal, osr
 import pyogrio

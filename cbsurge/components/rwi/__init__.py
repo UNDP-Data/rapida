@@ -6,7 +6,7 @@ from rich.progress import Progress
 from cbsurge import constants
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.session import Session
 from cbsurge.util import geo
 from cbsurge.util.download_geodata import download_raster

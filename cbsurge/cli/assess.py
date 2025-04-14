@@ -6,7 +6,7 @@ import sys
 import click
 from rich.progress import Progress
 from cbsurge.session import Session, is_rapida_initialized
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.util.setup_logger import setup_logger
 
 
@@ -25,6 +25,11 @@ def import_class(fqcn: str):
     module = importlib.import_module(module_name)
     return getattr(module, class_name)
 
+
+def get_parent_package():
+    if not __package__:
+        return None
+    return __package__.rsplit('.', 1)[0] if '.' in __package__ else None
 
 
 def getComponents():
@@ -120,7 +125,7 @@ def assess(ctx, components=None,  variables=None, year=None, force_compute=False
                         if len(component_parts) > 1:
                             class_name = f"{component_parts[-1].capitalize()}Component"
 
-                        fqcn = f'{__package__}.components.{component_name}.{class_name}'
+                        fqcn = f'{get_parent_package()}.components.{component_name}.{class_name}'
                         cls = import_class(fqcn=fqcn)
                         component = cls()
                         component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)

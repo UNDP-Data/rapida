@@ -4,7 +4,7 @@ from typing import List
 from osgeo import gdal
 from cbsurge.core.component import Component
 from cbsurge.components.rwi import RwiVariable
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.session import Session
 from cbsurge.util import geo
 from cbsurge.util.download_geodata import download_raster

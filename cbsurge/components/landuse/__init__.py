@@ -14,7 +14,7 @@ from cbsurge.components.landuse.prediction import predict
 from cbsurge.constants import GTIFF_CREATION_OPTIONS
 from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
-from cbsurge.project import Project
+from cbsurge.project.project import Project
 from cbsurge.session import Session
 from cbsurge.stats.raster_zonal_stats import zst
 from cbsurge.util import geo

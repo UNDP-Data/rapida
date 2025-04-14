@@ -1,6 +1,5 @@
-
-import httpx
 import click
+import httpx
 import time
 from urllib.parse import urlparse, parse_qs
 from azure.core.credentials import AccessToken, TokenCredential
@@ -95,7 +94,7 @@ class SurgeTokenCredential(TokenCredential):
 
     KEY = derive_key_from_username(os.environ.get('USER', None))
     TOKEN_FILE_NAME = f'{base64.urlsafe_b64encode(KEY).decode('utf-8')[:25]}.bin'
-    STORAGE_SCOPE = "https://storage.azure.com/.default"
+    STORAGE_SCOPE = ["https://storage.azure.com/.default"]
 
     def __init__(self, cache_dir=None):
         # Azure AD Configuration
@@ -321,7 +320,7 @@ class SurgeTokenCredential(TokenCredential):
 
 
     async def refresh_token_async(self, *scope):
-        
+
         data = {
             'client_id': self.client_id,
             'grant_type': 'refresh_token',
@@ -392,6 +391,7 @@ class SurgeTokenCredential(TokenCredential):
 
         :return:
         """
+
 
         if self.token:
             expires_at = datetime.fromtimestamp(self.token["expires_at"])

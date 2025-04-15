@@ -391,8 +391,10 @@ class Project:
                 if dataset_api_url:
                     try:
                         resp = requests.get(dataset_api_url, timeout=10)
-                        if resp.status_code == 200:
-                            click.echo("This project is registered in GeoHub. Please unregister it first before deleting.")
+
+                        if resp.status_code == 200 or resp.status_code == 403:
+                            # geohub returns 200 if it is public dataset, and returns 403 if it is private dataset
+                            click.echo("This project is likely registered in GeoHub. Please unregister it first before deleting.")
                             return
                         elif resp.status_code == 404:
                             click.echo("This project data was uploaded in Azure, but it is not registered in GeoHub.")

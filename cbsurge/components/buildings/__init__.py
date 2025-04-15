@@ -58,7 +58,7 @@ class BuildingsVariable(Variable):
                 :return:
                 """
 
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', None)
 
         if progress is not None:
@@ -66,7 +66,7 @@ class BuildingsVariable(Variable):
                 description=f'[blue]Assessing {self.component}->{self.name}', total=None)
 
         if not self.dep_vars:  # simple variable,
-            if not force_compute:
+            if not force:
                 # logger.debug(f'Downloading {self.name} source')
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
@@ -79,7 +79,7 @@ class BuildingsVariable(Variable):
 
         else:
             if self.operator:
-                if not force_compute:
+                if not force:
                     # logger.debug(f'Downloading {self.name} from  source')
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:
@@ -98,12 +98,12 @@ class BuildingsVariable(Variable):
             progress._tasks[variable_task].total = 1
             progress.update(variable_task, description=f'[blue]Assessed {self.component}->{self.name}', advance=1)
 
-    def download(self, progress=None, force_compute=None, **kwargs):
+    def download(self, progress=None, force=None, **kwargs):
 
         logger.debug(f'Downloading {self.name}')
         project = Project(os.getcwd())
         dst_layers = pyogrio.list_layers(project.geopackage_file_path)
-        if self.component in dst_layers[:,0]  and not force_compute:
+        if self.component in dst_layers[:,0]  and not force:
             if 'mask' in dst_layers:
                 affected_layer_name = f'{self.component}.affected'
                 assert affected_layer_name in dst_layers, f'layer {affected_layer_name}  does not exist'
@@ -181,9 +181,9 @@ class BuildingsVariable(Variable):
             )
 
 
-    def compute(self, force_compute=True, **kwargs):
-        assert force_compute, f'invalid force_compute={force_compute}'
-        return self.download(force_compute=force_compute, **kwargs)
+    def compute(self, force=True, **kwargs):
+        assert force, f'invalid force={force}'
+        return self.download(force=force, **kwargs)
 
 
     def evaluate(self, **kwargs):

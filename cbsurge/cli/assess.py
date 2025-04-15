@@ -59,7 +59,11 @@ def getVariables():
 available_variables = getVariables()
 
 
-@click.command(short_help='assess the effect of natural or social hazards')
+@click.command(short_help='assess/evaluate a specific geospatial exposure components/variables', no_args_is_help=True)
+@click.option(
+    '--all', '-a', is_flag=True, default=False,
+    help="compute all components and variables if this option is set"
+)
 @click.option(
     '--components', '-c', required=False, multiple=True,
     type=click.Choice(available_components, case_sensitive=False),
@@ -70,75 +74,93 @@ available_variables = getVariables()
               help=f'The variable/s to be assessed. Valid input example: {" ".join([f"-v {var}" for var in available_variables[:2]])}' )
 @click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
               show_default=True,help=f'The year for which to compute population' )
-
-@click.option('--force_compute', '-f', default=False, show_default=True,is_flag=True,
-              help=f'Force recomputation from sources that are files')
-
-@click.option('--debug', '-d', default=False, show_default=True, is_flag=True,
-              help=f'Turn on debug mode')
-
-
-
-
+@click.option('-p', '--project',
+              default=None,
+              type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
+              help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
+@click.option('--force', '-f', default=False, show_default=True,is_flag=True,
+              help=f'Force assess components. Downloaded data or computed data will be ignored and recomputed.')
+@click.option('--debug',
+              is_flag=True,
+              default=False,
+              help="Set log level to debug"
+              )
 @click.pass_context
-def assess(ctx, components=None,  variables=None, year=None, force_compute=False, debug=False):
-    """Assess the effect of natural or social hazard """
-    """ Asses/evaluate a specific geospatial exposure components/variables"""
+def assess(ctx, all=False, components=None,  variables=None, year=None, project: str = None, force=False, debug=False):
+    """
+    Assess/evaluate a specific geospatial exposure components/variables
 
-    if debug:
-        logger = setup_logger(level=logging.DEBUG)
-    else:
-        logger = setup_logger()
+    `-a/--all` option to assess all components (it may take longer time).
+
+    `-c/--component` to assess only specific components.
+
+    `-v/--variable` to assess only specific variables. If a variable is specified, but it is not in specified components, the variable will be ignored.
+
+    `-p/--project` to assess in a specific project folder other than current directory.
+
+    As default, this command tries to avoid download/compute again if they already exist. If you wish to redownload or recompute by force, use `-f/--force` flag explicitly.
+
+    Usage:
+
+    rapida assess --all: assess all components
+
+    rapida assess -c rwi: assess RWI component only.
+
+    rapida assess -c rwi -c population: assess RWI and population component only
+
+    rapida assess -c population -v male_total -v female_total: assess only male and female total population.
+
+    rapida assess -c rwi -p ./data/sample_project: assess RWI component for RAPIDA project stored at sample_project folder.
+
+    """
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return
 
-    try:
-        current_folder = os.getcwd()
-        project = Project(path=current_folder)
-    except Exception as e:
-        logger.error(f'"{current_folder}" is not a valid rapida project folder. {e}')
+    if project is None:
+        project = os.getcwd()
     else:
-        if len(available_components) == 0 or len(available_variables) == 0:
-            logger.warning("There are no available components. Please run `rapida init` to setup the tool first")
-            sys.exit(0)
+        os.chdir(project)
 
-        if project.is_valid:
-            logger.info(f'Current project/folder: {project.path}')
-            with Progress(disable=False) as progress:
-                with Session() as session:
-                    all_components = session.get_components()
-                    components = components or all_components
-                    comp_word = 'components' if len(components)> 1 else 'component'
-                    # components_task = progress.add_task(
-                    #     description=f'[green]Assessing [red]{"".join(components)}[green] {comp_word}', total=len(components))
-                    for component_name in components:
-                        if not component_name in all_components:
-                            msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
-                            logger.error(msg)
-                            click.echo(assess.get_help(ctx))
-                            #progress.remove_task(components_task)
-                            sys.exit(1)
+    prj = Project(path=project)
+    if not prj.is_valid:
+        logger.error(f'Project "{project}" is not a valid RAPIDA project')
+        return
 
-                        component_parts = component_name.split('.')
-                        class_name = f"{component_name.capitalize()}Component"
-                        if len(component_parts) > 1:
-                            class_name = f"{component_parts[-1].capitalize()}Component"
+    if len(available_components) == 0 or len(available_variables) == 0:
+        logger.warning("There are no available components. Please run `rapida init` to setup the tool first")
+        sys.exit(0)
 
-                        fqcn = f'{get_parent_package()}.components.{component_name}.{class_name}'
-                        cls = import_class(fqcn=fqcn)
-                        component = cls()
-                        component(progress=progress, variables=variables, target_year=year, force_compute=force_compute)
+    logger.info(f'Current project/folder: {prj.path}')
+    with Progress(disable=False) as progress:
+        with Session() as session:
+            all_components = session.get_components()
+            target_components = components
+            if len(components) == 0:
+                if all:
+                    target_components = all_components
+                else:
+                    logger.warning(f"At least one component is required. If you want to assess all components, use --all option")
+                    return
+            else:
+                if all:
+                    logger.warning(f"--all option is ignored and to process {", ".join(components)}")
 
-                        #progress.update(components_task,  advance=1, )
+            for component_name in target_components:
+                if not component_name in all_components:
+                    msg = f'Component {component_name} is invalid. Valid options  are: "{",".join(all_components)}"'
+                    logger.error(msg)
+                    click.echo(assess.get_help(ctx))
+                    sys.exit(1)
 
+                component_parts = component_name.split('.')
+                class_name = f"{component_name.capitalize()}Component"
+                if len(component_parts) > 1:
+                    class_name = f"{component_parts[-1].capitalize()}Component"
 
-        else:
-            logger.info(f'"{current_folder}" is not a valid rapida project folder')
-
-
-
-
-
-
+                fqcn = f'{get_parent_package()}.components.{component_name}.{class_name}'
+                cls = import_class(fqcn=fqcn)
+                component = cls()
+                component(progress=progress, variables=variables, target_year=year, force=force)
 

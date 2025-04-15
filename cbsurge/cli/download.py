@@ -8,19 +8,19 @@ from cbsurge.session import is_rapida_initialized
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
-logger = setup_logger()
+logger = logging.getLogger(__name__)
 
 
-@click.command(short_help=f'download a RAPIDA project from Azure file share')
+@click.command(short_help=f'download a RAPIDA project from Azure file share', no_args_is_help=True)
 @click.argument('project_name', nargs=1,)
 @click.argument('destination_folder',
                 type=click.Path(exists=False, dir_okay=True, file_okay=False, readable=True, resolve_path=True))
-@click.option('--max_concurrency',
+@click.option('--max_concurrency', '-c',
               default=4,
               show_default=True,
               type=int,
               help=f'The number of threads to use when downloading a file')
-@click.option('--overwrite','-o',
+@click.option('--force','-f',
               is_flag=True,
               default=False,
               help="Whether to overwrite the project in case it already exists locally.")
@@ -28,33 +28,28 @@ logger = setup_logger()
               is_flag=True,
               default=False,
               help="Set log level to debug")
-def download(project_name=None, destination_folder=None, max_concurrency=None,overwrite=None, debug: bool =False ):
+def download(project_name=None, destination_folder=None, max_concurrency=None,force=None, debug: bool =False ):
     """
-    Download a project from Azure File Share
+    Download a project from Azure File Share.
+
+    Firstly, please check available projects by using `rapida list` to find a project name to download.
 
     Usage:
 
-        First, please check available projects by using `rapida list` to find a project name to download.
+    rapida download <project name> <project folder path>
 
-        Then, download a project by using the below command:
+    For example, the project data will be downloaded under ./data/test folder if a project name is `test` if the below command is executed.
 
-        rapida download <project name> <project folder path>
-
-        For example, if project name is `test`, you could run:
+    Example:
 
         rapida download test ./data
 
-        OR
-
         rapida download test ./data/test
 
-        The project data will be downloaded under ./data/test folder.
 
-        If a project data already exists in local, run the below command:
 
-        rapida download <project name> <project folder path> --overwrite
+    To use `-f/--force`, project data will be overwritten if it already exists in local storage.
 
-        To use --overwrite, old project data in local storage will be lost..
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
@@ -69,15 +64,15 @@ def download(project_name=None, destination_folder=None, max_concurrency=None,ov
     if os.path.exists(project_path):
         project = Project(path=project_path)
         if project.is_valid:
-            if not overwrite:
-                logger.warning(f'Project "{project_name}" already exists in {project_path}. To overwrite it use the --overwrite flag')
+            if not force:
+                logger.warning(f'Project "{project_name}" already exists in {project_path}. To overwrite it use the --force flag')
                 return
             else:
                 logger.warning(f'Project "{project_name}" already exists in {project_path}. it will be overwritten by downloaded files')
                 pass
         else:
-            if not overwrite:
-                logger.warning(f'Folder "{project_name}" exists, but is not a valid RAPIDA project. To force downloading it use the --overwrite flag')
+            if not force:
+                logger.warning(f'Folder "{project_name}" exists, but is not a valid RAPIDA project. To force downloading it use the --force flag')
             else:
                 logger.warning(
                     f'Folder "{project_name}" exists, but is not a valid RAPIDA project. it will be overwritten by downloaded files')
@@ -91,6 +86,6 @@ def download(project_name=None, destination_folder=None, max_concurrency=None,ov
         download_project(name=project_name,
                          dst_folder=project_path,
                          progress=progress,
-                         overwrite=overwrite,
+                         overwrite=force,
                          max_concurrency=max_concurrency)
     logger.info(f'Project "{project_name}" was downloaded successfully to {project_path}')

@@ -5,7 +5,7 @@ from cbsurge.session import is_rapida_initialized
 from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
-logger = setup_logger()
+logger = logging.getLogger(__name__)
 
 
 
@@ -14,7 +14,7 @@ logger = setup_logger()
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
               help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
-@click.option('-y', '--yes',
+@click.option('--no-input',
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
@@ -22,21 +22,18 @@ logger = setup_logger()
               is_flag=True,
               default=False,
               help="Set log level to debug")
-def delete(project: str, yes: bool = False, debug: bool =False):
+def delete(project: str, no_input: bool = False, debug: bool =False):
     """
     Delete a project from local storage and Azure File Share if it was uploaded.
 
+    `--no-input` option can answer yes to all prompts. Default is False.
+
     Usage:
 
-        If you are already in a project folder, run the below command:
-        rapida delete
+        rapida delete: If you are already in a project folder
 
-        If you are not in a project folder, run the below command:
-        rapida delete --project=<project folder path>
+        rapida delete --project=<project folder path>: If you are not in a project folder
 
-        This command shows prompts to confirm deletion of a project to prevent deleting accidentally. If you wish to answer all prompts to yes, use -y or --yes in the command:
-
-        rapida delete --yes
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
@@ -47,10 +44,10 @@ def delete(project: str, yes: bool = False, debug: bool =False):
         project = os.getcwd()
     else:
         os.chdir(project)
-        logger.info(f"Delete command is executed at the project folder: {project}")
+        click.echo(f"Delete command is executed at the project folder: {project}")
 
     prj = Project(path=project)
     if not prj.is_valid:
-        logger.error(f'Project "{project}" is not a valid RAPIDA project')
+        click.echo(f'Project "{project}" is not a valid RAPIDA project')
         return
-    prj.delete(yes=yes)
+    prj.delete(no_input=no_input)

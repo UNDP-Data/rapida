@@ -6,9 +6,11 @@ from cbsurge.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from cbsurge.admin.ocha import fetch_admin as fetch_ocha_admin
 from cbsurge.session import is_rapida_initialized
 from cbsurge.util.bbox_param_type import BboxParamType
+from cbsurge.util.setup_logger import setup_logger
 import click
 import json
 from osgeo import gdal, ogr, osr
+
 
 gdal.UseExceptions()
 logger = logging.getLogger(__name__)
@@ -97,9 +99,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
 
     rapida admin osm -b "27.767944,-5.063586,31.734009,-0.417477" -l 0 osm.geojson
     """
-    logger = logging.getLogger('rapida')
-    if debug:
-        logger.setLevel(logging.DEBUG)
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return
@@ -160,10 +160,7 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, destination_
 
     rapida admin ocha -b 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip /data/admocha.fgb --layer-name abc
     """
-
-    logger = logging.getLogger('rapida')
-    if debug:
-        logger.setLevel(logging.DEBUG)
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

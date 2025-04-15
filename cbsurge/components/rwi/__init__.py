@@ -84,7 +84,7 @@ class RwiVariable(Variable):
                 :return:
                 """
 
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', None)
 
         if progress is not None:
@@ -92,7 +92,7 @@ class RwiVariable(Variable):
                 description=f'[blue]Assessing {self.component}->{self.name}', total=None)
 
         if not self.dep_vars:  # simple variable,
-            if not force_compute:
+            if not force:
                 # logger.debug(f'Downloading {self.name} source')
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
@@ -105,7 +105,7 @@ class RwiVariable(Variable):
 
         else:
             if self.operator:
-                if not force_compute:
+                if not force:
                     # logger.debug(f'Downloading {self.name} from  source')
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:
@@ -139,8 +139,8 @@ class RwiVariable(Variable):
                 assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
                 return affected_local_path
 
-    def download(self, force_compute=False, **kwargs):
-        if force_compute == False and os.path.exists(self.local_path):
+    def download(self, force=False, **kwargs):
+        if force == False and os.path.exists(self.local_path):
             if not os.path.exists(self.affected_path):
                 self._compute_affected_()
             return self.local_path
@@ -182,9 +182,9 @@ class RwiVariable(Variable):
         self._compute_affected_()
 
 
-    def compute(self, force_compute=True, **kwargs):
-        assert force_compute, f'invalid force_compute={force_compute}'
-        return self.download(force_compute=force_compute, **kwargs)
+    def compute(self, force=True, **kwargs):
+        assert force, f'invalid force={force}'
+        return self.download(force=force, **kwargs)
 
     def resolve(self, **kwargs):
         pass

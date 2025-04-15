@@ -21,7 +21,11 @@ def list_projects():
                          credential=session.get_credential(), token_intent='backup') as sc:
             for entry in sc.list_directories_and_files():
                 if entry.is_directory:
-                    yield entry.name
+                    dir_name = entry.name
+                    # Check if 'rapida.json' exists in the directory
+                    subitems = sc.list_directories_and_files(dir_name)
+                    if any(f.name == 'rapida.json' and not f.is_directory for f in subitems):
+                        yield dir_name
 
 
 

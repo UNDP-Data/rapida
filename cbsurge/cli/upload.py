@@ -7,7 +7,7 @@ from cbsurge.util.setup_logger import setup_logger
 from cbsurge.project.project import Project
 
 
-logger = setup_logger()
+logger = logging.getLogger(__name__)
 
 
 @click.command(short_help=f'upload a RAPIDA project to Azure file share')
@@ -15,12 +15,12 @@ logger = setup_logger()
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
               help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
-@click.option('--max_concurrency',
+@click.option('--max_concurrency', '-c',
               default=4,
               show_default=True,
               type=int,
               help=f'The number of threads to use when uploading a file')
-@click.option('--overwrite','-o',
+@click.option('--force','-f',
               is_flag=True,
               default=False,
               help="Whether to overwrite the project in case it already exists.")
@@ -28,23 +28,17 @@ logger = setup_logger()
               is_flag=True,
               default=False,
               help="Set log level to debug")
-def upload(project=None,max_concurrency=4,overwrite=None, debug: bool =False):
+def upload(project=None, max_concurrency=4, force=False, debug: bool =False):
     """
     Upload an entire project folder to Azure File Share
 
     Usage:
 
-        If you are already in a project folder, run the below command:
-        rapida upload
+        rapida upload: If you are already in a project folder
 
-        If you are not in a project folder, run the below command:
-        rapida upload --project=<project folder path>
+        rapida upload --project=<project folder path>: If you are not in a project folder
 
-        If a project data already exists in Azure File Share, run the below command:
-
-        rapida upload --overwrite
-
-        To use --overwrite, old project data in Azure File Share will be lost.
+    To use `-f/--force`, project data will be overwritten if it already exists in Azure File Share..
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
@@ -55,13 +49,18 @@ def upload(project=None,max_concurrency=4,overwrite=None, debug: bool =False):
         project = os.getcwd()
     else:
         os.chdir(project)
-        logger.info(f"Upload command is executed at the project folder: {project}")
+        click.echo(f"Upload command is executed at the project folder: {project}")
 
-    logger.info(f'Going to upload {project} to Azure')
-    with Progress() as progress:
-        prj = Project(path=project)
-        if not prj.is_valid:
-            logger.error(f'Project "{project}" is not a valid RAPIDA project')
-            return
-        prj.upload(progress=progress, overwrite=overwrite, max_concurrency=max_concurrency)
-    logger.info(f'Rapida project "{project}" was uploaded successfully to Azure')
+    prj = Project(path=project)
+
+    if not prj.is_valid:
+        click.echo(f'Project "{project}" is not a valid RAPIDA project')
+        return
+
+    if click.confirm('Are you sure uploading this project to Azure? Y/Yes to continue, Enter/No to cancel', abort=True):
+        click.echo(f'Going to upload {project} to Azure')
+        with Progress() as progress:
+            prj.upload(progress=progress, overwrite=force, max_concurrency=max_concurrency)
+        click.echo(f'Rapida project "{project}" was uploaded successfully to Azure')
+    else:
+        click.echo('Upload was cancelled.')

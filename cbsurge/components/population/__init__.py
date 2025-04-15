@@ -197,7 +197,7 @@ class PopulationVariable(Variable):
                 :return:
                 """
 
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', None)
 
         if progress is not None:
@@ -205,7 +205,7 @@ class PopulationVariable(Variable):
                 description=f'[blue]Assessing {self.component}->{self.name}', total=None)
 
         if not self.dep_vars:  # simple variable,
-            if not force_compute:
+            if not force:
                 # logger.debug(f'Downloading {self.name} source')
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
@@ -218,7 +218,7 @@ class PopulationVariable(Variable):
 
         else:
             if self.operator:
-                if not force_compute:
+                if not force:
                     # logger.debug(f'Downloading {self.name} from  source')
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:

@@ -1,3 +1,4 @@
+import logging
 import click
 import httpx
 import time
@@ -8,7 +9,6 @@ import os
 import hashlib
 import base64
 from os.path import expanduser
-from cbsurge.util.setup_logger import setup_logger
 from oauthlib.oauth2 import OAuth2Error
 from playwright.sync_api import sync_playwright
 from playwright.async_api import async_playwright
@@ -17,7 +17,7 @@ import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import json
 
-logger = setup_logger(name='rapida', make_root=False)
+logger = logging.getLogger(__name__)
 
 
 def derive_key_from_username(username: str) -> bytes:
@@ -397,16 +397,16 @@ class SurgeTokenCredential(TokenCredential):
             expires_at = datetime.fromtimestamp(self.token["expires_at"])
             expires_in = expires_at - datetime.now()
             expires_in_secs = expires_in.total_seconds()
-            logger.info(
+            logger.debug(
                 f'Token cached at {self._cache_file_} will expire in {expires_in_secs} secs')
             if expires_in_secs < 15*60:
-                logger.info(f'Refreshing token')
+                logger.debug(f'Refreshing token')
                 new_token = self.refresh_token(*scopes) # 97hrs/
                 if new_token is not None and 'access_token' in new_token:
                     self.token = new_token
                     self._save_to_cache_()
                 else:
-                    logger.info(f"Attempting to authenticate at {self.auth_url}")
+                    logger.debug(f"Attempting to authenticate at {self.auth_url}")
 
                     email = os.environ.get('RAPIDA_USER', None) or click.prompt('Your UNDP email address please...',
                                                                                 type=str)

@@ -43,9 +43,9 @@ class DeprivationComponent(Component):
                 # create instance
                 v = DeprivationVariable(name=var_name, component=self.component_name, **var_data)
                 # assess
-                if multiple_vars and kwargs['force_compute'] is True:
+                if multiple_vars and kwargs['force'] is True:
                     if var_index > 0:
-                        kwargs['force_compute'] = False
+                        kwargs['force'] = False
 
                 v(**kwargs)
 
@@ -78,12 +78,12 @@ class DeprivationVariable(RwiVariable):
             assert os.path.exists(self.affected_path), f'Failed to compute {self.affected_path}'
             return affected_local_path
 
-    def download(self, force_compute=False, **kwargs):
+    def download(self, force=False, **kwargs):
         project = Project(os.getcwd())
-        if os.path.exists(self.local_path) and not force_compute:
+        if os.path.exists(self.local_path) and not force:
             if project.raster_mask is not None:
                 assert os.path.exists(self.affected_path), (f'The affected version of {self.component} force not exist.'
-                                                            f'Consider assessing using --force_compute flag')
+                                                            f'Consider assessing using --force flag')
             return self.local_path
 
         logger.info(f'Downloading {self.component}')
@@ -122,6 +122,6 @@ class DeprivationVariable(RwiVariable):
         self._compute_affected_()
 
 
-    def compute(self, force_compute=True, **kwargs):
-        assert force_compute, f'invalid force_compute={force_compute}'
-        return self.download(force_compute=force_compute, **kwargs)
+    def compute(self, force=True, **kwargs):
+        assert force, f'invalid force={force}'
+        return self.download(force=force, **kwargs)

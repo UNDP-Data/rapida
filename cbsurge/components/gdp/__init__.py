@@ -138,7 +138,7 @@ class GdpVariable(Variable):
         :return:
         """
 
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress: Progress = kwargs.get('progress', Progress())
         variable_task = None
         if progress is not None:
@@ -154,7 +154,7 @@ class GdpVariable(Variable):
             progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
 
 
-    def download(self, force_compute=False, **kwargs):
+    def download(self, force=False, **kwargs):
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', Progress())
 
@@ -163,7 +163,7 @@ class GdpVariable(Variable):
             download_task = progress.add_task(
                 description=f'[red] Downloading {self.name}', total=None)
 
-        if force_compute == False and os.path.exists(self.local_path):
+        if force == False and os.path.exists(self.local_path):
             if not os.path.exists(self.affected_path):
                 self._compute_affected_()
             if progress is not None and download_task is not None:
@@ -290,9 +290,9 @@ class GdpVariable(Variable):
 
         return output_file
 
-    def compute(self, force_compute=True, **kwargs):
-        assert force_compute, f'invalid force_compute={force_compute}'
-        return self.download(force_compute=force_compute, **kwargs)
+    def compute(self, force=True, **kwargs):
+        assert force, f'invalid force={force}'
+        return self.download(force=force, **kwargs)
 
     def resolve(self, **kwargs):
         pass

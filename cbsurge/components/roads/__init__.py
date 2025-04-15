@@ -64,7 +64,7 @@ class RoadsVariable(Variable):
                 :return:
                 """
 
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', None)
 
         if progress is not None:
@@ -72,7 +72,7 @@ class RoadsVariable(Variable):
                 description=f'[blue]Assessing {self.component}->{self.name}', total=None)
 
         if not self.dep_vars:  # simple variable,
-            if not force_compute:
+            if not force:
                 # logger.debug(f'Downloading {self.name} source')
                 self.download(**kwargs)
                 if progress is not None and variable_task is not None:
@@ -85,7 +85,7 @@ class RoadsVariable(Variable):
 
         else:
             if self.operator:
-                if not force_compute:
+                if not force:
                     # logger.debug(f'Downloading {self.name} from  source')
                     self.download(**kwargs)
                     if progress is not None and variable_task is not None:
@@ -129,13 +129,13 @@ class RoadsVariable(Variable):
         project = Project(path=os.getcwd())
         self.local_path = project.geopackage_file_path
 
-        force_compute = kwargs.get('force_compute', False)
+        force = kwargs.get('force', False)
         progress = kwargs.get('progress', False)
 
         layers = pyogrio.list_layers(self.local_path)
         layer_names = layers[:, 0]
 
-        if force_compute == True or not self.component in layer_names:
+        if force == True or not self.component in layer_names:
             with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
                 lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
 
@@ -190,7 +190,7 @@ class RoadsVariable(Variable):
                 road_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
 
                 if project.vector_mask is not None:
-                    if force_compute == True or self.affected_layer not in layer_names:
+                    if force == True or self.affected_layer not in layer_names:
                         df_line = gpd.read_file(self.local_path, layer=self.component)
                         df_mask = gpd.read_file(self.local_path, layer=project.vector_mask)
                         df_line_mask = gpd.clip(df_line, mask=df_mask, keep_geom_type=True)
@@ -198,9 +198,9 @@ class RoadsVariable(Variable):
 
         return self.local_path
 
-    def compute(self, force_compute=True, **kwargs):
-        assert force_compute, f'invalid force_compute={force_compute}'
-        return self.download(force_compute=force_compute, **kwargs)
+    def compute(self, force=True, **kwargs):
+        assert force, f'invalid force={force}'
+        return self.download(force=force, **kwargs)
 
     def resolve(self, **kwargs):
         pass

@@ -1,12 +1,19 @@
 import datetime
 import ipywidgets as widgets
+from oauthlib.oauth2 import OAuth2Error
 import asyncio
 import jwt
+from cbsurge.util.in_notebook import in_notebook
 from cbsurge.az.surgeauth import SurgeTokenCredential
 from IPython.display import display
 import logging
+from cbsurge.util.setup_logger import setup_logger
 
-logger = logging.getLogger(__name__)
+
+if in_notebook():
+    logger = setup_logger(make_root=True)
+else:
+    logger = logging.getLogger(__name__)
 
 
 
@@ -28,6 +35,7 @@ class AuthWidget:
         input_style = {'description_width': '100px'}
 
         self.email_w = widgets.Text(
+            value='ioan.ferencik@undp.org',
             placeholder='...enter your UNDP email address',
             description='Email:',
             layout=text_input_layout,
@@ -84,8 +92,6 @@ class AuthWidget:
             self._prepare_to_authenticate()
             if self.credential.token:
                 asyncio.ensure_future(self.credential.get_token_async())
-
-
             if self.credential.authenticated:
                 self._handle_authenticated()
 
@@ -115,7 +121,6 @@ class AuthWidget:
     async def authenticate(self):
         email = self.email_w.value.strip()
         passwd = self.password_w.value.strip()
-
         self.auth_button.description = "Authenticating..."
         self.auth_button.disabled = True
 
@@ -133,19 +138,21 @@ class AuthWidget:
 
         try:
             await self.credential.get_token_async(
-                self.credential.STORAGE_SCOPE,
+            self.credential.STORAGE_SCOPE,
                 email=email,
                 password=passwd,
                 mfa_widget=self.feedback_html
             )
             self._handle_authenticated()
-        except Exception as e:
+
+        except (OAuth2Error, Exception) as e:
             self.feedback_html.value = f"<b style='color:red'>Authentication failed: {e}</b>"
-            self.auth_button.style = 'info'
+            self.auth_button.button_style = 'info'
             self.auth_button.description = "Authenticate"
+
         finally:
-            #self.auth_button.description = "Authenticate"
             self.auth_button.disabled = False
+
 
     def on_click(self, btn):
         if self.credential.authenticated:

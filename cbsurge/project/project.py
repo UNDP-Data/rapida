@@ -352,12 +352,12 @@ class Project:
                                     dc.upload_file(name, src_path, max_concurrency=max_concurrency)
 
 
-    def delete(self, yes=False):
+    def delete(self, no_input=False):
         """
         Delete a project by name from Azure File Share
 
         :param name: name of the project
-        :param yes: optional, default = false, whether to skip confirmation to answer Yes for all.
+        :param no_input: optional, default = false, whether to skip confirmation to answer Yes for all.
         """
 
         def delete_directory_recursive(sc: ShareClient, dir_name: str):
@@ -397,14 +397,14 @@ class Project:
                 if target_project is None:
                     logger.warning(f'Project: {project_name} not found in Azure.')
                 else:
-                    if yes or click.confirm(f"Project: {project_name} was found. Yes to continue deleting it, or No/Enter to exit. ",
+                    if no_input or click.confirm(f"Project: {project_name} was found. Yes to continue deleting it, or No/Enter to exit. ",
                                      default=False):
                         delete_directory_recursive(sc, target_project)
                         logger.info(f'Successfully deleted the project from Azure: {project_name}.')
                     else:
                         logger.info(f'Cancelled to delete the project from Azure: {project_name}.')
 
-        if yes or click.confirm(
+        if no_input or click.confirm(
                 f'Do want to continue deleting {self.name} located in {self.path} locally?',
                 default=False):
             shutil.rmtree(self.path)

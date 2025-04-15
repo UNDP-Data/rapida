@@ -35,7 +35,6 @@ class AuthWidget:
         input_style = {'description_width': '100px'}
 
         self.email_w = widgets.Text(
-            value='ioan.ferencik@undp.org',
             placeholder='...enter your UNDP email address',
             description='Email:',
             layout=text_input_layout,

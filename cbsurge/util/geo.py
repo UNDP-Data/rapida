@@ -160,7 +160,8 @@ def polygonize_raster_mask(raster_ds=None, band=1, dst_dataset=None, dst_layer=N
         rds = None
 
 def import_vector(src_dataset=None, src_layer=0, dst_dataset=None, dst_layer=None, access_mode=None, target_srs=None,
-                  clip_dataset=None, clip_layer=None, return_handle=False):
+                  clip_dataset=None, clip_layer=None, return_handle=False,
+                  **kwargs):
     """
     Import a vector layer into RAPIDA.
     Essentially this will reproject, crop and save to project GPKG
@@ -190,8 +191,10 @@ def import_vector(src_dataset=None, src_layer=0, dst_dataset=None, dst_layer=Non
         translate_options = dict(
             format='GPKG', accessMode=access_mode, dstSRS=target_srs, reproject=reproject,
             layerName=dst_layer,  makeValid=True, clipDst=clip_dataset, clipDstLayer=clip_layer,
-            preserveFID=True, geometryType='PROMOTE_TO_MULTI', layerCreationOptions=layer_creation_options
+            preserveFID=True, geometryType='PROMOTE_TO_MULTI', layerCreationOptions=layer_creation_options,
+            dim='XY'
         )
+        translate_options.update(kwargs)
         imported_ds = gdal.VectorTranslate(destNameOrDestDS=dst_dataset, srcDS=src_ds, **translate_options)
         src_ds = None
         if not return_handle:

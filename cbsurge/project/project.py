@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 import webbrowser
-
+import requests
 import click
 import geopandas
 import h3
@@ -18,7 +18,7 @@ from azure.storage.fileshare import ShareClient, ShareDirectoryClient
 
 from cbsurge import constants
 from cbsurge.admin.osm import fetch_admin
-from cbsurge.az.blobstorage import check_blob_exists
+from cbsurge.az.blobstorage import check_blob_exists, delete_blob
 from cbsurge.session import Session
 from cbsurge.util import geo
 from cbsurge.util.dataset2pmtiles import dataset2pmtiles
@@ -296,10 +296,14 @@ class Project:
                 and os.path.exists(self.config_file)) and os.path.getsize(self.config_file) > 0
 
 
-    def save(self):
+    def save(self, load_default=True):
+        """
+        Save rapida.json
+        :param load_default: default is True. If True, load current rapida.json file to the memory first.
+        """
         os.makedirs(self.data_folder, exist_ok=True)
 
-        if os.path.exists(self.config_file):
+        if load_default and os.path.exists(self.config_file):
             with open(self.config_file, 'r', encoding="utf-8") as cfgf:
                 content = cfgf.read()
                 data = json.loads(content) if content else {}
@@ -379,6 +383,41 @@ class Project:
 
 
         project_name = self._cfg_["name"]
+
+        if "publish_info" in self._cfg_:
+            publish_info = self._cfg_["publish_info"]
+            if publish_info:
+                dataset_api_url = publish_info.get("geohub_dataset_api")
+                if dataset_api_url:
+                    try:
+                        resp = requests.get(dataset_api_url, timeout=10)
+                        if resp.status_code == 200:
+                            click.echo("This project is registered in GeoHub. Please unregister it first before deleting.")
+                            return
+                        elif resp.status_code == 404:
+                            click.echo("This project data was uploaded in Azure, but it is not registered in GeoHub.")
+                    except requests.RequestException as e:
+                        logger.warning(f"Warning: Failed to check GeoHub registration: {e}")
+                        return
+
+                published_files = publish_info.get("publish_files", [])
+                if published_files:
+                    click.echo("The following files were uploaded for publishing:")
+                    for f in published_files:
+                        click.echo(f"- {f}")
+
+                    if not no_input and not click.confirm("Do you want to delete these files from Azure Blob Storage?",
+                                                          default=False):
+                        click.echo("Cancelled deletion of published files.")
+                        return
+                    else:
+                        for blob_url in published_files:
+                            blob_deleted = asyncio.run(delete_blob(blob_url))
+                            if blob_deleted:
+                                logger.debug(f"Deleted {blob_url} successfully")
+                        click.echo("Data for publishing was deleted successfully from Azure Blob Container.")
+                        del self._cfg_["publish_info"]
+                        self.save(load_default=False)
 
         with Session() as session:
             share_name = session.get_file_share_name()

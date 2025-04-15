@@ -411,11 +411,11 @@ class Project:
             logger.info(f'Successfully deleted the project folder: {self.path} from local storage.')
 
 
-    def publish(self, yes=False):
+    def publish(self, no_input=False):
         """
         Publish project outcome to Azure blob storage and make data registration URL of GeoHub.
 
-        :param yes: optional. If True, it will automatically answer yes to prompts. Default is False.
+        :param no_input: optional. If True, it will automatically answer yes to prompts. Default is False.
         """
         project_name = self._cfg_["name"]
 
@@ -428,7 +428,7 @@ class Project:
 
             publish_blob_exists = asyncio.run(check_blob_exists(blob_url))
             if publish_blob_exists:
-                if not yes and not click.confirm(f"Project data was already published at {blob_url}. Do you want to overwrite it? Type yes to proceed, No/Enter to exit. ", default=False):
+                if not no_input and not click.confirm(f"Project data was already published at {blob_url}. Do you want to overwrite it? Type yes to proceed, No/Enter to exit. ", default=False):
                     click.echo("Canceled to publish")
                     return
 
@@ -470,7 +470,7 @@ class Project:
                 click.echo(f"Open the following URL to register metadata on GeoHub: {publish_url}")
 
                 # if yes, don't open browser.
-                if not yes:
+                if not no_input:
                     browser = None
                     try:
                         browser = webbrowser.get()

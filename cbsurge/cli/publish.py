@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
               help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
-@click.option('-y', '--yes',
+@click.option('--no-input',
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
@@ -23,19 +23,18 @@ logger = logging.getLogger(__name__)
               default=False,
               help="Set log level to debug"
               )
-def publish(project: str, yes: bool = False, debug: bool =False):
+def publish(project: str, no_input: bool = False, debug: bool =False):
     """
     Publish project data to Azure and open GeoHub registration page URL.
 
+    `--no-input` option can answer yes to all prompts. Default is False.
+
     Usage:
 
-        If you are already in a project folder, run the below command:
-        rapida publish
+        rapida publish: If you are already in a project folder
 
-        If you are not in a project folder, run the below command:
-        rapida publish --project=<project folder path>
+        rapida publish --project=<project folder path>: If you are not in a project folder
 
-        If you answer all prompts to yes, use '--yes' option of the command.
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
@@ -46,9 +45,9 @@ def publish(project: str, yes: bool = False, debug: bool =False):
         project = os.getcwd()
     else:
         os.chdir(project)
-        logger.info(f"Publish command is executed at the project folder: {project}")
+        click.echo(f"Publish command is executed at the project folder: {project}")
     prj = Project(path=project)
     if not prj.is_valid:
-        logger.error(f'Project "{project}" is not a valid RAPIDA project')
+        click.echo(f'Project "{project}" is not a valid RAPIDA project')
         return
-    prj.publish(yes=yes)
+    prj.publish(no_input=no_input)

@@ -126,6 +126,30 @@ async def check_blob_exists( dst_path: str):
             return await blob_client.exists()
 
 
+async def delete_blob(src_path: str):
+    """
+    Delete a blob from Azure Blob Storage.
+    :param src_path: str, the fully qualified path to a blob in az in format az:{account}:{container}/path.ext
+    :return If True, the blob was successfully deleted
+    """
+    deleted = False
+    validate_azure_storage_path(a_path=src_path)
+    parts = src_path.split(":", 2)
+    if len(parts) != 3:
+        raise ValueError(
+            f"Invalid Azure path format: {src_path}. Expected format 'az:{{account}}:{{container}}/path.ext'")
+    proto, account_name, src_blob_path = parts
+    container_name, *src_path_parts = src_blob_path.split(os.path.sep)
+    rel_src_blob_path = os.path.sep.join(src_path_parts)
+    async with Session() as session:
+       async with session.get_blob_container_client(account_name=account_name,container_name=container_name) as cc:
+           blob_client = cc.get_blob_client(blob=rel_src_blob_path)
+           if await blob_client.exists():
+               await cc.delete_blob(blob=rel_src_blob_path, delete_snapshots="include")
+               deleted=True
+    return deleted
+
+
 async def upload_blob(src_path: str = None, dst_path: str = None, overwrite=True):
     """
     Upload a blob from a local file

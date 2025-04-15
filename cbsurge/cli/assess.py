@@ -5,9 +5,11 @@ import importlib
 import sys
 import click
 from rich.progress import Progress
+from rich.console import Console
 from cbsurge.session import Session, is_rapida_initialized
 from cbsurge.project.project import Project
 from cbsurge.util.setup_logger import setup_logger
+from cbsurge.util.in_notebook import in_notebook
 
 
 logger = setup_logger()
@@ -133,7 +135,11 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
         sys.exit(0)
 
     logger.info(f'Current project/folder: {prj.path}')
-    with Progress(disable=False) as progress:
+    if in_notebook():
+        console = Console(force_jupyter=True)
+    else:
+        console = Console()
+    with Progress(disable=False, console=console) as progress:
         with Session() as session:
             all_components = session.get_components()
             target_components = components

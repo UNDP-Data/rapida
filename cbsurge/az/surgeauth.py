@@ -94,7 +94,7 @@ class SurgeTokenCredential(TokenCredential):
 
     KEY = derive_key_from_username(os.environ.get('USER', None))
     TOKEN_FILE_NAME = f'{base64.urlsafe_b64encode(KEY).decode('utf-8')[:25]}.bin'
-    STORAGE_SCOPE = ["https://storage.azure.com/.default"]
+    STORAGE_SCOPE = "https://storage.azure.com/.default"
 
     def __init__(self, cache_dir=None):
         # Azure AD Configuration
@@ -126,9 +126,9 @@ class SurgeTokenCredential(TokenCredential):
             os.makedirs(self._cache_dir_, mode=0o700, exist_ok=True)
         encrypt_json(json_data=self.token, username=os.environ.get('USER', None), cache_file_path=self._cache_file_)
 
-    async def fetch_token_async(self, *scope, username=None, password=None, mfa_confirmation_widget=None):
+    async def fetch_token_async(self, *scope, username=None, password=None, mfa_confirmation_widget=None,
+                                quick_selectors_timeout=3000):
         # Start OAuth session
-
         oauth = OAuth2Session(self.client_id, redirect_uri=self.redirect_uri, scope=scope)
 
         # Step 1: Get authorization URL
@@ -140,11 +140,19 @@ class SurgeTokenCredential(TokenCredential):
             browser = await p.chromium.launch(headless=True, args=["--no-sandbox"])  # Launch headless browser
             page = await browser.new_page()
             error_msg = None
-            await page.goto(auth_url)
+            error_selector = '#exceptionMessageContainer'
 
+            try:
+                await page.goto(auth_url, timeout=quick_selectors_timeout)
+                error_message = await page.inner_text(error_selector)  # Capture the error message
+                error_msg = f'Failed to authenticate using username "{username}". {error_message}'
+            except Exception as eee:
+                pass
+            if error_msg is not None:
+                raise OAuth2Error(description=error_msg)
 
             # Wait for the email field to appear and fill it in
-            await page.wait_for_selector('input[type="email"]', timeout=30 * 1000)
+            await page.wait_for_selector('input[type="email"]', timeout=quick_selectors_timeout * 10)
             await page.fill('input[type="email"]', value=str(username))
             await page.click('input[type="submit"]')  # Click the next button
 
@@ -152,9 +160,8 @@ class SurgeTokenCredential(TokenCredential):
             # Error handling for username
             error_selector = '#usernameError'  # Match the ID of the error message element
             try:
-                await page.wait_for_selector(error_selector, timeout=3000)  # Wait for error message
-                error_message = await page.inner_text(error_selector)  # Capture the error message
-                error_msg = f'Failed to authenticate using username "{username}". {error_message}'
+                await page.wait_for_selector(error_selector, timeout=quick_selectors_timeout)  # Wait for error message
+
             except Exception:
                 pass  # Ignore error if the selector is not found
 
@@ -162,14 +169,14 @@ class SurgeTokenCredential(TokenCredential):
                 raise OAuth2Error(description=error_msg, status_code=None)
 
             # Wait for the password field to appear and fill it in
-            await page.wait_for_selector('input[type="password"]', timeout=30 * 1000)
+            await page.wait_for_selector('input[type="password"]', timeout=quick_selectors_timeout * 10)
             await page.fill('input[type="password"]', value=str(password))
             await page.click('input[type="submit"]')  # Click the sign-in button
 
             # Error handling for password
             error_selector = '#passwordError'  # Match the ID of the error message element
             try:
-                await page.wait_for_selector(error_selector, timeout=3000)  # Wait for error message
+                await page.wait_for_selector(error_selector, timeout=quick_selectors_timeout)  # Wait for error message
                 error_msg = await page.inner_text(error_selector)  # Capture the error message
             except Exception:
                 pass  # Ignore error if the selector is not found
@@ -178,7 +185,7 @@ class SurgeTokenCredential(TokenCredential):
                 raise OAuth2Error(description=error_msg)
 
             # Wait for the MFA element to appear
-            await page.wait_for_selector('#idRichContext_DisplaySign', timeout=30 * 1000)
+            await page.wait_for_selector('#idRichContext_DisplaySign', timeout=quick_selectors_timeout * 10)
             # Get the MFA number
             number = await page.inner_text('#idRichContext_DisplaySign')
             mfa_msg = f"Your MFA input code is: {number}. Please input it into the Authenticator App on your mobile"
@@ -189,7 +196,7 @@ class SurgeTokenCredential(TokenCredential):
 
             # Wait for the redirection URL after MFA confirmation
             await page.wait_for_url("**/*code=*",
-                                    timeout=30 * 1000)  # Adjust the pattern to match the expected redirect URL
+                                    timeout=quick_selectors_timeout * 10)  # Adjust the pattern to match the expected redirect URL
 
             # Get the current URL after redirection
             final_url = page.url
@@ -216,7 +223,7 @@ class SurgeTokenCredential(TokenCredential):
 
 
 
-    def fetch_token_sync(self, *scope, username=None, password=None):
+    def fetch_token_sync(self, *scope, username=None, password=None, quick_selectors_timeout=3000):
 
         # Start OAuth session
         oauth = OAuth2Session(self.client_id, redirect_uri=self.redirect_uri, scope=scope)
@@ -227,18 +234,27 @@ class SurgeTokenCredential(TokenCredential):
         with sync_playwright() as p:
             with p.chromium.launch(headless=True, args=["--no-sandbox"]) as browser: # Use headless=True for invisible mode
                 error_msg = None
-
                 page = browser.new_page()
-                page.goto(auth_url)
+
+                error_selector = '#exceptionMessageContainer'
+                try:
+                    page.goto(auth_url, timeout=quick_selectors_timeout)
+                    error_message = page.inner_text(error_selector)  # Capture the error message
+                    error_msg = f'Failed to authenticate using username "{username}". {error_message}'
+                except Exception as eee:
+                    pass
+                if error_msg is not None:
+                    raise OAuth2Error(description=error_msg)
+
                 # # Wait for the password field to appear and fill it in
-                page.wait_for_selector(selector='input[type="email"]', timeout=30 * 1000)
+                page.wait_for_selector(selector='input[type="email"]', timeout=quick_selectors_timeout*10)
                 # Fill in the username
                 page.fill(selector='input[type="email"]', value=str(username))
                 page.click('input[type="submit"]')  # Click the next button
 
                 error_selector = '#usernameError'  # This should match the ID of the error message element
                 try:
-                    page.wait_for_selector(selector=error_selector,timeout=3000)  # Wait up to 10 seconds for the error message
+                    page.wait_for_selector(selector=error_selector,timeout=quick_selectors_timeout)  # Wait up to 10 seconds for the error message
                     error_message = page.inner_text(error_selector)  # Capture the text of the error message
                     error_msg = f'Failed to authenticate using username "{username}". {error_message} '
                 except Exception as e:
@@ -247,14 +263,14 @@ class SurgeTokenCredential(TokenCredential):
                     raise OAuth2Error(description=error_msg,status_code=None)
 
                 # Wait for the password field to appear and fill it in
-                page.wait_for_selector(selector='input[type="password"]', timeout=30 * 1000)
+                page.wait_for_selector(selector='input[type="password"]', timeout=quick_selectors_timeout*10)
                 page.fill(selector='input[type="password"]', value=str(password))
                 page.click('input[type="submit"]')  # Click the sign-in button
 
                 error_selector = '#passwordError'  # This should match the ID of the error message element
                 try:
                     page.wait_for_selector(selector=error_selector,
-                                           timeout=3000)  # Wait up to 10 seconds for the error message
+                                           timeout=quick_selectors_timeout)  # Wait up to 10 seconds for the error message
                     error_msg = page.inner_text(error_selector)  # Capture the text of the error message
                 except Exception as e:
                     pass
@@ -263,16 +279,14 @@ class SurgeTokenCredential(TokenCredential):
 
 
                 # Wait for the element containing the number to appear
-                page.wait_for_selector(selector='#idRichContext_DisplaySign', timeout=30 * 1000)
+                page.wait_for_selector(selector='#idRichContext_DisplaySign', timeout=quick_selectors_timeout*10)
                 ds = page.locator("#idRichContext_DisplaySign")
-
                 number = int(ds.text_content())
-
                 logger.info(f"Your MFA input code is: {number}. Please input it into the  Authenticator App on your mobile")
 
                 # Wait for the redirection to complete
                 page.wait_for_url("**/*code=*",
-                                  timeout=30 * 1000)  # Adjust the pattern to match the expected redirect URL
+                                  timeout=quick_selectors_timeout*10)  # Adjust the pattern to match the expected redirect URL
 
                 # Get the current URL after redirection
                 final_url = page.url
@@ -316,7 +330,7 @@ class SurgeTokenCredential(TokenCredential):
             return token_data
         else:
 
-            logger.error(f"Failed to refresh token: {response.json()} " )
+            logger.error(f"Failed to refresh token: {response.json().get('error_description', 'Could not retrieve error description')} " )
 
 
     async def refresh_token_async(self, *scope):

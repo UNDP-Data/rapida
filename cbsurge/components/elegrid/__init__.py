@@ -17,6 +17,7 @@ from cbsurge.project.project import Project
 from cbsurge.session import Session
 from cbsurge.stats.vector_zonal_stats import vector_line_zonal_stats
 from cbsurge.util.download_geodata import download_vector
+from cbsurge.util.gpd_overlay import run_overlay
 from cbsurge.util.proj_are_equal import proj_are_equal
 from cbsurge.util.resolve_url import resolve_geohub_url
 
@@ -180,16 +181,12 @@ class ElectricityVariable(Variable):
                     progress=progress,
                     add_polyid=False
                 )
-                lyr.SetAttributeFilter(None)
-                lyr.ResetReading()
 
             df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
             el_grid_lines = gpd.read_file(self.local_path, layer=self.component)
-            el_grid_lines.sindex
-            df_polygon.sindex
             poly_cols = df_polygon.columns.tolist()
             cols_to_drop = set(poly_cols).difference(['h3id']).difference(el_grid_lines.columns.tolist())
-            el_grid_lines = gpd.overlay(el_grid_lines, df_polygon, how="intersection", make_valid=True, keep_geom_type=True)
+            el_grid_lines = run_overlay(polygons_df=df_polygon, overlay_df=el_grid_lines)
             el_grid_lines.drop(columns=list(cols_to_drop), inplace=True)
             el_grid_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
             el_grid_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
@@ -317,7 +314,7 @@ class ElectricityVariable(Variable):
             return
         mask_df = gpd.read_file(self.local_path, layer=project.vector_mask)
         grid_df = gpd.read_file(self.local_path, layer=self.component)
-        affected_df = gpd.overlay(grid_df, mask_df, how='intersection')
+        affected_df = run_overlay(polygons_df=mask_df, overlay_df=grid_df)
         affected_df.to_file(self.local_path, driver='GPKG', layer=affected_layer)
 
 

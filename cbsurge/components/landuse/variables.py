@@ -8,7 +8,7 @@ def generate_variables():
     source = "earth-search:sentinel-2-l1c"
 
     license = "Proprietary"
-    dynamic_world_citation = "Brown, C.F., Brumby, S.P., Guzder-Williams, B. et al. (2022). Dynamic World, Near real-time global 10 m land use land cover mapping. Scientific Data, 9(1)."
+    dynamic_world_citation = "Brown  et al. (2022). Dynamic World Near real-time global 10 m land use land cover mapping. Scientific Data 9(1)."
     attribution = f"ESA, Sinergise, AWS, Element 84, {dynamic_world_citation}"
 
     variables = OrderedDict()

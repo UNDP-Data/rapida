@@ -8,7 +8,6 @@ import typing
 from traceback import print_exc
 from osgeo import gdal, ogr, osr
 from pmtiles.reader import Reader, MmapSource
-
 from cbsurge.az.blobstorage import upload_blob, check_blob_exists
 
 
@@ -166,8 +165,13 @@ def dataset2fgb(fgb_dir: str = None,
     return converted_layers
 
 
-def fgb2pmtiles(fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str = None,
-                timeout_event=multiprocessing.Event()):
+def fgb2pmtiles(fgb_layers: typing.Dict[str, str] = None,
+                pmtiles_file_name: str = None,
+                timeout_event=multiprocessing.Event(),
+                name: str = None,
+                attribution: str = None,
+                description: str = None,
+                ):
     """
     Converts all FlatGeobuf files from fgb_layers dict into PMtile format. Supports cancellation through event arg
     @param fgb_layers: a dict where the key is the layer name and the value is the abs path to the FlatGeobuf file
@@ -189,6 +193,14 @@ def fgb2pmtiles(fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str
 
 
         pmtiles_path = os.path.join(fgb_dir, f'{pmtiles_file_name}.pmtiles' if not '.pmtiles' in pmtiles_file_name else pmtiles_file_name)
+
+        if name is None:
+            name = pmtiles_file_name
+        if attribution is None:
+            attribution = ATTRIBUTION
+        if description is None:
+            description = ",".join(list(fgb_layers.keys()))
+
         tippecanoe_cmd = [
             "tippecanoe",
             "-o",
@@ -201,9 +213,9 @@ def fgb2pmtiles(fgb_layers: typing.Dict[str, str] = None, pmtiles_file_name: str
             "--no-tile-size-limit",
             "--no-tile-compression",
             "--force",
-            f'--name={pmtiles_file_name}',
-            f'--description={",".join(list(fgb_layers.keys()))}',
-            f'--attribution={ATTRIBUTION}',
+            f'--name={name}',
+            f'--description={description}',
+            f'--attribution={attribution}',
         ]
 
         tippecanoe_cmd += fgb_sources
@@ -280,7 +292,10 @@ def validate_src_file(src_file: str):
 async def dataset2pmtiles(blob_url: str,
                           src_file: str,
                           overwrite: bool = True,
-                          timeout_event=multiprocessing.Event()):
+                          timeout_event=multiprocessing.Event(),
+                          name: str = None,
+                          attribution: str = None,
+                          description: str = None,):
     """
     Converts the layer/s contained in src_ds GDAL dataset  to PMTiles and uploads them to Azure.
     If supplied all vector layers will ve stored in one multilayer PMTile file
@@ -316,7 +331,13 @@ async def dataset2pmtiles(blob_url: str,
                                  layers=layers,
                                  timeout_event=timeout_event)
         if fgb_layers:
-            pmtiles_path = fgb2pmtiles(fgb_layers=fgb_layers, pmtiles_file_name=pmtiles_file_name, timeout_event=timeout_event)
+            pmtiles_path = fgb2pmtiles(fgb_layers=fgb_layers,
+                                       pmtiles_file_name=pmtiles_file_name,
+                                       timeout_event=timeout_event,
+                                       name=name,
+                                       description=description,
+                                       attribution=attribution,
+                                       )
 
             if pmtiles_path:
                 uploaded_blobs = [

@@ -84,11 +84,12 @@ def stream(src_path=None, src_layer=0, bbox=None, mask=None, batch_size=None,
                         if b.num_rows > 0:
                             if add_polyid:
                                 b = b.append_column('polyid', [polygon_id] * b.num_rows)
-                            results.append(b)
-                            nb+=b.num_rows
-                            if progress:progress.update(task, description=f'[green]Downloaded {nb} features in {polygon_id}',
-                                                        advance=nb, completed=None)
 
+                            results.append((polygon_id, b))
+                            nb+=b.num_rows
+                            if progress:
+                                progress.update(task, description=f'[green]Downloaded {nb} features in {polygon_id}',
+                                                        advance=nb, completed=None)
                         now = datetime.datetime.now()
                         delta = now-start
                         if delta.total_seconds() > 1800 and n == nb:

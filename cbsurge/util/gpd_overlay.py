@@ -23,7 +23,7 @@ def process_chunk(chunk_rows, overlay_df, overlay_df_sindex, crs):
 
         for col in single_row_gdf.columns:
             if col != "geometry":
-                precise_matches.loc[:, col] = single_row_gdf.iloc[0][col]
+                precise_matches[col] = single_row_gdf.iloc[0][col]
 
         if not precise_matches.empty:
             results.append(precise_matches)

@@ -174,11 +174,12 @@ def download_vector(
                     total_task = progress.add_task(
                         description=f'[red]Downloading data covering {njobs} polygons', total=njobs)
                     nworkers = njobs if njobs < NWORKERS else NWORKERS
+
                     futures = [executor.submit(worker, job=stream, jobs=jobs, task=total_task,stop=stop, id_prop_name='polygon_id') for i in range(nworkers)]
                     while True:
                         try:
                             try:
-                                batch = results.pop()
+                                polygon_id, batch = results.pop()
                                 new_geometries = []
                                 mask = numpy.zeros(batch.num_rows, dtype=bool)
                                 for i, record in enumerate(batch.to_pylist()):
@@ -223,13 +224,13 @@ def download_vector(
                                     destination_layer.SyncToDisk()
                                 except Exception as e:
                                     logger.info(
-                                        f'writing batch with {batch.num_rows} rows from {poly_id} failed with error {e} and will be ignored')
+                                        f'writing batch with {batch.num_rows} rows from {polygon_id} failed with error {e} and will be ignored')
                                 # keep the number of worker processed to prevent going into infinite loop
                                 ndownloaded += 1
 
                             except IndexError as ie:
                                 done = [f.done() for f in futures]
-                                if len(mask_polygons) == 0 or all(done) or ndownloaded == len(jobs):
+                                if len(mask_polygons) == 0 or all(done) or (ndownloaded == len(mask_polygons) and len(mask_polygons) > 0): # questionable if last cond is really needed
                                     break
                                 s = random.random()  # this one is necessary for ^C/KeyboardInterrupt
                                 time.sleep(s)

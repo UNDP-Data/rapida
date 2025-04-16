@@ -43,21 +43,6 @@ def getComponents():
 
 available_components = getComponents()
 
-
-# def getVariables():
-#     try:
-#         with Session() as session:
-#             variables = []
-#             for component in available_components:
-#                 res = session.get_variables(component=component)
-#                 variables.extend(res)
-#             return list(variables)
-#     except:
-#         return []
-#
-#
-# available_variables = getVariables()
-
 def get_variables_by_components(components):
     result = {}
     try:

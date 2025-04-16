@@ -181,8 +181,6 @@ class ElectricityVariable(Variable):
                     progress=progress,
                     add_polyid=False
                 )
-                lyr.SetAttributeFilter(None)
-                lyr.ResetReading()
 
             df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
             el_grid_lines = gpd.read_file(self.local_path, layer=self.component)

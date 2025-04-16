@@ -14,7 +14,7 @@ def generate_variables():
     """
 
     license = "Creative Commons Attribution 4.0 International"
-    attribution = "Wang, T., & Sun, F. (2023). Global gridded GDP under the historical and future scenarios"
+    attribution = "Wang et al (2023). Global gridded GDP under the historical and future scenarios"
 
     variables = OrderedDict()
 

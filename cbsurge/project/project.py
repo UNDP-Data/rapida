@@ -12,6 +12,7 @@ import requests
 import click
 import geopandas
 import h3
+import pyogrio
 from osgeo import gdal, ogr, osr
 from pyproj import CRS as pCRS
 from azure.storage.fileshare import ShareClient, ShareDirectoryClient
@@ -464,6 +465,38 @@ class Project:
         if not os.path.exists(gpkg_path):
             raise RuntimeError(f"Could not find {gpkg_path} in {self.data_folder}. Please do assess command first.")
 
+        layers = pyogrio.list_layers(gpkg_path)
+        layer_names = layers[:, 0]
+
+        stats_layers = [name.replace("stats.","") for name in layer_names if name.startswith("stats.")]
+        has_stats_layers = len(stats_layers) > 0
+
+        if not has_stats_layers:
+            raise RuntimeError(f"Could not find assessed statistics layer in {gpkg_path}. Please do assess command first for at least one component.")
+
+        layer_info = []
+        with Session() as session:
+            components = session.get_components()
+            for c_name in components:
+                if c_name in stats_layers:
+                    variables = session.get_variables(c_name)
+                    first_variable_name = next(iter(variables))
+                    first_variable = session.get_variable(c_name, first_variable_name)
+
+                    layer_info.append({
+                        "layer": f"stats.{c_name}",
+                        "license": first_variable["license"],
+                        "attribution": first_variable["attribution"],
+                    })
+
+            descriptions = [f"**{info["layer"]}** (Data provider: **{info["attribution"]}**, License: **{info["license"]}**)" for info in layer_info]
+            description = f"""This dataset was generated for the project {self.name} by UNDP RAPIDA tool to assess the following component layers: 
+{"\n".join(f"- {d}" for d in descriptions)}
+"""
+            attributions = [info["attribution"] for info in layer_info]
+            attributions.insert(0, "United Nations Development Programme (UNDP)")
+            attribution = ", ".join(attributions)
+
         with Session() as s:
             blob_url = f"az:{s.get_account_name()}:{s.get_publish_container_name()}/projects/{project_name}/{project_name}.pmtiles"
 
@@ -475,7 +508,13 @@ class Project:
 
             uploaded_files = None
             try:
-                uploaded_files = asyncio.run(dataset2pmtiles(blob_url=blob_url, src_file=gpkg_path, overwrite=True))
+                uploaded_files = asyncio.run(dataset2pmtiles(blob_url=blob_url,
+                                                             src_file=gpkg_path,
+                                                             overwrite=True,
+                                                             name=f"RAPIDA: {project_name}",
+                                                             description=description,
+                                                             attribution=attribution,
+                                                             ))
             except Exception as e:
                 logger.error(e)
 

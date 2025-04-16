@@ -43,20 +43,63 @@ def getComponents():
 
 available_components = getComponents()
 
-
-def getVariables():
+def get_variables_by_components(components):
+    result = {}
     try:
         with Session() as session:
-            variables = []
-            for component in available_components:
-                res = session.get_variables(component=component)
-                variables.extend(res)
-            return list(variables)
+            for comp in components:
+                result[comp] = session.get_variables(component=comp)
     except:
-        return []
+        pass
+    return result
 
 
-available_variables = getVariables()
+component_variable_map = get_variables_by_components(available_components)
+
+
+def validate_variables(ctx, param, value):
+    """
+    click callback function to validate -v/--variable value
+
+    If `-a/--all` is passed, all variables are validated and shown as valid options in the error message.
+    If `-c/--component` is passed, only relevant component variables are shown as valid options in the error message.
+    """
+    selected_components = ctx.params.get('components')
+    use_all = ctx.params.get('all')
+
+    if not value:
+        return value
+
+    # when -a/--all is used
+    if use_all or not selected_components:
+        all_vars = set(var for vars_list in component_variable_map.values() for var in vars_list)
+        invalid = [v for v in value if v not in all_vars]
+        if invalid:
+            raise click.BadParameter(f"Invalid variable: {', '.join(invalid)}. Valid options: {', '.join(all_vars)}")
+        return value
+
+    # when -c/--component is used
+    valid_vars = set()
+    for comp in selected_components:
+        valid_vars.update(component_variable_map.get(comp, []))
+
+    invalid = [v for v in value if v not in valid_vars]
+    if invalid:
+        raise click.BadParameter(f"Invalid variable{'s' if len(invalid) > 1 else ''}: {', '.join(invalid)} for selected component{'s:' if len(selected_components) > 1 else ':'} {', '.join(selected_components)}. {', '.join(invalid)}. Valid options: {', '.join(valid_vars)}")
+
+    return value
+
+
+def build_variable_help():
+    """
+    build help message for variable option
+    """
+    parts = []
+    for comp, vars_list in component_variable_map.items():
+        if vars_list:
+            vars_str = ", ".join(vars_list)
+            parts.append(f"{comp} ({vars_str})")
+    return "The variable/s to be assessed. Will be filtered by selected components. Available variables per component:\n\n" + "\n\n".join(parts)
 
 
 @click.command(short_help='assess/evaluate a specific geospatial exposure components/variables', no_args_is_help=True)
@@ -70,8 +113,8 @@ available_variables = getVariables()
     help=f'One or more components to be assessed. Valid input example: {" ".join([f"-c {var}" for var in available_components[:2]])}'
 )
 @click.option('--variables', '-v', required=False, multiple=True,
-              type=click.Choice(available_variables, case_sensitive=False),
-              help=f'The variable/s to be assessed. Valid input example: {" ".join([f"-v {var}" for var in available_variables[:2]])}' )
+              type=str, callback=validate_variables,
+              help=f"{build_variable_help()}")
 @click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
               show_default=True,help=f'The year for which to compute population' )
 @click.option('-p', '--project',
@@ -128,6 +171,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
         logger.error(f'Project "{project}" is not a valid RAPIDA project')
         return
 
+    available_variables = list({var for vars_list in component_variable_map.values() for var in vars_list})
     if len(available_components) == 0 or len(available_variables) == 0:
         logger.warning("There are no available components. Please run `rapida init` to setup the tool first")
         sys.exit(0)

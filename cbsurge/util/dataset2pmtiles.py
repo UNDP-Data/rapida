@@ -257,11 +257,12 @@ def gdal_callback(complete, message, timeout_event):
         return 0
 
 
-def validate_src_file(src_file: str):
+def validate_src_file(src_file: str, target_layers = None):
     """
     Validate a source file and return required info for further processing.
 
     :param src_file: source filename
+    :param target_layers: optional. If target layers are passed, only they are published. Otherwise, all layers are published.
     :return: An array of GDAL dataset instance, layers (iter or layer/s name/s) and filename (str).
     """
     try:
@@ -284,10 +285,22 @@ def validate_src_file(src_file: str):
     _, file_name = os.path.split(vdataset.GetDescription())
     layer_names = [vdataset.GetLayerByIndex(i).GetName() for i in range(nvector_layers)]
 
-    logger.info(f'Ingesting all vector layers into one multilayer PMtiles file')
+    if target_layers is None or len(target_layers) == 0:
+        logger.info(f'Ingesting all vector layers into one multilayer PMtiles file')
+        target_layers = layer_names
+    else:
+        invalid_layers = []
+        for layer in target_layers:
+            if not layer in layer_names:
+                invalid_layers.append(layer)
+        if len(invalid_layers) > 0:
+            raise RuntimeError(f"Invalid layers: {", ".join(invalid_layers)}")
+
+        logger.info(f'Ingesting {len(target_layers)} vector layers into one multilayer PMtiles file')
+
     fname, *ext = file_name.split(os.extsep)
 
-    return [vdataset, layer_names, fname]
+    return [vdataset, target_layers, fname]
 
 async def dataset2pmtiles(blob_url: str,
                           src_file: str,
@@ -295,16 +308,18 @@ async def dataset2pmtiles(blob_url: str,
                           timeout_event=multiprocessing.Event(),
                           name: str = None,
                           attribution: str = None,
-                          description: str = None,):
+                          description: str = None,
+                          target_layers = None):
     """
     Converts the layer/s contained in src_ds GDAL dataset  to PMTiles and uploads them to Azure.
     If supplied all vector layers will ve stored in one multilayer PMTile file
 
-    @param blob_url:
-    @param src_file: a vector source file to be ingested
-    @param overwrite: if True, overwrite existing PMTiles and FlatGeobuf
-    @param timeout_event: instance of multiprocessing.Event used to interrupt the processing
-    @return: an array of uploaded blob URLs if successful, None otherwise.
+    :param blob_url:
+    :param src_file: a vector source file to be ingested
+    :param overwrite: if True, overwrite existing PMTiles and FlatGeobuf
+    :param timeout_event: instance of multiprocessing.Event used to interrupt the processing
+    :param target_layers: optional. If target layers are passed, only they are published. Otherwise, all layers are published.
+    :return: an array of uploaded blob URLs if successful, None otherwise.
 
     The conversion is implemented in two stages
 
@@ -323,7 +338,7 @@ async def dataset2pmtiles(blob_url: str,
         else:
             logger.info(f"{blob_url} already exists. It will be overwritten.")
 
-    vdataset, layers, pmtiles_file_name = validate_src_file(src_file)
+    vdataset, layers, pmtiles_file_name = validate_src_file(src_file, target_layers)
 
     with tempfile.TemporaryDirectory() as temp_dir:
         fgb_layers = dataset2fgb(fgb_dir=temp_dir,

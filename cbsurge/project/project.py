@@ -453,10 +453,11 @@ class Project:
             logger.info(f'Successfully deleted the project folder: {self.path} from local storage.')
 
 
-    def publish(self, no_input=False):
+    def publish(self, target_layers=None, no_input=False):
         """
         Publish project outcome to Azure blob storage and make data registration URL of GeoHub.
 
+        :param target_layers: optional. If target layers are passed, only they are published. Otherwise, all layers are published.
         :param no_input: optional. If True, it will automatically answer yes to prompts. Default is False.
         """
         project_name = self._cfg_["name"]
@@ -468,17 +469,14 @@ class Project:
         layers = pyogrio.list_layers(gpkg_path)
         layer_names = layers[:, 0]
 
-        stats_layers = [name.replace("stats.","") for name in layer_names if name.startswith("stats.")]
-        has_stats_layers = len(stats_layers) > 0
-
-        if not has_stats_layers:
-            raise RuntimeError(f"Could not find assessed statistics layer in {gpkg_path}. Please do assess command first for at least one component.")
+        if target_layers is None or len(target_layers) == 0:
+            target_layers = layer_names
 
         layer_info = []
         with Session() as session:
             components = session.get_components()
             for c_name in components:
-                if c_name in stats_layers:
+                if c_name in target_layers:
                     variables = session.get_variables(c_name)
                     first_variable_name = next(iter(variables))
                     first_variable = session.get_variable(c_name, first_variable_name)
@@ -514,6 +512,7 @@ class Project:
                                                              name=f"RAPIDA: {project_name}",
                                                              description=description,
                                                              attribution=attribution,
+                                                             target_layers=target_layers,
                                                              ))
             except Exception as e:
                 logger.error(e)

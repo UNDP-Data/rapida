@@ -212,5 +212,6 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
                 fqcn = f'{get_parent_package()}.components.{component_name}.{class_name}'
                 cls = import_class(fqcn=fqcn)
                 component = cls()
+
                 component(progress=progress, variables=variables, target_year=year, force=force)
 

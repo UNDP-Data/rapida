@@ -15,11 +15,11 @@ from cbsurge.util.setup_logger import setup_logger
 logger = logging.getLogger(__name__)
 
 
-AZURE_STORAGE_ACCOUNT=os.environ.get("AZURE_STORAGE_ACCOUNT", "undpgeohub")
-AZURE_PUBLISH_CONTAINER_NAME=os.environ.get("AZURE_PUBLISH_CONTAINER_NAME", "rapida")
-AZURE_STAC_CONTAINER_NAME=os.environ.get("AZURE_STAC_CONTAINER_NAME", "stacdata")
-AZURE_FILE_SHARE_NAME=os.environ.get("AZURE_FILE_SHARE_NAME", "cbrapida")
-GEOHUB_ENDPOINT=os.environ.get("GEOHUB_ENDPOINT", "https://geohub.data.undp.org")
+AZURE_STORAGE_ACCOUNT=os.environ.get("AZURE_STORAGE_ACCOUNT") or "undpgeohub"
+AZURE_PUBLISH_CONTAINER_NAME=os.environ.get("AZURE_PUBLISH_CONTAINER_NAME" ) or "rapida"
+AZURE_STAC_CONTAINER_NAME=os.environ.get("AZURE_STAC_CONTAINER_NAME") or "stacdata"
+AZURE_FILE_SHARE_NAME=os.environ.get("AZURE_FILE_SHARE_NAME") or  "cbrapida"
+GEOHUB_ENDPOINT=os.environ.get("GEOHUB_ENDPOINT") or  "https://geohub.data.undp.org"
 
 def setup_prompt(session: Session):
     ## i have just commented authentication out for now

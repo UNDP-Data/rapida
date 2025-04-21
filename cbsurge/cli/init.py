@@ -82,7 +82,11 @@ def setup_prompt(session: Session):
               help="Set log level to debug"
               )
 def init(no_input: bool = False, debug=False):
-    """ Initialize rapida tool"""
+    """
+    Initialize RAPIDA tool. This command will creates a config file under user home directory (~/.cbsurge/config.json) to setup RAPIDA tool.
+
+    Use `--no-input` to disable prompting. Default is False.
+    """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     click.echo("Welcome to rapida CLI tool!")

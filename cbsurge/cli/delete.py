@@ -28,6 +28,8 @@ def delete(project: str, no_input: bool = False, debug: bool =False):
 
     `--no-input` option can answer yes to all prompts. Default is False.
 
+    Note. Please be careful that it will delete all projects data from Azure and your local storage if you use `--no-input`.
+
     Usage:
 
         rapida delete: If you are already in a project folder

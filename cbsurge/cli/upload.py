@@ -24,11 +24,15 @@ logger = logging.getLogger(__name__)
               is_flag=True,
               default=False,
               help="Whether to overwrite the project in case it already exists.")
+@click.option('--no-input',
+              is_flag=True,
+              default=False,
+              help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
 @click.option('--debug',
               is_flag=True,
               default=False,
               help="Set log level to debug")
-def upload(project=None, max_concurrency=4, force=False, debug: bool =False):
+def upload(project=None, max_concurrency=4, force=False, no_input: bool = False, debug: bool =False):
     """
     Upload an entire project folder to Azure File Share
 
@@ -38,7 +42,9 @@ def upload(project=None, max_concurrency=4, force=False, debug: bool =False):
 
         rapida upload --project=<project folder path>: If you are not in a project folder
 
-    To use `-f/--force`, project data will be overwritten if it already exists in Azure File Share..
+    To use `-f/--force`, project data will be overwritten if it already exists in Azure File Share.
+
+    Use `--no-input` to disable prompting. Default is False.
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
@@ -57,10 +63,14 @@ def upload(project=None, max_concurrency=4, force=False, debug: bool =False):
         click.echo(f'Project "{project}" is not a valid RAPIDA project')
         return
 
-    if click.confirm('Are you sure uploading this project to Azure? Y/Yes to continue, Enter/No to cancel', abort=True):
-        click.echo(f'Going to upload {project} to Azure')
-        with Progress() as progress:
-            prj.upload(progress=progress, overwrite=force, max_concurrency=max_concurrency)
-        click.echo(f'Rapida project "{project}" was uploaded successfully to Azure')
-    else:
-        click.echo('Upload was cancelled.')
+    if not no_input:
+        if click.confirm('Are you sure uploading this project to Azure? Y/Yes to continue, Enter/No to cancel', abort=True):
+            pass
+        else:
+            click.echo('Upload was cancelled.')
+            return
+
+    click.echo(f'Going to upload {project} to Azure')
+    with Progress() as progress:
+        prj.upload(progress=progress, overwrite=force, max_concurrency=max_concurrency)
+    click.echo(f'Rapida project "{project}" was uploaded successfully to Azure')

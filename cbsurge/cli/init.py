@@ -72,21 +72,31 @@ def setup_prompt(session: Session):
 
 
 @click.command(short_help='initialize RAPIDA tool')
+@click.option('--no-input',
+              is_flag=True,
+              default=False,
+              help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
 @click.option('--debug',
               is_flag=True,
               default=False,
               help="Set log level to debug"
               )
-def init(debug=False):
-    """ Initialize rapida tool"""
+def init(no_input: bool = False, debug=False):
+    """
+    Initialize RAPIDA tool. This command will creates a config file under user home directory (~/.cbsurge/config.json) to setup RAPIDA tool.
+
+    Use `--no-input` to disable prompting. Default is False.
+    """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     click.echo("Welcome to rapida CLI tool!")
     with Session() as session:
         config = session.get_config()
-        if config:
-            if click.confirm('Your setup has already been done. Would you like to do setup again?', abort=True):
-                setup_prompt(session)
-        else:
-            if click.confirm('Would you like to setup rapida tool?', abort=True):
-                setup_prompt(session)
+        if not no_input:
+            if config:
+                if not click.confirm('Your setup has already been done. Would you like to do setup again?', abort=True):
+                    return
+            else:
+                if not click.confirm('Would you like to setup rapida tool?', abort=True):
+                    return
+    setup_prompt(session)

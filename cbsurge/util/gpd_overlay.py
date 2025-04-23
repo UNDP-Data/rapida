@@ -1,6 +1,5 @@
 from collections import defaultdict
 from concurrent.futures import as_completed
-import tracemalloc
 import logging
 from concurrent.futures.thread import ThreadPoolExecutor
 
@@ -80,8 +79,14 @@ def process_chunk(chunk_rows, overlay_df, overlay_df_sindex, crs):
 
 
 def run_overlay(polygons_df=None, overlay_df=None, default_chunk_size=2, **kwargs):
-
-    tracemalloc.start()
+    """
+    Run overlay function
+    :param polygons_df: The polygon geometries dataframe
+    :param overlay_df: The overlay dataframe
+    :param default_chunk_size: The default chunk size
+    :param kwargs:
+    :return:
+    """
     progress = kwargs.get('progress')
     max_workers = 4
     final_results = gpd.GeoDataFrame()
@@ -108,10 +113,6 @@ def run_overlay(polygons_df=None, overlay_df=None, default_chunk_size=2, **kwarg
             except Exception as e:
                 logging.error(f"Error processing chunk: {e}")
     if len(final_results) > 0:
-        current, peak = tracemalloc.get_traced_memory()
-        print(f"Current memory usage: {current / 1024:.2f} KB")
-        print(f"Peak memory usage: {peak / 1024:.2f} KB")
-        tracemalloc.stop()
         if progress and overlay_task:
             progress.remove_task(overlay_task)
         logging.info("run_overlay complete")

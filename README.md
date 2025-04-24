@@ -1,4 +1,4 @@
-# geo-cb-surge
+# rapida
 A repo to hold python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc  
 
 ## Installation
@@ -9,10 +9,10 @@ Install the project with dependencies to virtual environment as below.
 pipenv run pip install -e .
 ```
 
-If you want to install optional dependencies for testing and jupyter, execute the following command.
+If you want to install optional dependencies for testing, execute the following command.
 
 ```shell
-pipenv run pip install .[dev,jupyter]
+pipenv run pip install .[dev]
 ```
 
 To uninstall the project from Python environment, execute the following command.
@@ -32,19 +32,6 @@ pipenv run rapida --help
 ## Setup
 
 To access blob storage in Azure, each user must have a role of `Storage Blob Data Contributor`.
-
-- inside Docker container
-
-Since it has an issue of opening browser by azure.identity package inside docker container, use `az login` to authenticate prior to use API.
-
-```shell
-az login # authenticate with az login
-pipenv run rapida init
-```
-
-- without Docker
-
-`init` command will open browser to authenticate to Azure
 
 ```shell
 pipenv run rapida init
@@ -90,35 +77,6 @@ If you would like to build image for production, execute the below command
 PRODUCTION=true make build
 ```
 
-- launch docker container
-
-```shell
-make up
-```
-
-You can access to JupyterHub through `http:localhost:8100` in your browser. 
-
-- set users
-
-Authenticate users can be set through `JUPYTER_USERS` variable at `.env` file.
-
-```
-cp .env.example .env
-vi .env
-```
-
-JUPYTER_USERS can have multiple users (username:password) for authentication
-
-```shell
-JUPYTER_USERS=docker:docker user:user
-```
-
-folder structure in the container will be as follows:
-
-- /data - it will be mounted to fileshare. All files under this folder will be kept
-  - /data/{username} - users can explore all users file, a user has no permission to edit other users' folder.
-- /home/{username} - user home folder. This data will be lost when the server is restarted.
-
 ### destroy docker container
 
 ```shell
@@ -157,10 +115,10 @@ pip install msal azure-core playwright azure-storage-blob click
 Execute below py file independently to authenticate in local machine.
 
 ```shell
-python cbsurge/az/auth.py
+pipenv run rapida auth
 ```
 
-`python cbsurge/az/auth.py --help` to show usage.
+`rapida auth --help` to show usage.
 
 Use `-c {cache_dir}` to change folder path to store `token_cache.json`.
 

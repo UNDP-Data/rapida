@@ -177,13 +177,11 @@ class RoadsVariable(Variable):
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
-
-                df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
-                road_lines = gpd.read_file(self.local_path, layer=self.component)
-
+                df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name, engine="pyogrio")
+                road_lines = gpd.read_file(self.local_path, layer=self.component, engine="pyogrio")
                 poly_cols = df_polygon.columns.tolist()
                 cols_to_drop = set(poly_cols).difference(['h3id']).difference(road_lines.columns.tolist())
-                road_lines = run_overlay(polygons_df=df_polygon, overlay_df=road_lines, progress=progress)
+                road_lines = run_overlay(polygons_dataframe=df_polygon, overlay_dataframe=road_lines, progress=progress)
 
                 road_lines.drop(columns=list(cols_to_drop), inplace=True)
                 road_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
@@ -191,8 +189,8 @@ class RoadsVariable(Variable):
 
                 if project.vector_mask is not None:
                     if force == True or self.affected_layer not in layer_names:
-                        df_line = gpd.read_file(self.local_path, layer=self.component)
-                        df_mask = gpd.read_file(self.local_path, layer=project.vector_mask)
+                        df_line = gpd.read_file(self.local_path, layer=self.component, engine="pyogrio")
+                        df_mask = gpd.read_file(self.local_path, layer=project.vector_mask, engine="pyogrio")
                         df_line_mask = gpd.clip(df_line, mask=df_mask, keep_geom_type=True)
                         df_line_mask.to_file(self.local_path, driver='GPKG', layer=self.affected_layer, mode='w')
 
@@ -226,8 +224,8 @@ class RoadsVariable(Variable):
         else:
             polygons_layer = constants.POLYGONS_LAYER_NAME
 
-        df_polygon = gpd.read_file(self.local_path, layer=polygons_layer)
-        df_line = gpd.read_file(self.local_path, layer=self.component)
+        df_polygon = gpd.read_file(self.local_path, layer=polygons_layer, engine="pyogrio")
+        df_line = gpd.read_file(self.local_path, layer=self.component, engine="pyogrio")
 
         for col in [self.name, self.affected_variable, self.affected_percentage_variable]:
             if col in df_polygon.columns:
@@ -253,7 +251,7 @@ class RoadsVariable(Variable):
                 if progress is not None and evaluate_task is not None:
                     progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
 
-                df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer)
+                df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer, engine="pyogrio")
                 output_df = vector_line_zonal_stats(
                     df_polygon=output_df,
                     df_line=df_line_affected,

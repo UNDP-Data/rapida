@@ -169,7 +169,7 @@ class PopulationComponent(Component):
 
                 #assess
                 v(year=self.base_year,**kwargs)
-                kwargs['computed'] |= set([var_name] + v.dep_vars)
+                kwargs['computed'] |= set([var_name] + (v.dep_vars or []))
 
 
 
@@ -229,8 +229,6 @@ class PopulationVariable(Variable):
         if progress is not None and variable_task is not None:
             progress._tasks[variable_task].total = 100
             progress.update(variable_task, description=f'[green]Assessed {self.component}->{self.name}', advance=100)
-            if self.name == 'elderly_total':
-                print(variable_task, progress._tasks[variable_task].total, progress._tasks[variable_task].completed)
 
 
     def compute(self, **kwargs):
@@ -303,7 +301,7 @@ class PopulationVariable(Variable):
                 var_dict = s.get_variable(component=self.component, variable=var_name)
                 var = self.__class__(name=var_name, component=self.component, **var_dict)
                 if already_done and var_name in already_done and force_compute:
-                    logger.debug(f'Skipping {var_name} because it was already computed')
+                    logger.info(f'Skipping {var_name} because it was already computed') # this will skip download by removing  force arg
                     force = kwargs.pop('force')
                 var_local_path = var(**kwargs) # assess
                 if already_done and var_name in already_done and force_compute:

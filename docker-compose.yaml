@@ -13,7 +13,7 @@ services:
       # uncomment to mount token info from local
       # - ~/.cbsurge:/root/.cbsurge
       # uncomment to mount data folder from local
-      # - ./data:/data
+      - /data:/data
     entrypoint: "/app/entrypoint.sh"
     ports:
       - 8100:8000

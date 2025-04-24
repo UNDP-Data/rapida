@@ -10,7 +10,8 @@ from cbsurge.cli.upload import upload
 from cbsurge.cli.download import download
 from cbsurge.cli.publish import publish
 import click
-
+import nest_asyncio
+nest_asyncio.apply()
 
 class RapidaCommandGroup(click.Group):
     def list_commands(self, ctx):

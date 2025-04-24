@@ -13,8 +13,6 @@ RUN make
 # Use the GDAL image as the base
 FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0
 
-ARG GROUP_NAME="cbsurge"
-ARG DATA_DIR='/data'
 ARG PRODUCTION
 
 # Install necessary tools and Python packages

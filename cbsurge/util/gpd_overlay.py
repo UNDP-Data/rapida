@@ -8,11 +8,6 @@ import geopandas as gpd
 from rich.progress import Progress
 
 
-def chunk_gdf(gdf, chunk_size):
-    for i in range(0, len(gdf), chunk_size):
-        yield gdf.iloc[i:i + chunk_size]
-
-
 def dynamic_chunk_df(gdf, chunk_size):
     """
     Yield chunks of the GeoDataFrame, each with approximately `chunk_size` features,
@@ -45,8 +40,6 @@ def dynamic_chunk_df(gdf, chunk_size):
         chunks[min_chunk_idx].append(row.name)  # store original index
         chunk_areas[min_chunk_idx] += row['__area__']
 
-    print(chunk_areas)
-
     # Yield original-CRS chunks in order
     for i in range(num_chunks):
         yield gdf.loc[chunks[i]]
@@ -78,11 +71,11 @@ def process_chunk(chunk_rows, overlay_df, overlay_df_sindex, crs):
     return pd.DataFrame(columns=overlay_df.columns)
 
 
-def run_overlay(polygons_df=None, overlay_df=None, default_chunk_size=2, **kwargs):
+def run_overlay(polygons_dataframe=None, overlay_dataframe=None, default_chunk_size=2, **kwargs):
     """
     Run overlay function
-    :param polygons_df: The polygon geometries dataframe
-    :param overlay_df: The overlay dataframe
+    :param polygons_dataframe: The polygon geometries dataframe
+    :param overlay_dataframe: The overlay dataframe
     :param default_chunk_size: The default chunk size
     :param kwargs:
     :return:
@@ -90,8 +83,8 @@ def run_overlay(polygons_df=None, overlay_df=None, default_chunk_size=2, **kwarg
     progress = kwargs.get('progress')
     max_workers = 4
     final_results = gpd.GeoDataFrame()
-    overlay_df_sindex = overlay_df.sindex
-    chunks = list(dynamic_chunk_df(polygons_df, chunk_size=default_chunk_size))
+    overlay_df_sindex = overlay_dataframe.sindex
+    chunks = list(dynamic_chunk_df(polygons_dataframe, chunk_size=default_chunk_size))
 
     if progress:
         overlay_task = progress.add_task(description=f'[red]Running overlay for {len(chunks)} chunks', total=len(chunks))
@@ -100,14 +93,14 @@ def run_overlay(polygons_df=None, overlay_df=None, default_chunk_size=2, **kwarg
         overlay_task = progress.add_task(description=f'[green]Running overlay for {len(chunks)} chunks', total=len(chunks))
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(process_chunk, chunk, overlay_df, overlay_df_sindex, polygons_df.crs)
+            executor.submit(process_chunk, chunk, overlay_dataframe, overlay_df_sindex, polygons_dataframe.crs)
             for chunk in chunks
         ]
         for future in as_completed(futures):
             try:
                 result = future.result()
                 if not result.empty:
-                    result_gdf = gpd.GeoDataFrame(result, geometry='geometry', crs=polygons_df.crs)
+                    result_gdf = gpd.GeoDataFrame(result, geometry='geometry', crs=polygons_dataframe.crs)
                     final_results = pd.concat([final_results, result_gdf], ignore_index=True)
                     progress.update(overlay_task, advance=1)
             except Exception as e:

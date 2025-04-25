@@ -182,12 +182,13 @@ class ElectricityVariable(Variable):
                     add_polyid=False
                 )
 
-            df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name)
-            el_grid_lines = gpd.read_file(self.local_path, layer=self.component)
-            poly_cols = df_polygon.columns.tolist()
-            cols_to_drop = set(poly_cols).difference(['h3id']).difference(el_grid_lines.columns.tolist())
-            el_grid_lines = run_overlay(polygons_dataframe=df_polygon, overlay_dataframe=el_grid_lines)
-            el_grid_lines.drop(columns=list(cols_to_drop), inplace=True)
+            el_grid_lines = run_overlay(
+                polygons_data_path=self.local_path,
+                polygons_layer_name=project.polygons_layer_name,
+                input_data_path=self.local_path,
+                input_layer_name=self.component,
+                progress=progress
+            )
             el_grid_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
             el_grid_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
             self._compute_affected()
@@ -312,9 +313,7 @@ class ElectricityVariable(Variable):
         affected_layer = f'{self.component}.affected'
         if affected_layer in gpd.list_layers(self.local_path):
             return
-        mask_df = gpd.read_file(self.local_path, layer=project.vector_mask)
-        grid_df = gpd.read_file(self.local_path, layer=self.component)
-        affected_df = run_overlay(polygons_dataframe=mask_df, overlay_dataframe=grid_df)
+        affected_df = run_overlay(polygons_data_path=self.local_path,polygons_layer_name=project.vector_mask, input_data_path=self.local_path, input_layer_name=self.component)
         affected_df.to_file(self.local_path, driver='GPKG', layer=affected_layer)
 
 

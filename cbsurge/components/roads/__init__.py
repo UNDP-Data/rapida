@@ -7,7 +7,7 @@ from cbsurge.core.component import Component
 from cbsurge.core.variable import Variable
 from cbsurge.session import Session
 from cbsurge.util.fiona_chunks import gdf_chunks, gdf_columns
-from cbsurge.util.gpd_overlay import run_overlay, run_overlay_chunks
+from cbsurge.util.gpd_overlay import run_overlay
 from cbsurge.util.resolve_url import resolve_geohub_url
 from cbsurge.util.download_geodata import download_vector
 from cbsurge.util.proj_are_equal import proj_are_equal

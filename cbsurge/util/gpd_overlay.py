@@ -85,6 +85,11 @@ def run_overlay(polygons_data_path=None, polygons_layer_name=None, input_data_pa
     :return:
     """
 
+    if polygons_data_path is None or polygons_layer_name is None:
+        raise ValueError("polygons_data_path and polygons_layer_name must be provided")
+    if input_data_path is None or input_layer_name is None:
+        raise ValueError("input_data_path and input_layer_name must be provided")
+
     progress = kwargs.get('progress')
     max_workers = 4
     final_results = gpd.GeoDataFrame()
@@ -119,42 +124,4 @@ def run_overlay(polygons_data_path=None, polygons_layer_name=None, input_data_pa
         poly_cols = gdf_columns(file_path=polygons_data_path, layer_name=polygons_layer_name)
         cols_to_drop = set(poly_cols).difference(['h3id']).difference(input_data_df.columns.tolist())
         final_results.drop(columns=list(cols_to_drop), inplace=True)
-        return final_results
-
-
-
-
-def run_overlay_chunks(df_polygon_chunks=None, overlay_dataframe=None, default_chunk_size=2, **kwargs):
-    progress = kwargs.get('progress')
-    max_workers = 4
-    final_results = gpd.GeoDataFrame()
-    overlay_df_sindex = overlay_dataframe.sindex
-
-    for i, chunk_df in enumerate(df_polygon_chunks):
-        chunks_rows = list(dynamic_chunk_df(chunk_df, chunk_size=default_chunk_size))
-        if progress:
-            overlay_task = progress.add_task(description=f'[red]Running overlay for chunk {i}', total=len(chunks_rows))
-        else:
-            progress = Progress()
-            overlay_task = progress.add_task(description=f'[green]Running overlay for chunk {i}', total=len(chunks_rows))
-
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = [
-                executor.submit(process_chunk, chunk_row, overlay_dataframe, overlay_df_sindex, chunk_df.crs)
-                for chunk_row in chunks_rows
-            ]
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                    if not result.empty:
-                        result_gdf = gpd.GeoDataFrame(result, geometry='geometry', crs=chunk_df.crs)
-                        final_results = pd.concat([final_results, result_gdf], ignore_index=True)
-                        progress.update(overlay_task, advance=1)
-                    # if len(result_gdf) > 0:
-                        if progress and overlay_task:
-                            progress.remove_task(overlay_task)
-                            logging.info(f"run_overlay_chunks for chunk {i} complete")
-                except Exception as e:
-                    logging.error(f"Error processing chunk: {e}")
-
-        return final_results
+    return final_results

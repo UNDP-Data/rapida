@@ -69,7 +69,7 @@ jobs:
 
       - name: Run tests in container
         run: |
-          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ needs.build-image.outputs.tags }} -c "pipenv run pip install .[test] && pipenv run python -m pytest tests"
+          docker run --rm -v ${{ github.workspace }}:/app -w /app --entrypoint /bin/bash ${{ needs.build-image.outputs.tags }} -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 
   deploy-acr:
     name: Build and deploy to Azure Container Registry

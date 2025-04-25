@@ -1,5 +1,5 @@
 [project]
-name = "geo-cb-surge"
+name = "rapida"
 version = "0.0.1"
 description = "python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc"
 requires-python = ">=3.12"
@@ -52,33 +52,18 @@ dev = [
     "pytest"
 ]
 
-# dependencies required for Jupyter server
-jupyter = [
-    "jupyterhub",
-    "jupyterlab",
-    "notebook",
-    "dockerspawner",
-    "matplotlib",
-    "jupyterlab_widgets",
-    "ipywidgets",
-    "leafmap",
-    "mapclassify",
-    "xarray",
-    "localtileserver"
-]
-
 [project.scripts]
-rapida = "cbsurge.cli:cli"
+rapida = "rapida.cli:cli"
 
 [project.urls]
-Homepage = "https://github.com/UNDP-Data/geo-cb-surge"
-Documentation = "https://github.com/UNDP-Data/geo-cb-surge"
-Repository = "https://github.com:UNDP-Data/geo-cb-surge.git"
-Issues = "https://github.com/UNDP-Data/geo-cb-surge/issues"
-#Changelog = "https://github.com/UNDP-Data/geo-cb-surge/blob/master/CHANGELOG.md"
+Homepage = "https://github.com/UNDP-Data/rapida"
+Documentation = "https://github.com/UNDP-Data/rapida"
+Repository = "https://github.com:UNDP-Data/rapida.git"
+Issues = "https://github.com/UNDP-Data/rapida/issues"
+#Changelog = "https://github.com/UNDP-Data/rapida/blob/master/CHANGELOG.md"
 
 [tool.hatch.build.targets.wheel]
-    packages = ["cbsurge"]
+packages = ["rapida"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [

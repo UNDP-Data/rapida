@@ -10,7 +10,8 @@ from rapida.cli.upload import upload
 from rapida.cli.download import download
 from rapida.cli.publish import publish
 import click
-
+import nest_asyncio
+nest_asyncio.apply()
 
 class RapidaCommandGroup(click.Group):
     def list_commands(self, ctx):

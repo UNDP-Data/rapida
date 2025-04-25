@@ -41,13 +41,13 @@ class Session(object):
 
     def get_config_file_path(self) -> str:
         user_dir = os.path.expanduser("~")
-        config_file_path = os.path.join(user_dir, ".cbsurge", "config.json")
+        config_file_path = os.path.join(user_dir, ".rapida", "config.json")
         return config_file_path
 
 
     def get_config(self):
         """
-        get config from ~/.cbsurge/config.json
+        get config from ~/.rapida/config.json
 
         Returns:
             JSON object
@@ -113,7 +113,7 @@ class Session(object):
 
     def save_config(self):
         """
-        Save config.json under user directory as ~/.cbsurge/config.json
+        Save config.json under user directory as ~/.rapida/config.json
         """
         if self.get_account_name() is None:
             raise RuntimeError(f"account_name is not set")
@@ -141,7 +141,7 @@ class Session(object):
         Usage example:
 
         from azure.storage.blob import BlobServiceClient
-        from cbsurge.session import Session
+        from rapida.session import Session
 
         session = Session()
         credential = session.get_credential()

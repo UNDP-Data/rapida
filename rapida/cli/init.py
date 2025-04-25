@@ -83,7 +83,7 @@ def setup_prompt(session: Session):
               )
 def init(no_input: bool = False, debug=False):
     """
-    Initialize RAPIDA tool. This command will creates a config file under user home directory (~/.cbsurge/config.json) to setup RAPIDA tool.
+    Initialize RAPIDA tool. This command will creates a config file under user home directory (~/.rapida/config.json) to setup RAPIDA tool.
 
     Use `--no-input` to disable prompting. Default is False.
     """

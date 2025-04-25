@@ -17,7 +17,7 @@ def resolve_geohub_url(dataset_url: str, link_name: str = None):
 
     If link_name is not provided or a provided link_name does not exist, it returns `dataset.properties.url`.
 
-    Prior to use this function, it requires to initialize ~/.cbsurge/config.json by `rapida init` command.
+    Prior to use this function, it requires to initialize ~/.rapida/config.json by `rapida init` command.
 
     Usage:
         data_url = "geohub:/api/datasets/{dataset_id}"

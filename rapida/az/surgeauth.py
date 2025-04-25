@@ -112,7 +112,7 @@ class SurgeTokenCredential(TokenCredential):
         # cache file path
         self._cache_dir_ = cache_dir
         if self._cache_dir_ is None:
-            self._cache_dir_ = os.path.join(expanduser("~"), '.cbsurge')
+            self._cache_dir_ = os.path.join(expanduser("~"), '.rapida')
         self._cache_file_ = os.path.join(self._cache_dir_,self.TOKEN_FILE_NAME)
         self._load_from_cache_()
 

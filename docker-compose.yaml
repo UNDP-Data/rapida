@@ -8,7 +8,7 @@ services:
       - ./rapida:/app/rapida # mount app folder to container
       - ./tests:/app/tests
       # uncomment to mount token info from local
-      # - ~/.cbsurge:/root/.cbsurge
+      # - ~/.rapida:/root/.rapida
       # uncomment to mount data folder from local
       # - ./data:/data
     ports:

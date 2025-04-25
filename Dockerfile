@@ -33,7 +33,6 @@ COPY README.md README.md
 ENV PIPENV_VENV_IN_PROJECT=1
 ENV PLAYWRIGHT_BROWSERS_PATH=0
 RUN pipenv install --python 3 && \
-    pipenv run pip install .[dev] && \
     pipenv run pip install playwright && \
     pipenv run playwright install chromium --with-deps
 ENV VIRTUAL_ENV=/app/.venv
@@ -47,9 +46,9 @@ COPY . .
 
 # Conditional installation based on PRODUCTION variable
 RUN if [ -z "$PRODUCTION" ]; then \
-        pipenv run pip install -e . ; \
+        pipenv run pip install -e .[dev] ; \
     else \
-        pipenv run pip install . ; \
+        pipenv run pip install .[dev] ; \
     fi
 RUN pipenv --clear
 

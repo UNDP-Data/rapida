@@ -55,7 +55,7 @@ pipenv run rapida admin ocha --help
 
 ## Run test
 
-Each `cbsurge`'s modules has its own test suite which can be ran independently
+Each `rapida`'s modules has its own test suite which can be ran independently
 
 ```shell
 make test
@@ -120,9 +120,9 @@ pipenv run rapida auth
 
 `rapida auth --help` to show usage.
 
-Use `-c {cache_dir}` to change folder path to store `token_cache.json`.
+Use `-c {cache_dir}` to change folder path to store a token file.
 
-The script will create token_cache.json at `~/cbsurge/token_cache.json`.
+The script will create token file at `~/.rapida`.
 
 Open `docker-compose.yaml`. Uncomment the following code to mount json file from your local to the container.
 
@@ -130,7 +130,7 @@ You may need to adjust file path according to your environment settings.
 
 ```yaml
 volume:
-  - ~/.cbsurge/token_cache.json:/root/.cbsurge/token_cache.json
+  - ~/.rapida:/root/.rapida
 ```
 
 Using the below command to setup rapida tool. If it shows `authentication successful` in the log, it uses credential from your local machine directly.

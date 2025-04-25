@@ -12,7 +12,7 @@ TOKEN_CACHE_FIlE = 'token_cache.json'
 
 @click.command(short_help="authenticate with UNDP account")
 @click.option('-c', '--cache_dir', default=None, type=click.Path(),
-              help="Optional. Folder path to store token_cache.json. Default is ~/.cbsurge folder to store cache file.")
+              help="Optional. Folder path to store token_cache.json. Default is ~/.rapida folder to store cache file.")
 @click.option('--debug',
               is_flag=True,
               default=False,

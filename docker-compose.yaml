@@ -1,31 +1,17 @@
 services:
-  cbsurge:
+  rapida:
     build:
       context: .
       dockerfile: ./Dockerfile
     volumes:
-      - ./create_user.sh:/app/create_user.sh
-      - ./entrypoint.sh:/app/entrypoint.sh
-      - ./jupyterhub_config.py:/app/jupyterhub_config.py
       - ./Makefile:/app/Makefile
-      - ./cbsurge:/app/cbsurge # mount app folder to container
+      - ./rapida:/app/rapida # mount app folder to container
       - ./tests:/app/tests
       # uncomment to mount token info from local
-      # - ~/.cbsurge:/root/.cbsurge
+      # - ~/.rapida:/root/.rapida
       # uncomment to mount data folder from local
       # - ./data:/data
-    entrypoint: "/app/entrypoint.sh"
     ports:
       - 8100:8000
     env_file:
       - .env
-#    environment:
-#      - JUPYTER_USERS=${JUPYTER_USERS:-''}
-#      - TENANT_ID=${TENANT_ID:-''}
-#      - CLIENT_ID=${CLIENT_ID:-''}
-#      - USER=${USER:-''}
-#      - AZURE_STORAGE_ACCOUNT=${AZURE_STORAGE_ACCOUNT:-''}
-#      - AZURE_PUBLISH_CONTAINER_NAME=${AZURE_PUBLISH_CONTAINER_NAME:-''}
-#      - AZURE_STAC_CONTAINER_NAME=${AZURE_STAC_CONTAINER_NAME:-''}
-#      - AZURE_FILE_SHARE_NAME=${AZURE_FILE_SHARE_NAME:-''}
-#      - GEOHUB_ENDPOINT=${GEOHUB_ENDPOINT:-''}

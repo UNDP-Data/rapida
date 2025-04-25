@@ -13,7 +13,7 @@ shell:
 	@echo "------------------------------------------------------------------"
 	@echo "Shelling in dev mode"
 	@echo "------------------------------------------------------------------"
-	docker compose -f docker-compose.yaml run --remove-orphans --entrypoint /bin/bash cbsurge
+	docker compose -f docker-compose.yaml run --remove-orphans --entrypoint /bin/bash rapida
 
 
 test:
@@ -29,13 +29,6 @@ build:
 	@echo "Building Docker image"
 	@echo "------------------------------------------------------------------"
 	docker compose -f docker-compose.yaml build --build-arg PRODUCTION=$(PRODUCTION)
-
-up:
-	@echo
-	@echo "------------------------------------------------------------------"
-	@echo "Launch docker containers"
-	@echo "------------------------------------------------------------------"
-	docker compose -f docker-compose.yaml up
 
 down:
 	@echo

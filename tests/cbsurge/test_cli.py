@@ -1,7 +1,7 @@
 import pytest
 from typing import List
 from click.testing import CliRunner
-from cbsurge.cli import cli
+from rapida.cli import cli
 
 
 @pytest.mark.parametrize(

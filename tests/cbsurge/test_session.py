@@ -1,4 +1,4 @@
-from cbsurge.session import Session
+from rapida.session import Session
 import os
 
 

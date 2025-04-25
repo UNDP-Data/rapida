@@ -5,7 +5,7 @@ services:
       dockerfile: ./Dockerfile
     volumes:
       - ./Makefile:/app/Makefile
-      - ./cbsurge:/app/cbsurge # mount app folder to container
+      - ./rapida:/app/rapida # mount app folder to container
       - ./tests:/app/tests
       # uncomment to mount token info from local
       # - ~/.cbsurge:/root/.cbsurge

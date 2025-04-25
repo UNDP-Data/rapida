@@ -152,18 +152,12 @@ class PopulationComponent(Component):
                     logger.error(f'variable "{var_name}" is invalid. Valid options are "{", ".join(self.variables)}"')
                     return
 
-
-        progress = kwargs.get('progress', None)
+        #progress = kwargs.get('progress', None)
+        kwargs['computed'] = set([])
         project = Project(path=os.getcwd())
         logger.debug(f'Assessing component "{self.component_name}" in  {", ".join(project.countries)}')
         with Session() as ses:
             variables_data = ses.get_component(self.component_name)
-            #nvars = len(variables)
-            # if progress:
-            #     vars_word = 'variables:' if nvars > 1 else 'variable'
-            #     variables_task = progress.add_task(
-            #         description=f'[red]Going to assess  {vars_word} {", ".join(variables)}', total=nvars)
-
             for var_name in variables:
                 var_data = variables_data[var_name]
                 #create instance
@@ -172,12 +166,10 @@ class PopulationComponent(Component):
                     component=self.component_name,
                     **var_data
                 )
+
                 #assess
                 v(year=self.base_year,**kwargs)
-                # if progress and variables_task:
-                #     progress.update(variables_task, advance=1, description=f'[red]Assessed {var_name} ')
-            #if progress and variable_task: progress.remove_task(variable_task)
-
+                kwargs['computed'] |= set([var_name] + (v.dep_vars or []))
 
 
 
@@ -229,13 +221,14 @@ class PopulationVariable(Variable):
                     if progress is not None and variable_task is not None:
                         progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
             else:
-                # logger.debug(f'Computing {self.name}={self.sources} using GeoPandas')
+                logger.debug(f'Resolving {self.name}={self.sources}')
                 sources = self.resolve(**kwargs)
 
         self.evaluate(**kwargs)
+
         if progress is not None and variable_task is not None:
-            progress._tasks[variable_task].total = 1
-            progress.update(variable_task, description=f'[blue]Assessed {self.component}->{self.name}', advance=1)
+            progress._tasks[variable_task].total = 100
+            progress.update(variable_task, description=f'[green]Assessed {self.component}->{self.name}', advance=100)
 
 
     def compute(self, **kwargs):
@@ -300,12 +293,19 @@ class PopulationVariable(Variable):
         self._compute_affected_()
 
     def resolve(self,  **kwargs):
+        already_done = kwargs.get('computed', None)
+        force_compute = kwargs.get('force', False)
         with Session() as s:
             sources = dict()
             for var_name in self.dep_vars:
                 var_dict = s.get_variable(component=self.component, variable=var_name)
                 var = self.__class__(name=var_name, component=self.component, **var_dict)
+                if already_done and var_name in already_done and force_compute:
+                    logger.info(f'Skipping {var_name} because it was already computed') # this will skip download by removing  force arg
+                    force = kwargs.pop('force')
                 var_local_path = var(**kwargs) # assess
+                if already_done and var_name in already_done and force_compute:
+                    kwargs['force'] = force
                 sources[var_name] = var_local_path or var.local_path
             return sources
 

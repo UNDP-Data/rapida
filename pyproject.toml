@@ -43,7 +43,8 @@ dependencies = [
     "msal",
     "playwright",
     "pystac_client",
-    "requests-oauthlib"
+    "requests-oauthlib",
+    "fiona"
 ]
 
 [project.optional-dependencies]

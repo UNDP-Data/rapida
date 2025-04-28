@@ -1,19 +1,22 @@
-import logging
 import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+
 from concurrent.futures import ProcessPoolExecutor
 from typing import List
-
 import numpy as np
 import rasterio
 from rasterio.windows import Window
+from rapida.util.setup_logger import setup_logger
+
+logger = setup_logger('rapida')
 
 try:
     import tensorflow as tf
+    from absl import logging as absl_logging
+    absl_logging.set_verbosity(absl_logging.ERROR)
 except Exception as ie:
     tf = None
 
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 def normalize(image):
     """
@@ -71,7 +74,7 @@ def create_multi_band_image(input_files, output_file):
         for i, file in enumerate(input_files):
             with rasterio.open(file) as src:
                 raw_data[:, :, i] = src.read(1)
-    print(f"Multi-band image saved as {output_file}")
+    logger.debug(f"Multi-band image saved as {output_file}")
     return output_file
 
 def preinference_check(img_paths: List):
@@ -94,7 +97,7 @@ def preinference_check(img_paths: List):
 
 
 def process_tile(row, col, img_paths, buffer, row_size, col_size):
-    logging.info(f"Processing window at row {row}, col {col}")
+    logger.debug(f"Processing window at row {row}, col {col}")
     window_width = min(256 + buffer * 2, col_size - col)
     window_height = min(256 + buffer * 2, row_size - row)
 
@@ -107,7 +110,7 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
 
     normalized_data = normalize(raw_data)
     nhwc_image = tf.expand_dims(tf.cast(normalized_data, dtype=tf.float32), axis=0)
-    logging.info("Running model inference")
+    logger.debug("Running model inference")
     forward_model = load_model()
     lulc_logits = forward_model(nhwc_image)
     lulc_prob = tf.nn.softmax(lulc_logits)
@@ -125,17 +128,24 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
     return (row, col, original_tile)
 
 
-def predict(img_paths: List[str], output_file_path: str):
-    logging.info("Starting land use prediction")
+def predict(img_paths: List[str], output_file_path: str, progress = None):
+    predict_task = None
+    if progress:
+        predict_task = progress.add_task(f"[cyan]Starting land use prediction")
+
     col_size, row_size = preinference_check(img_paths)
     buffer = 64
 
-    logging.info("Opening first image to get metadata")
+    if predict_task is not None:
+        progress.update(predict_task, description="[cyan]Opening first image to get metadata")
+
     with rasterio.open(img_paths[0]) as src:
         crs = src.crs
         dst_transform = src.transform
 
-    logging.info(f"Creating output file: {output_file_path}")
+    if predict_task is not None:
+        progress.update(predict_task, description=f"[cyan]Creating output file: {output_file_path}")
+
     with rasterio.open(output_file_path, mode='w', driver="GTiff", dtype='uint8',
                        width=col_size, height=row_size, crs=crs, transform=dst_transform, count=1) as dst:
         tasks = []
@@ -145,12 +155,19 @@ def predict(img_paths: List[str], output_file_path: str):
                     tasks.append(
                         executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size))
 
+            if predict_task is not None:
+                progress.update(predict_task, description=f"[red]Predicting land use", total=len(tasks))
+
             for future in tasks:
                 row, col, original_tile = future.result()
-                logging.info(f"Writing prediction tile at row {row}, col {col}")
                 dst.write(original_tile.astype(np.uint8), 1,
                           window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
-    logging.info("Prediction process completed successfully")
+                if predict_task is not None:
+                    progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
+
+    if predict_task is not None:
+        progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")
+        progress.remove_task(predict_task)
     return output_file_path
 
 

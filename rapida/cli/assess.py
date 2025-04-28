@@ -9,7 +9,6 @@ from rich.console import Console
 from rapida.session import Session, is_rapida_initialized
 from rapida.project.project import Project
 from rapida.util.setup_logger import setup_logger
-from rapida.util.in_notebook import in_notebook
 
 
 logger = setup_logger()
@@ -179,10 +178,6 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
         sys.exit(0)
 
     logger.info(f'Current project/folder: {prj.path}')
-    # if in_notebook():
-    #     console = Console(force_jupyter=True)
-    # else:
-    #     console = Console()
     with Progress(disable=False, console=None) as progress:
         with Session() as session:
             all_components = session.get_components()
@@ -214,4 +209,6 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
                 component = cls()
 
                 component(progress=progress, variables=variables, target_year=year, force=force)
+
+
 

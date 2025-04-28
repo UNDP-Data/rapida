@@ -301,7 +301,7 @@ class PopulationVariable(Variable):
                 var_dict = s.get_variable(component=self.component, variable=var_name)
                 var = self.__class__(name=var_name, component=self.component, **var_dict)
                 if already_done and var_name in already_done and force_compute:
-                    logger.info(f'Skipping {var_name} because it was already computed') # this will skip download by removing  force arg
+                    logger.debug(f'Skipping {var_name} because it was already computed') # this will skip download by removing  force arg
                     force = kwargs.pop('force')
                 var_local_path = var(**kwargs) # assess
                 if already_done and var_name in already_done and force_compute:

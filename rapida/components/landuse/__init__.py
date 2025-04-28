@@ -207,7 +207,7 @@ class LanduseVariable(Variable):
                         )
 
 
-                        warped_project_mask = project.raster_mask.replace('mask', 'warped_mask')
+                        warped_project_mask = project.raster_mask.replace('mask.tif', 'warped_mask.tif')
                         temp_mask_ds = gdal.Warp(
                             destNameOrDestDS=warped_project_mask,
                             srcDSOrSrcDSTab=project.raster_mask,
@@ -239,14 +239,16 @@ class LanduseVariable(Variable):
 
     def compute(self, **kwargs):
         force = kwargs.get('force', False)
+        progress = kwargs.get('progress', None)
+
         # run the prediction only when the force or prediction image doesn't exist
         if force or not os.path.exists(self.prediction_output_image):
             predict(
                 img_paths=self.downloaded_files,
                 output_file_path=self.prediction_output_image,
+                progress=progress,
             )
 
-        progress = kwargs.get('progress', None)
         source_value = self.target_band_value
 
         calc_creation_options = {
@@ -285,6 +287,9 @@ class LanduseVariable(Variable):
 
         # Then, compute affected area for land use
         self._compute_affected_(**kwargs)
+
+        if variable_task is not None:
+            progress.remove_task(variable_task)
 
     def evaluate(self, **kwargs):
         progress: Progress = kwargs.get('progress', Progress())

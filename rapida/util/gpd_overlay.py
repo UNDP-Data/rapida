@@ -109,24 +109,31 @@ def run_overlay(
 
     input_data_chunks = []
     input_sindexes = []
+    if progress:
+        spatial_indexing_task = progress.add_task("[red]Building spatial index...", total=input_chunk_size)
+    else:
+        progress = Progress()
+        spatial_indexing_task = progress.add_task(description=f'[green]Building spatial index....', total=input_chunk_size)
     for input_chunk_index, input_data_chunk in enumerate(
         gdf_chunks(input_data_path, chunk_size=input_chunk_size, layer_name=input_layer_name)
     ):
         input_sindex = input_data_chunk.sindex
         input_data_chunks.append(input_data_chunk)
         input_sindexes.append(input_sindex)
+        if progress and spatial_indexing_task is not None:
+            progress.update(spatial_indexing_task, advance=1)
+    progress.remove_task(spatial_indexing_task)
+    logging.info('Spatial index built')
 
     polygon_chunks = list(gdf_chunks(polygons_data_path, chunk_size=default_chunk_size, layer_name=polygons_layer_name))
-
-    task_id = None
     if progress:
-        task_id = progress.add_task("[red]Processing polygons...", total=len(polygon_chunks))
+        overlay_task = progress.add_task("[red]Running overlay...", total=len(polygon_chunks))
     else:
         progress = Progress()
-        task_id = progress.add_task(description=f'[green]Running overlay....', total=len(polygon_chunks))
+        overlay_task = progress.add_task(description=f'[green]Running overlay....', total=len(polygon_chunks))
 
     for chunk_index, polygon_chunk in enumerate(polygon_chunks):
-        chunks_rows = list(dynamic_chunk_df(polygon_chunk, chunk_size=1))
+        chunks_rows = list(dynamic_chunk_df(polygon_chunk, chunk_size=10))
         for input_chunk_index, input_data_chunk in enumerate(input_data_chunks):
             input_chunk_sindex = input_sindexes[input_chunk_index]
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -153,11 +160,11 @@ def run_overlay(
         cols_to_drop = set(poly_cols).difference({'h3id'}).difference(input_columns)
         final_results.drop(columns=list(cols_to_drop), inplace=True, errors='ignore')
 
-        if progress and task_id is not None:
-            progress.update(task_id, advance=1)
+        if progress and overlay_task is not None:
+            progress.update(overlay_task, advance=1)
 
     logging.info('Overlay process completed')
-    progress.remove_task(task_id)
+    progress.remove_task(overlay_task)
     return final_results
 
 

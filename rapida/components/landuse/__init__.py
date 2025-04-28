@@ -288,6 +288,9 @@ class LanduseVariable(Variable):
         # Then, compute affected area for land use
         self._compute_affected_(**kwargs)
 
+        if variable_task is not None:
+            progress.remove_task(variable_task)
+
     def evaluate(self, **kwargs):
         progress: Progress = kwargs.get('progress', Progress())
         evaluate_task = None

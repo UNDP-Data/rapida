@@ -9,8 +9,7 @@ from rich.console import Console
 from rapida.session import Session, is_rapida_initialized
 from rapida.project.project import Project
 from rapida.util.setup_logger import setup_logger
-from rapida.util.in_notebook import in_notebook
-import shlex
+
 
 logger = setup_logger()
 
@@ -179,10 +178,6 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
         sys.exit(0)
 
     logger.info(f'Current project/folder: {prj.path}')
-    # if in_notebook():
-    #     console = Console(force_jupyter=True)
-    # else:
-    #     console = Console()
     with Progress(disable=False, console=None) as progress:
         with Session() as session:
             all_components = session.get_components()
@@ -216,27 +211,4 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, project:
                 component(progress=progress, variables=variables, target_year=year, force=force)
 
 
-
-def run_assessment( command: str = None):
-    """
-    Invoke a Click entry‐point programmatically using a shell‐style string.
-
-
-    :param command:        the exact command‐line you’d type in your shell,
-                           e.g. "-c population -f"
-    :returns:              whatever your click command returns (or None)
-    :raises:               ClickException on non‐zero exit
-    """
-    # split like a shell would (handles quoted args, etc.)
-    args = shlex.split(command)
-
-    try:
-        # call Click’s entrypoint, passing in our args list
-        return assess.main(args=args, standalone_mode=False)
-    except SystemExit as e:
-        # catch Click’s “exit” and rewrap non‐zero into a ClickException
-        if e.code != 0:
-            raise click.ClickException(
-                f"Command `{command}` exited with status {e.code}."
-            )
 

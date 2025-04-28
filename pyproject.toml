@@ -45,7 +45,7 @@ dependencies = [
     "pystac_client",
     "requests-oauthlib",
     "nest_asyncio",
-    "tensorflow-cpu"
+    "tensorflow"
 ]
 
 [project.optional-dependencies]

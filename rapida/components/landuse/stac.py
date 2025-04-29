@@ -1,10 +1,12 @@
 import asyncio
+import json
 import logging
 import os
 import re
 from glob import glob
 from collections import defaultdict
-from typing import Dict
+import concurrent.futures
+import threading
 
 from osgeo import gdal
 from datetime import datetime, date
@@ -12,12 +14,12 @@ from rich.progress import Progress
 import pystac_client
 import rasterio
 from rasterio.warp import reproject, Resampling, calculate_default_transform
-from rasterio.enums import Resampling as ResampleEnum
 from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
 from rapida.util import geo
-from rapida.util.chunker import chunker
+import time
+
 
 logger = logging.getLogger('rapida')
 
@@ -105,7 +107,11 @@ async def download_from_https_async(
         no_data_value: int = 0,
         progress=None,
 ) -> str:
-    logging.debug("Starting download: %s", file_url)
+    download_task = None
+    if progress is not None:
+        download_task = progress.add_task(
+            description=f'[blue] Downloading {file_url}', total=None)
+
     extension = os.path.splitext(file_url)[1]
     download_file = f"{target}.tif"
 
@@ -113,81 +119,84 @@ async def download_from_https_async(
         return download_file
 
     tmp_file = f"{target}{extension}.tmp"
-    pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
-    match = re.search(pattern, file_url)
-    if match:
-        year, month, day = map(int, match.groups())
-        acquisition_date = datetime(year, month, day)
-        logging.debug("Extracted acquisition date: %s", acquisition_date)
-    else:
-        logging.error("Failed to extract date from file_url: %s", file_url)
-        raise ValueError(f"Could not extract date from URL: {file_url}")
 
-    cutoff = datetime(2022, 1, 25)
-    download_task = None
-    if progress is not None:
-        download_task = progress.add_task(
-            description=f'[blue] Downloading {file_url}', total=None)
+    try:
+        pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
+        match = re.search(pattern, file_url)
+        if match:
+            year, month, day = map(int, match.groups())
+            acquisition_date = datetime(year, month, day)
+            logging.debug("Extracted acquisition date: %s", acquisition_date)
+        else:
+            logging.error("Failed to extract date from file_url: %s", file_url)
+            raise ValueError(f"Could not extract date from URL: {file_url}")
 
-    async with httpx.AsyncClient() as client:
-        async with client.stream("GET", file_url) as response:
-            response.raise_for_status()
-            total = int(response.headers.get("content-length", 0))
+        cutoff = datetime(2022, 1, 25)
 
-            if progress is not None and download_task is not None:
-                progress.update(download_task, total=total)
+        async with httpx.AsyncClient() as client:
+            async with client.stream("GET", file_url) as response:
+                response.raise_for_status()
+                total = int(response.headers.get("content-length", 0))
 
-            with open(tmp_file, "wb") as f:
-                async for chunk in response.aiter_bytes(chunk_size=8192):
-                    f.write(chunk)
-                    if progress is not None and download_task is not None:
-                        progress.update(download_task, advance=len(chunk))
+                if progress is not None and download_task is not None:
+                    progress.update(download_task, total=total)
 
-    if progress and download_task:
-        progress.remove_task(download_task)
+                with open(tmp_file, "wb") as f:
+                    async for chunk in response.aiter_bytes(chunk_size=8192):
+                        f.write(chunk)
+                        if progress is not None and download_task is not None:
+                            progress.update(download_task, advance=len(chunk))
 
-    logging.debug("Downloaded %s to %s", file_url, target)
 
-    with rasterio.open(tmp_file) as src:
-        data = src.read()
-        dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
+        if progress and download_task:
+            progress.update(download_task, description=f"[blue] Reprojecting...")
 
-        if acquisition_date >= cutoff:
-            data = harmonize_to_old(data)  # Ensure harmonize_to_old is defined
+        with rasterio.open(tmp_file) as src:
+            data = src.read()
+            dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
 
-        transform, width, height = calculate_default_transform(
-            src.crs, dst_crs, src.width, src.height, *src.bounds
-        )
+            if acquisition_date >= cutoff:
+                data = harmonize_to_old(data)  # Ensure harmonize_to_old is defined
 
-        profile = src.profile.copy()
-        nodata = profile.get("nodata", no_data_value)
-        profile.update({
-            "crs": dst_crs,
-            "transform": transform,
-            "width": width,
-            "height": height,
-            "driver": "GTiff",
-            "compress": "ZSTD",
-            "tiled": True,
-            "nodata": nodata,
-        })
+            transform, width, height = calculate_default_transform(
+                src.crs, dst_crs, src.width, src.height, *src.bounds
+            )
 
-        with rasterio.open(download_file, "w", **profile) as dst:
-            for i in range(1, src.count + 1):
-                reproject(
-                    source=data[i - 1],
-                    destination=rasterio.band(dst, i),
-                    src_transform=src.transform,
-                    src_crs=src.crs,
-                    dst_transform=transform,
-                    dst_crs=dst_crs,
-                    resampling=Resampling.nearest,
-                    src_nodata=nodata,
-                    dst_nodata=nodata,
-                )
+            profile = src.profile.copy()
+            nodata = profile.get("nodata", no_data_value)
+            profile.update({
+                "crs": dst_crs,
+                "transform": transform,
+                "width": width,
+                "height": height,
+                "driver": "GTiff",
+                "compress": "ZSTD",
+                "tiled": True,
+                "nodata": nodata,
+            })
 
-    os.remove(tmp_file)
-    logging.debug("Downloaded file saved to %s", download_file)
+            with rasterio.open(download_file, "w", **profile) as dst:
+                for i in range(1, src.count + 1):
+                    reproject(
+                        source=data[i - 1],
+                        destination=rasterio.band(dst, i),
+                        src_transform=src.transform,
+                        src_crs=src.crs,
+                        dst_transform=transform,
+                        dst_crs=dst_crs,
+                        resampling=Resampling.nearest,
+                        src_nodata=nodata,
+                        dst_nodata=nodata,
+                    )
+
+
+    finally:
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
+        if progress and download_task:
+            progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
+            progress.remove_task(download_task)
+
     return download_file
 
 
@@ -313,6 +322,76 @@ def crop_asset_files(base_dir,
     return output_files
 
 
+def search_stac_items(stac_client,
+                      collection_id: str,
+                      df_polygon: gpd.GeoDataFrame,
+                      datetime_range: str,
+                      target_assets: dict[str, str],
+                      max_workers: int = 5,
+                      progress: Progress = None,
+                      ):
+    """
+    Search stac items for covering project geodataframe area
+
+    :param stac_client: stac client
+    :param collection_id: collection id
+    :param df_polygon: Polygon dataframe for searching
+    :param target_assets: target assets
+    :param max_workers: maximum number of workers
+    :param progress: rich progress object
+    """
+
+    search_task = None
+    if progress:
+        search_task = progress.add_task(f"[green]Searching STAC Items", total=len(df_polygon))
+
+    latest_per_tile = {}
+    lock = threading.Lock()
+
+    def search_single_polygon(idx, single_geom):
+        nonlocal latest_per_tile
+
+        fc_geojson_str = gpd.GeoDataFrame(geometry=[single_geom], crs=df_polygon.crs).to_json()
+        fc_geojson = json.loads(fc_geojson_str)
+        first_feature = fc_geojson["features"][0]
+
+        search = stac_client.search(
+            collections=[collection_id],
+            intersects=first_feature,
+            query={"eo:cloud_cover": {"lt": 5}},
+            datetime=datetime_range,
+        )
+        items = list(search.items())
+
+        with lock:
+            for item in items:
+                tile_id = item.properties.get("grid:code")
+                if tile_id is None:
+                    continue
+
+                if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
+                    if all(asset in item.assets for asset in target_assets):
+                        latest_per_tile[tile_id] = item
+
+        if progress and search_task:
+            progress.update(search_task, advance=1)
+
+    # simplify polygons with tolerance 0.01 (approximate 1km in equator)
+    work_df = df_polygon.copy()
+    work_df["geometry"] = work_df["geometry"].simplify(tolerance=0.01, preserve_topology=True)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(search_single_polygon, idx, row.geometry)
+            for idx, row in work_df.iterrows()
+        ]
+        concurrent.futures.wait(futures)
+
+    if progress and search_task:
+        progress.remove_task(search_task)
+
+    return latest_per_tile
+
 async def download_stac(
     stac_url: str,
     collection_id: str,
@@ -323,6 +402,7 @@ async def download_stac(
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
+    max_workers: int = 5,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -338,6 +418,7 @@ async def download_stac(
     :param progress: rich progress object
     :return the list of output files
     """
+    t1 = time.time()
 
     stac_task = None
     if progress:
@@ -353,26 +434,13 @@ async def download_stac(
         progress.update(stac_task, description="[yellow]Searching for STAC items...")
 
     datetime = create_date_range(target_year)
-    search = client.search(
-        collections=[collection_id],
-        bbox=bbox,
-        query={"eo:cloud_cover": {"lt": 5}},
-        datetime=datetime,
-    )
 
-    items = list(search.items())
-    if progress and stac_task:
-        progress.update(stac_task, description=f"[green]Found {len(items)} items.")
-
-    latest_per_tile = {}
-    for item in items:
-        tile_id = item.properties.get("grid:code")
-        if tile_id is None:
-            continue
-
-        if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
-            if all(asset in item.assets for asset in target_assets):
-                latest_per_tile[tile_id] = item
+    latest_per_tile = search_stac_items(stac_client=client,
+                      collection_id=collection_id,
+                      df_polygon=df_polygon,
+                      datetime_range=datetime,
+                      target_assets=target_assets,
+                      progress=progress,)
 
     asset_urls = []
     for item in latest_per_tile.values():
@@ -391,48 +459,70 @@ async def download_stac(
     if progress and stac_task:
         progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
 
+    t2 = time.time()
+    logger.debug(f"STAC Item search: {t2 - t1} seconds")
+
     asset_nodata = {}
-    for chunk in chunker(asset_urls, 5):
-        download_tasks = {}
-        for url, asset_key, tile_id, nodata in chunk:
-            url = s3_to_http(url)
-            band_name = target_assets[asset_key]
-            asset_nodata[band_name] = nodata
-            download_dir = os.path.join(output_dir, tile_id)
-            os.makedirs(download_dir, exist_ok=True)
 
-            task = asyncio.create_task(
-                download_from_https_async(
-                    file_url=url,
-                    target=os.path.join(download_dir, band_name),
-                    target_srs=target_srs,
-                    progress=progress,
-                    no_data_value=nodata,
-                ),
-                name=f"{tile_id}:{band_name}",
-            )
-            download_tasks[band_name] = task
+    semaphore = asyncio.Semaphore(max_workers)
 
-        done, pending = await asyncio.wait(download_tasks.values(), return_when=asyncio.ALL_COMPLETED)
+    async def download_asset(url, asset_key, tile_id, nodata, semaphore):
+        url = s3_to_http(url)
+        band_name = target_assets[asset_key]
+        asset_nodata[band_name] = nodata
 
-        for task in done:
-            try:
-                band_name = task.get_name()
-                result = await task
-                if progress and stac_task:
-                    progress.update(stac_task, description=f"[green]Saved {band_name}", advance=1)
-                logging.debug(f"Downloaded {band_name} to {result}")
-            except Exception as e:
-                band_name = task.get_name()
-                logging.error(f"Failed to download {band_name}: {e}")
+        download_dir = os.path.join(output_dir, tile_id)
+        os.makedirs(download_dir, exist_ok=True)
 
-        for task in pending:
-            band_name = task.get_name()
+        target_path = os.path.join(download_dir, band_name)
+
+        async with semaphore:
+            # retry max 3 times if any connection error occurs
+            max_retries = 3
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = await download_from_https_async(
+                        file_url=url,
+                        target=target_path,
+                        target_srs=target_srs,
+                        progress=progress,
+                        no_data_value=nodata,
+                    )
+                    if progress and stac_task:
+                        progress.update(stac_task, description=f"[green]Saved {tile_id}:{band_name}", advance=1)
+                    logger.debug(f"Downloaded {band_name} to {result}")
+                    break
+                except asyncio.CancelledError:
+                    logger.error(f"Download cancelled for {tile_id}:{band_name}")
+                    raise
+                except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
+                    logger.warning(f"Timeout on attempt {attempt} for {tile_id}:{band_name}: {e}")
+                    if attempt < max_retries:
+                        await asyncio.sleep(5)
+                    else:
+                        logger.error(f"Failed after {max_retries} attempts: {tile_id}:{band_name}")
+                except Exception as e:
+                    logger.error(f"Download failed for {tile_id}:{band_name}: {e}")
+                    break
+
+    tasks = [
+        asyncio.create_task(download_asset(url, asset_key, tile_id, nodata, semaphore), name=f"{tile_id}:{target_assets[asset_key]}")
+        for url, asset_key, tile_id, nodata in asset_urls
+    ]
+
+    try:
+        await asyncio.gather(*tasks)
+    except KeyboardInterrupt:
+        logging.warning("Download interrupted by user. Cancelling tasks...")
+
+        for task in tasks:
             task.cancel()
-            try:
-                await task
-            except asyncio.CancelledError:
-                logging.warning(f"Cancelled download for {band_name}")
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+    t3 = time.time()
+    logger.debug(f"STAC Item download: {t3 - t2} seconds")
 
     if progress and stac_task:
         progress.update(stac_task, description="[magenta]Cropping downloaded assets...")
@@ -449,5 +539,8 @@ async def download_stac(
     if progress and stac_task:
         progress.update(stac_task, description="[bold green]Download and crop complete!")
         progress.remove_task(stac_task)
+
+    t4 = time.time()
+    logger.debug(f"Download completed: {t4 - t1} seconds")
 
     return output_files

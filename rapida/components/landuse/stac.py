@@ -1,10 +1,13 @@
 import asyncio
+import json
 import logging
 import os
 import re
 from glob import glob
 from collections import defaultdict
 from typing import Dict
+import concurrent.futures
+import threading
 
 from osgeo import gdal
 from datetime import datetime, date
@@ -105,7 +108,6 @@ async def download_from_https_async(
         no_data_value: int = 0,
         progress=None,
 ) -> str:
-    logging.debug("Starting download: %s", file_url)
     extension = os.path.splitext(file_url)[1]
     download_file = f"{target}.tif"
 
@@ -143,10 +145,9 @@ async def download_from_https_async(
                     if progress is not None and download_task is not None:
                         progress.update(download_task, advance=len(chunk))
 
-    if progress and download_task:
-        progress.remove_task(download_task)
 
-    logging.debug("Downloaded %s to %s", file_url, target)
+    if progress and download_task:
+        progress.update(download_task, description=f"[blue] Reprojecting...")
 
     with rasterio.open(tmp_file) as src:
         data = src.read()
@@ -187,7 +188,10 @@ async def download_from_https_async(
                 )
 
     os.remove(tmp_file)
-    logging.debug("Downloaded file saved to %s", download_file)
+    if progress and download_task:
+        progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
+        progress.remove_task(download_task)
+
     return download_file
 
 
@@ -313,6 +317,74 @@ def crop_asset_files(base_dir,
     return output_files
 
 
+def search_stac_items(stac_client,
+                      collection_id: str,
+                      df_polygon: gpd.GeoDataFrame,
+                      datetime_range: str,
+                      target_assets: dict[str, str],
+                      max_workers: int = 5,
+                      progress: Progress = None,
+                      ):
+    """
+    Search stac items for covering project geodataframe area
+
+    :param stac_client: stac client
+    :param collection_id: collection id
+    :param df_polygon: Polygon dataframe for searching
+    :param target_assets: target assets
+    :param max_workers: maximum number of workers
+    :param progress: rich progress object
+    """
+
+    search_task = None
+    if progress:
+        search_task = progress.add_task(f"[green]Searching STAC Items", total=len(df_polygon))
+
+    latest_per_tile = {}
+    lock = threading.Lock()
+
+    def search_single_polygon(idx, single_geom):
+        nonlocal latest_per_tile
+
+        # PolygonをGeoJSONに変換
+        fc_geojson_str = gpd.GeoDataFrame(geometry=[single_geom], crs=df_polygon.crs).to_json()
+        fc_geojson = json.loads(fc_geojson_str)
+        first_feature = fc_geojson["features"][0]
+
+        # STAC検索
+        search = stac_client.search(
+            collections=[collection_id],
+            intersects=first_feature,
+            query={"eo:cloud_cover": {"lt": 5}},
+            datetime=datetime_range,
+        )
+        items = list(search.items())
+
+        with lock:
+            for item in items:
+                tile_id = item.properties.get("grid:code")
+                if tile_id is None:
+                    continue
+
+                if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
+                    if all(asset in item.assets for asset in target_assets):
+                        latest_per_tile[tile_id] = item
+
+        if progress and search_task:
+            progress.update(search_task, advance=1)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(search_single_polygon, idx, row.geometry)
+            for idx, row in df_polygon.iterrows()
+        ]
+        concurrent.futures.wait(futures)
+
+    if progress and search_task:
+        progress.remove_task(search_task)
+
+    return latest_per_tile
+
 async def download_stac(
     stac_url: str,
     collection_id: str,
@@ -353,26 +425,13 @@ async def download_stac(
         progress.update(stac_task, description="[yellow]Searching for STAC items...")
 
     datetime = create_date_range(target_year)
-    search = client.search(
-        collections=[collection_id],
-        bbox=bbox,
-        query={"eo:cloud_cover": {"lt": 5}},
-        datetime=datetime,
-    )
 
-    items = list(search.items())
-    if progress and stac_task:
-        progress.update(stac_task, description=f"[green]Found {len(items)} items.")
-
-    latest_per_tile = {}
-    for item in items:
-        tile_id = item.properties.get("grid:code")
-        if tile_id is None:
-            continue
-
-        if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
-            if all(asset in item.assets for asset in target_assets):
-                latest_per_tile[tile_id] = item
+    latest_per_tile = search_stac_items(stac_client=client,
+                      collection_id=collection_id,
+                      df_polygon=df_polygon,
+                      datetime_range=datetime,
+                      target_assets=target_assets,
+                      progress=progress,)
 
     asset_urls = []
     for item in latest_per_tile.values():

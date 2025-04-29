@@ -351,12 +351,10 @@ def search_stac_items(stac_client,
     def search_single_polygon(idx, single_geom):
         nonlocal latest_per_tile
 
-        # PolygonをGeoJSONに変換
         fc_geojson_str = gpd.GeoDataFrame(geometry=[single_geom], crs=df_polygon.crs).to_json()
         fc_geojson = json.loads(fc_geojson_str)
         first_feature = fc_geojson["features"][0]
 
-        # STAC検索
         search = stac_client.search(
             collections=[collection_id],
             intersects=first_feature,

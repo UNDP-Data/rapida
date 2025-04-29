@@ -112,14 +112,15 @@ async def download_from_https_async(
         download_task = progress.add_task(
             description=f'[blue] Downloading {file_url}', total=None)
 
+    extension = os.path.splitext(file_url)[1]
+    download_file = f"{target}.tif"
+
+    if os.path.exists(download_file):
+        return download_file
+
+    tmp_file = f"{target}{extension}.tmp"
+
     try:
-        extension = os.path.splitext(file_url)[1]
-        download_file = f"{target}.tif"
-
-        if os.path.exists(download_file):
-            return download_file
-
-        tmp_file = f"{target}{extension}"
         pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
         match = re.search(pattern, file_url)
         if match:
@@ -188,9 +189,10 @@ async def download_from_https_async(
                         dst_nodata=nodata,
                     )
 
-    # os.remove(tmp_file)
 
     finally:
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
         if progress and download_task:
             progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
             progress.remove_task(download_task)

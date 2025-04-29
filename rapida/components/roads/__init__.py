@@ -6,6 +6,7 @@ from rapida import constants
 from rapida.core.component import Component
 from rapida.core.variable import Variable
 from rapida.session import Session
+from rapida.util.fiona_chunks import gdf_chunks, gdf_columns
 from rapida.util.gpd_overlay import run_overlay
 from rapida.util.resolve_url import resolve_geohub_url
 from rapida.util.download_geodata import download_vector
@@ -177,13 +178,15 @@ class RoadsVariable(Variable):
                 )
                 lyr.SetAttributeFilter(None)
                 lyr.ResetReading()
-                df_polygon = gpd.read_file(self.local_path, layer=project.polygons_layer_name, engine="pyogrio")
-                road_lines = gpd.read_file(self.local_path, layer=self.component, engine="pyogrio")
-                poly_cols = df_polygon.columns.tolist()
-                cols_to_drop = set(poly_cols).difference(['h3id']).difference(road_lines.columns.tolist())
-                road_lines = run_overlay(polygons_dataframe=df_polygon, overlay_dataframe=road_lines, progress=progress)
 
-                road_lines.drop(columns=list(cols_to_drop), inplace=True)
+                road_lines = run_overlay(
+                    polygons_data_path=self.local_path,
+                    polygons_layer_name=project.polygons_layer_name,
+                    input_data_path=self.local_path,
+                    input_layer_name=self.component,
+                    progress=progress
+                )
+
                 road_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
                 road_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
 

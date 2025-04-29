@@ -44,6 +44,7 @@ dependencies = [
     "playwright",
     "pystac_client",
     "requests-oauthlib",
+    "fiona",
     "nest_asyncio",
     "tensorflow"
 ]

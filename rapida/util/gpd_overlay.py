@@ -7,6 +7,8 @@ import pandas as pd
 import geopandas as gpd
 from rich.progress import Progress
 
+from rapida.util.fiona_chunks import gdf_chunks, gdf_columns
+
 
 def dynamic_chunk_df(gdf, chunk_size):
     """
@@ -70,46 +72,99 @@ def process_chunk(chunk_rows, overlay_df, overlay_df_sindex, crs):
 
     return pd.DataFrame(columns=overlay_df.columns)
 
+def chunk_gdf_by_size(gdf, chunk_size):
+    """
+    Split GeoDataFrame into chunks of specified size.
+    :param gdf: GeoDataFrame to be chunked
+    :param chunk_size: Number of rows per chunk
+    :yield: GeoDataFrame chunks
+    """
+    for start in range(0, len(gdf), chunk_size):
+        yield gdf.iloc[start:start + chunk_size]
 
-def run_overlay(polygons_dataframe=None, overlay_dataframe=None, default_chunk_size=2, **kwargs):
-    """
-    Run overlay function
-    :param polygons_dataframe: The polygon geometries dataframe
-    :param overlay_dataframe: The overlay dataframe
-    :param default_chunk_size: The default chunk size
-    :param kwargs:
-    :return:
-    """
-    progress = kwargs.get('progress')
-    max_workers = 4
+
+
+def run_overlay(
+    polygons_data_path=None,
+    polygons_layer_name=None,
+    input_data_path=None,
+    input_layer_name=None,
+    default_chunk_size=10,
+    input_chunk_size=50000,
+    **kwargs
+):
+    logging.info("Starting overlay process")
+
+    if polygons_data_path is None or polygons_layer_name is None:
+        raise ValueError("polygons_data_path and polygons_layer_name must be provided")
+    if input_data_path is None or input_layer_name is None:
+        raise ValueError("input_data_path and input_layer_name must be provided")
+
+    sample_input_chunk = next(gdf_chunks(input_data_path, chunk_size=1, layer_name=input_layer_name))
+    input_columns = sample_input_chunk.columns.tolist()
+
     final_results = gpd.GeoDataFrame()
-    overlay_df_sindex = overlay_dataframe.sindex
-    chunks = list(dynamic_chunk_df(polygons_dataframe, chunk_size=default_chunk_size))
+    max_workers = kwargs.get('max_workers', 4)
+    progress = kwargs.get('progress')
 
+    input_data_chunks = []
+    input_sindexes = []
     if progress:
-        overlay_task = progress.add_task(description=f'[red]Running overlay for {len(chunks)} chunks', total=len(chunks))
+        spatial_indexing_task = progress.add_task("[red]Building spatial index...", total=input_chunk_size)
     else:
         progress = Progress()
-        overlay_task = progress.add_task(description=f'[green]Running overlay for {len(chunks)} chunks', total=len(chunks))
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(process_chunk, chunk, overlay_dataframe, overlay_df_sindex, polygons_dataframe.crs)
-            for chunk in chunks
-        ]
-        for future in as_completed(futures):
-            try:
-                result = future.result()
-                if not result.empty:
-                    result_gdf = gpd.GeoDataFrame(result, geometry='geometry', crs=polygons_dataframe.crs)
-                    final_results = pd.concat([final_results, result_gdf], ignore_index=True)
-                    progress.update(overlay_task, advance=1)
-            except Exception as e:
-                logging.error(f"Error processing chunk: {e}")
-    if len(final_results) > 0:
-        if progress and overlay_task:
-            progress.remove_task(overlay_task)
-        logging.info("run_overlay complete")
-        return final_results
+        spatial_indexing_task = progress.add_task(description=f'[green]Building spatial index....', total=input_chunk_size)
+    for input_chunk_index, input_data_chunk in enumerate(
+        gdf_chunks(input_data_path, chunk_size=input_chunk_size, layer_name=input_layer_name)
+    ):
+        input_sindex = input_data_chunk.sindex
+        input_data_chunks.append(input_data_chunk)
+        input_sindexes.append(input_sindex)
+        if progress and spatial_indexing_task is not None:
+            progress.update(spatial_indexing_task, advance=1)
+    progress.remove_task(spatial_indexing_task)
+    logging.info('Spatial index built')
+
+    polygon_chunks = list(gdf_chunks(polygons_data_path, chunk_size=default_chunk_size, layer_name=polygons_layer_name))
+    if progress:
+        overlay_task = progress.add_task("[red]Running overlay...", total=len(polygon_chunks))
     else:
-        logging.warning("No intersecting rows from overlay_df found for any polygons.")
+        progress = Progress()
+        overlay_task = progress.add_task(description=f'[green]Running overlay....', total=len(polygon_chunks))
+
+    for chunk_index, polygon_chunk in enumerate(polygon_chunks):
+        chunks_rows = list(dynamic_chunk_df(polygon_chunk, chunk_size=10))
+        for input_chunk_index, input_data_chunk in enumerate(input_data_chunks):
+            input_chunk_sindex = input_sindexes[input_chunk_index]
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = []
+                for row_index, chunk_row in enumerate(chunks_rows):
+                    futures.append(
+                        executor.submit(
+                            process_chunk,
+                            chunk_row,
+                            input_data_chunk,
+                            input_chunk_sindex,
+                            polygon_chunk.crs
+                        )
+                    )
+
+                for future in as_completed(futures):
+                    result = future.result()
+                    if not result.empty:
+                        result_gdf = gpd.GeoDataFrame(result, geometry='geometry', crs=polygon_chunk.crs)
+                        final_results = pd.concat([final_results, result_gdf], ignore_index=True)
+
+        # Drop unnecessary columns
+        poly_cols = gdf_columns(file_path=polygons_data_path, layer_name=polygons_layer_name)
+        cols_to_drop = set(poly_cols).difference({'h3id'}).difference(input_columns)
+        final_results.drop(columns=list(cols_to_drop), inplace=True, errors='ignore')
+
+        if progress and overlay_task is not None:
+            progress.update(overlay_task, advance=1)
+
+    logging.info('Overlay process completed')
+    progress.remove_task(overlay_task)
+    return final_results
+
 

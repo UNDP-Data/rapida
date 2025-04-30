@@ -116,6 +116,8 @@ async def download_from_https_async(
     download_file = f"{target}.tif"
 
     if os.path.exists(download_file):
+        if progress and download_task:
+            progress.remove_task(download_task)
         return download_file
 
     tmp_file = f"{target}{extension}.tmp"
@@ -255,7 +257,7 @@ def crop_asset_files(base_dir,
 
     for jp2_path in glob(os.path.join(base_dir, "**", "B??.tif"), recursive=True):
         filename = os.path.basename(jp2_path)
-        band_name = os.path.splitext(filename)[0]  # "B02" 部分だけ取る
+        band_name = os.path.splitext(filename)[0]
         band_files[band_name].append(jp2_path)
 
     # get highest resolution from all bands

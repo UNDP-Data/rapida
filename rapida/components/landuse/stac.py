@@ -116,6 +116,8 @@ async def download_from_https_async(
     download_file = f"{target}.tif"
 
     if os.path.exists(download_file):
+        if progress and download_task:
+            progress.remove_task(download_task)
         return download_file
 
     tmp_file = f"{target}{extension}.tmp"

@@ -24,11 +24,6 @@ import time
 logger = logging.getLogger('rapida')
 
 
-STAC_MAP = {
-    'earth-search': 'https://earth-search.aws.element84.com/v1'
-}
-
-
 def interpolate_stac_source(source: str) -> dict[str, str]:
     """
     Interpolate stac source. Source of stac should be defined like below:
@@ -105,6 +100,8 @@ async def download_from_https_async(
         target: str,
         target_srs: str,
         no_data_value: int = 0,
+        item_datetime: str = None,
+        cloud_cover: float = None,
         progress=None,
 ) -> str:
     download_task = None
@@ -115,10 +112,23 @@ async def download_from_https_async(
     extension = os.path.splitext(file_url)[1]
     download_file = f"{target}.tif"
 
+    # fetch content-length from remote file header
+    async with httpx.AsyncClient() as client:
+        head_resp = await client.head(file_url)
+        head_resp.raise_for_status()
+        remote_content_length = head_resp.headers.get("content-length")
+        if remote_content_length is None:
+            raise ValueError("No content-length in response headers")
+        remote_content_length = int(remote_content_length)
+
     if os.path.exists(download_file):
-        if progress and download_task:
-            progress.remove_task(download_task)
-        return download_file
+        with rasterio.open(download_file) as src:
+            meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
+            if meta_content_length and int(meta_content_length) == remote_content_length:
+                logging.debug(f"file already exists. Skipped: {download_file}")
+                if progress and download_task:
+                    progress.remove_task(download_task)
+                return download_file
 
     tmp_file = f"{target}{extension}.tmp"
 
@@ -178,6 +188,11 @@ async def download_from_https_async(
             })
 
             with rasterio.open(download_file, "w", **profile) as dst:
+                dst.update_tags(JP2_CONTENT_LENGTH=str(remote_content_length))
+                if item_datetime:
+                    dst.update_tags(ITEM_DATETIME=item_datetime)
+                if cloud_cover:
+                    dst.update_tags(CLOUD_COVER=cloud_cover)
                 for i in range(1, src.count + 1):
                     reproject(
                         source=data[i - 1],
@@ -371,8 +386,26 @@ def search_stac_items(stac_client,
                 if tile_id is None:
                     continue
 
-                if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
-                    if all(asset in item.assets for asset in target_assets):
+                cloud_cover = item.properties.get("eo:cloud_cover")
+                if cloud_cover is None:
+                    continue
+
+                # if item does not have all required assets, skip it.
+                if not all(asset in item.assets for asset in target_assets):
+                    continue
+
+                existing = latest_per_tile.get(tile_id)
+                if existing is None:
+                    latest_per_tile[tile_id] = item
+                else:
+                    existing_cloud = existing.properties.get("eo:cloud_cover")
+                    if existing_cloud is None:
+                        latest_per_tile[tile_id] = item
+                    elif cloud_cover < existing_cloud:
+                        # Update item if cloud cover is lower even it is older item
+                        latest_per_tile[tile_id] = item
+                    elif item.datetime > existing.datetime:
+                        # Otherwise, newer image is used
                         latest_per_tile[tile_id] = item
 
         if progress and search_task:
@@ -447,13 +480,15 @@ async def download_stac(
     asset_urls = []
     for item in latest_per_tile.values():
         tile_id = item.properties["grid:code"]
+        item_datetime = item.datetime
+        cloud_cover = item.properties.get("eo:cloud_cover")
         assets = item.get_assets()
         for key, asset in item.assets.items():
             if key in target_assets:
                 asset_meta = assets[key].to_dict()
                 band_meta = asset_meta['raster:bands'][0]
                 no_data = band_meta['nodata']
-                asset_urls.append((asset.href, key, tile_id, no_data))
+                asset_urls.append((asset.href, key, tile_id, no_data, item_datetime, cloud_cover))
 
     if not asset_urls:
         raise RuntimeError(f"No assets found in {stac_url} for target area")
@@ -468,7 +503,7 @@ async def download_stac(
 
     semaphore = asyncio.Semaphore(max_workers)
 
-    async def download_asset(url, asset_key, tile_id, nodata, semaphore):
+    async def download_asset(url, asset_key, tile_id, nodata, datetime,cloud_cover, semaphore):
         url = s3_to_http(url)
         band_name = target_assets[asset_key]
         asset_nodata[band_name] = nodata
@@ -479,8 +514,8 @@ async def download_stac(
         target_path = os.path.join(download_dir, band_name)
 
         async with semaphore:
-            # retry max 3 times if any connection error occurs
-            max_retries = 3
+            # retry max 5 times if any connection error occurs
+            max_retries = 5
             for attempt in range(1, max_retries + 1):
                 try:
                     result = await download_from_https_async(
@@ -489,6 +524,8 @@ async def download_stac(
                         target_srs=target_srs,
                         progress=progress,
                         no_data_value=nodata,
+                        item_datetime=datetime,
+                        cloud_cover=cloud_cover,
                     )
                     if progress and stac_task:
                         progress.update(stac_task, description=f"[green]Saved {tile_id}:{band_name}", advance=1)
@@ -508,8 +545,8 @@ async def download_stac(
                     break
 
     tasks = [
-        asyncio.create_task(download_asset(url, asset_key, tile_id, nodata, semaphore), name=f"{tile_id}:{target_assets[asset_key]}")
-        for url, asset_key, tile_id, nodata in asset_urls
+        asyncio.create_task(download_asset(url, asset_key, tile_id, nodata, asset_datetime, cloud_cover, semaphore), name=f"{tile_id}:{target_assets[asset_key]}")
+        for url, asset_key, tile_id, nodata, asset_datetime, cloud_cover in asset_urls
     ]
 
     try:

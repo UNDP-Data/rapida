@@ -8,7 +8,6 @@ from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
 
-from rapida import constants
 from rapida.components.landuse.stac import interpolate_stac_source, download_stac
 from rapida.components.landuse.prediction import predict
 from rapida.components.landuse.constants import STAC_MAP
@@ -202,7 +201,7 @@ class LanduseVariable(Variable):
                             format='GTiff',
                             xRes=x_res,
                             yRes=y_res,
-                            creationOptions=constants.GTIFF_CREATION_OPTIONS,
+                            creationOptions=GTIFF_CREATION_OPTIONS,
                             outputBounds=(geotransform[0], geotransform[3] + ds.RasterYSize * geotransform[5],
                                           geotransform[0] + ds.RasterXSize * geotransform[1], geotransform[3]),
                         )

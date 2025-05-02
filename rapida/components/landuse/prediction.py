@@ -1,4 +1,7 @@
 import os
+
+from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from concurrent.futures import ProcessPoolExecutor
@@ -128,6 +131,11 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
     return (row, col, original_tile)
 
 
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
 def predict(img_paths: List[str], output_file_path: str, progress = None):
     predict_task = None
     if progress:
@@ -164,6 +172,10 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
                           window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
                 if predict_task is not None:
                     progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
+
+        # write colormap
+        landuse_colormap = {k: hex_to_rgb(v) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
+        dst.write_colormap(1, landuse_colormap)
 
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")

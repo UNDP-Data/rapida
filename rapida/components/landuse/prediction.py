@@ -1,4 +1,6 @@
 import os
+import json
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from concurrent.futures import ProcessPoolExecutor
@@ -6,6 +8,7 @@ from typing import List
 import numpy as np
 import rasterio
 from rasterio.windows import Window
+from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
 from rapida.util.setup_logger import setup_logger
 
 logger = setup_logger('rapida')
@@ -128,6 +131,11 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
     return (row, col, original_tile)
 
 
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+
+
 def predict(img_paths: List[str], output_file_path: str, progress = None):
     predict_task = None
     if progress:
@@ -164,6 +172,17 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
                           window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
                 if predict_task is not None:
                     progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
+
+        # write colormap
+        landuse_colormap = {k: hex_to_rgb(v['color']) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
+        dst.write_colormap(1, landuse_colormap)
+
+        # write STATISTICS_UNIQUE_VALUES for GeoHub
+        statistics_unique_values = {
+            str(k): v['label'] for k, v in DYNAMIC_WORLD_COLORMAP.items()
+        }
+        unique_values_json = json.dumps(statistics_unique_values, ensure_ascii=False)
+        dst.update_tags(1, STATISTICS_UNIQUE_VALUES=unique_values_json)
 
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")

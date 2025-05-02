@@ -24,7 +24,7 @@ logger = logging.getLogger('rapida')
 
 
 class LanduseComponent(Component):
-    def __call__(self, variables: List[str], target_year: int=None, **kwargs):
+    def __call__(self, variables: List[str], target_year: int=None, target_month: int=None, **kwargs):
         if not variables:
             variables = self.variables
         else:
@@ -43,6 +43,7 @@ class LanduseComponent(Component):
                     name=var_name,
                     component=self.component_name,
                     target_year=target_year,
+                    target_month=target_month,
                     **var_data
                 )
                 v(**kwargs)
@@ -165,6 +166,7 @@ class LanduseVariable(Variable):
                           polygons_layer_name=project.polygons_layer_name,
                           output_dir=output_dir,
                           target_year=self.target_year,
+                          target_month=self.target_month,
                           target_assets=self.target_asset,
                           target_srs=project.target_srs,
                           progress=progress))

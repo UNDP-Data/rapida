@@ -24,11 +24,6 @@ import time
 logger = logging.getLogger('rapida')
 
 
-STAC_MAP = {
-    'earth-search': 'https://earth-search.aws.element84.com/v1'
-}
-
-
 def interpolate_stac_source(source: str) -> dict[str, str]:
     """
     Interpolate stac source. Source of stac should be defined like below:

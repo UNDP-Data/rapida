@@ -9,3 +9,7 @@ DYNAMIC_WORLD_COLORMAP = {
     7: {'color': '#a59b8f', 'label': 'bare'},
     8: {'color': '#b39fe1', 'label': 'snow_and_ice'},
 }
+
+STAC_MAP = {
+    'earth-search': 'https://earth-search.aws.element84.com/v1'
+}

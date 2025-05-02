@@ -9,8 +9,9 @@ from rich.progress import Progress
 import geopandas as gpd
 
 from rapida import constants
-from rapida.components.landuse.stac import STAC_MAP, interpolate_stac_source, download_stac
+from rapida.components.landuse.stac import interpolate_stac_source, download_stac
 from rapida.components.landuse.prediction import predict
+from rapida.components.landuse.constants import STAC_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS
 from rapida.core.component import Component
 from rapida.core.variable import Variable

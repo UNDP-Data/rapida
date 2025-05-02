@@ -165,27 +165,25 @@ async def download_from_https_async(
     extension = os.path.splitext(file_url)[1]
     download_file = f"{target}.tif"
 
-    # fetch content-length from remote file header
-    async with httpx.AsyncClient() as client:
-        head_resp = await client.head(file_url)
-        head_resp.raise_for_status()
-        remote_content_length = head_resp.headers.get("content-length")
-        if remote_content_length is None:
-            raise ValueError("No content-length in response headers")
-        remote_content_length = int(remote_content_length)
-
-    if os.path.exists(download_file):
-        with rasterio.open(download_file) as src:
-            meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
-            if meta_content_length and int(meta_content_length) == remote_content_length:
-                logging.debug(f"file already exists. Skipped: {download_file}")
-                if progress and download_task:
-                    progress.remove_task(download_task)
-                return download_file
-
     tmp_file = f"{target}{extension}.tmp"
 
     try:
+        # fetch content-length from remote file header
+        async with httpx.AsyncClient() as client:
+            head_resp = await client.head(file_url)
+            head_resp.raise_for_status()
+            remote_content_length = head_resp.headers.get("content-length")
+            if remote_content_length is None:
+                raise ValueError("No content-length in response headers")
+            remote_content_length = int(remote_content_length)
+
+        if os.path.exists(download_file):
+            with rasterio.open(download_file) as src:
+                meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
+                if meta_content_length and int(meta_content_length) == remote_content_length:
+                    logging.debug(f"file already exists. Skipped: {download_file}")
+                    return download_file
+
         pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
         match = re.search(pattern, file_url)
         if match:
@@ -522,7 +520,7 @@ async def download_stac(
     if progress and stac_task:
         progress.update(stac_task, description="[yellow]Searching for STAC items...")
 
-    datetime_range = create_date_range(target_year, target_month)
+    datetime_range = create_date_range(target_year, target_month, duration=12)
     logger.debug(f"datetime range for searching: {datetime_range}")
     latest_per_tile = search_stac_items(stac_client=client,
                       collection_id=collection_id,

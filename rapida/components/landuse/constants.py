@@ -1,11 +1,11 @@
 DYNAMIC_WORLD_COLORMAP = {
-    0: '#419bdf',  # water
-    1: '#397d49',  # trees
-    2: '#88b053',  # grass
-    3: '#7a87c6',  # flooded_vegetation
-    4: '#e49635',  # crops
-    5: '#dfc35a',  # shrub_and_scrub
-    6: '#c4281b',  # built
-    7: '#a59b8f',  # bare
-    8: '#b39fe1',  # snow_and_ice
+    0: {'color': '#419bdf', 'label': 'water'},
+    1: {'color': '#397d49', 'label': 'trees'},
+    2: {'color': '#88b053', 'label': 'grass'},
+    3: {'color': '#7a87c6', 'label': 'flooded_vegetation'},
+    4: {'color': '#e49635', 'label': 'crops'},
+    5: {'color': '#dfc35a', 'label': 'shrub_and_scrub'},
+    6: {'color': '#c4281b', 'label': 'built'},
+    7: {'color': '#a59b8f', 'label': 'bare'},
+    8: {'color': '#b39fe1', 'label': 'snow_and_ice'},
 }

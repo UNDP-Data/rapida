@@ -1,6 +1,5 @@
 import os
-
-from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
+import json
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -9,6 +8,7 @@ from typing import List
 import numpy as np
 import rasterio
 from rasterio.windows import Window
+from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
 from rapida.util.setup_logger import setup_logger
 
 logger = setup_logger('rapida')
@@ -174,8 +174,15 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
                     progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
 
         # write colormap
-        landuse_colormap = {k: hex_to_rgb(v) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
+        landuse_colormap = {k: hex_to_rgb(v['color']) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
         dst.write_colormap(1, landuse_colormap)
+
+        # write STATISTICS_UNIQUE_VALUES for GeoHub
+        statistics_unique_values = {
+            str(k): v['label'] for k, v in DYNAMIC_WORLD_COLORMAP.items()
+        }
+        unique_values_json = json.dumps(statistics_unique_values, ensure_ascii=False)
+        dst.update_tags(1, STATISTICS_UNIQUE_VALUES=unique_values_json)
 
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")

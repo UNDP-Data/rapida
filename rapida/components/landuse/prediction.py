@@ -154,8 +154,17 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Creating output file: {output_file_path}")
 
-    with rasterio.open(output_file_path, mode='w', driver="GTiff", dtype='uint8',
-                       width=col_size, height=row_size, crs=crs, transform=dst_transform, count=1) as dst:
+    with rasterio.open(output_file_path,
+                       mode='w',
+                       driver="GTiff",
+                       dtype='uint8',
+                       width=col_size,
+                       height=row_size,
+                       crs=crs,
+                       transform=dst_transform,
+                       count=1,
+                       compress='ZSTD',
+                       tiled=True) as dst:
         tasks = []
         with ProcessPoolExecutor() as executor:
             for row in range(0, row_size, 256):

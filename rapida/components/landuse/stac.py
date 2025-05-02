@@ -19,6 +19,8 @@ from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
+
+from rapida.constants import GTIFF_CREATION_OPTIONS
 from rapida.util import geo
 import time
 
@@ -374,6 +376,7 @@ def crop_asset_files(base_dir,
             return_handle=False,
             progress=progress,
             warpMemoryLimit=1024,
+            creationOptions=GTIFF_CREATION_OPTIONS,
         )
 
         if os.path.exists(vrt_path):

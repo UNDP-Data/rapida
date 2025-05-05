@@ -7,6 +7,8 @@ from glob import glob
 from collections import defaultdict
 import concurrent.futures
 import threading
+from typing import Optional
+from calendar import monthrange
 
 from osgeo import gdal
 from datetime import datetime, date
@@ -17,6 +19,7 @@ from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
+import numpy as np
 from rapida.util import geo
 import time
 
@@ -43,18 +46,69 @@ def interpolate_stac_source(source: str) -> dict[str, str]:
     }
 
 
-def create_date_range(target_year: int) -> str:
+def create_date_range(target_year: int, target_month: Optional[int] = None, duration: int = 6) -> str:
     """
-    create date range from start date to end date for a given target year
+    Generate a date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.
 
-    :param target_year: target year
-    :return: date range formatted as YYYY-MM-DD/YYYY-MM-DD. But maximum date is always today's date.
+    The end date is determined based on the provided target year and optional target month:
+    - If target_year is None or in the future → use current year.
+    - If target_month is None:
+        - If target_year is current year → use today as end_date.
+        - If target_year is past → use December as default month.
+    - If target_month is in the future (within current year) → clamp to current month.
+    - end_date = today (if current year and current/future month), else last day of target_month.
+    - start_date = end_date - `duration` months (manual calculation, no external lib).
+
+    The start date is computed by subtracting `duration` months from the end date,
+    accounting for varying month lengths and year boundaries.
+
+    :param target_year: The year of interest.
+    :param target_month: The month of interest (1–12), optional.
+    :param duration: Number of months to go back from the end date (default is 6).
+    :return: A date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.
     """
-    start_date = date(target_year, 1, 1)
-    end_of_year = date(target_year, 12, 31)
     today = date.today()
+    current_year = today.year
+    current_month = today.month
 
-    end_date = min(today, end_of_year)
+    def subtract_months(from_date: date, months: int) -> date:
+        year = from_date.year
+        month = from_date.month - months
+
+        while month <= 0:
+            month += 12
+            year -= 1
+
+        day = min(from_date.day, monthrange(year, month)[1])
+        return date(year, month, day)
+
+    # normalize year
+    if target_year is None or target_year > current_year:
+        target_year = current_year
+
+    # normalize month
+    if target_month is None:
+        if target_year < current_year:
+            target_month = 12  # Use December for past years
+    else:
+        if target_year == current_year and target_month > current_month:
+            target_month = current_month
+
+            # Determine end_date
+    if target_year == current_year:
+        if target_month is None or target_month >= current_month:
+            end_date = today
+        else:
+            last_day = monthrange(target_year, target_month)[1]
+            end_date = date(target_year, target_month, last_day)
+    else:
+        if target_month is None:
+            end_date = date(target_year, 12, 31)
+        else:
+            last_day = monthrange(target_year, target_month)[1]
+            end_date = date(target_year, target_month, last_day)
+
+    start_date = subtract_months(end_date, duration)
 
     return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
 
@@ -75,7 +129,7 @@ def s3_to_http(url):
         return url
 
 
-def harmonize_to_old(data):
+def harmonize_to_old(data, nodata_value):
     """
     Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
 
@@ -83,8 +137,10 @@ def harmonize_to_old(data):
 
     Parameters
     ----------
-    data : xarray.DataArray
+    data : np.ndarray
         A DataArray with dimensions (e.g., time, band, y, x).
+    nodata_value : int
+        The value representing no data.
 
     Returns
     -------
@@ -92,7 +148,8 @@ def harmonize_to_old(data):
         The input data with an offset of 1000 subtracted.
     """
     offset = 1000
-    return data - offset
+    harmonized = np.where(data != nodata_value, data - offset, data)
+    return harmonized
 
 
 async def download_from_https_async(
@@ -112,27 +169,25 @@ async def download_from_https_async(
     extension = os.path.splitext(file_url)[1]
     download_file = f"{target}.tif"
 
-    # fetch content-length from remote file header
-    async with httpx.AsyncClient() as client:
-        head_resp = await client.head(file_url)
-        head_resp.raise_for_status()
-        remote_content_length = head_resp.headers.get("content-length")
-        if remote_content_length is None:
-            raise ValueError("No content-length in response headers")
-        remote_content_length = int(remote_content_length)
-
-    if os.path.exists(download_file):
-        with rasterio.open(download_file) as src:
-            meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
-            if meta_content_length and int(meta_content_length) == remote_content_length:
-                logging.debug(f"file already exists. Skipped: {download_file}")
-                if progress and download_task:
-                    progress.remove_task(download_task)
-                return download_file
-
     tmp_file = f"{target}{extension}.tmp"
 
     try:
+        # fetch content-length from remote file header
+        async with httpx.AsyncClient() as client:
+            head_resp = await client.head(file_url)
+            head_resp.raise_for_status()
+            remote_content_length = head_resp.headers.get("content-length")
+            if remote_content_length is None:
+                raise ValueError("No content-length in response headers")
+            remote_content_length = int(remote_content_length)
+
+        if os.path.exists(download_file):
+            with rasterio.open(download_file) as src:
+                meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
+                if meta_content_length and int(meta_content_length) == remote_content_length:
+                    logging.debug(f"file already exists. Skipped: {download_file}")
+                    return download_file
+
         pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
         match = re.search(pattern, file_url)
         if match:
@@ -167,15 +222,16 @@ async def download_from_https_async(
             data = src.read()
             dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
 
+            nodata = src.nodata if src.nodata is not None else no_data_value
+
             if acquisition_date >= cutoff:
-                data = harmonize_to_old(data)  # Ensure harmonize_to_old is defined
+                data = harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
 
             transform, width, height = calculate_default_transform(
                 src.crs, dst_crs, src.width, src.height, *src.bounds
             )
 
             profile = src.profile.copy()
-            nodata = profile.get("nodata", no_data_value)
             profile.update({
                 "crs": dst_crs,
                 "transform": transform,
@@ -208,8 +264,8 @@ async def download_from_https_async(
 
 
     finally:
-        if os.path.exists(tmp_file):
-            os.remove(tmp_file)
+        # if os.path.exists(tmp_file):
+        #     os.remove(tmp_file)
         if progress and download_task:
             progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
             progress.remove_task(download_task)
@@ -360,7 +416,7 @@ def search_stac_items(stac_client,
 
     search_task = None
     if progress:
-        search_task = progress.add_task(f"[green]Searching STAC Items", total=len(df_polygon))
+        search_task = progress.add_task(f"[green]Searching STAC Items for {datetime_range}", total=len(df_polygon))
 
     latest_per_tile = {}
     lock = threading.Lock()
@@ -434,6 +490,7 @@ async def download_stac(
     polygons_layer_name: str,
     output_dir: str,
     target_year: int,
+    target_month:int,
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
@@ -468,12 +525,12 @@ async def download_stac(
     if progress and stac_task:
         progress.update(stac_task, description="[yellow]Searching for STAC items...")
 
-    datetime = create_date_range(target_year)
-
+    datetime_range = create_date_range(target_year, target_month, duration=12)
+    logger.debug(f"datetime range for searching: {datetime_range}")
     latest_per_tile = search_stac_items(stac_client=client,
                       collection_id=collection_id,
                       df_polygon=df_polygon,
-                      datetime_range=datetime,
+                      datetime_range=datetime_range,
                       target_assets=target_assets,
                       progress=progress,)
 
@@ -491,7 +548,7 @@ async def download_stac(
                 asset_urls.append((asset.href, key, tile_id, no_data, item_datetime, cloud_cover))
 
     if not asset_urls:
-        raise RuntimeError(f"No assets found in {stac_url} for target area")
+        raise RuntimeError(f"No assets found for target area and date range: {datetime_range}")
 
     if progress and stac_task:
         progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
@@ -503,7 +560,7 @@ async def download_stac(
 
     semaphore = asyncio.Semaphore(max_workers)
 
-    async def download_asset(url, asset_key, tile_id, nodata, datetime,cloud_cover, semaphore):
+    async def download_asset(url, asset_key, tile_id, nodata, target_datetime,cloud_cover, semaphore):
         url = s3_to_http(url)
         band_name = target_assets[asset_key]
         asset_nodata[band_name] = nodata
@@ -524,7 +581,7 @@ async def download_stac(
                         target_srs=target_srs,
                         progress=progress,
                         no_data_value=nodata,
-                        item_datetime=datetime,
+                        item_datetime=target_datetime,
                         cloud_cover=cloud_cover,
                     )
                     if progress and stac_task:

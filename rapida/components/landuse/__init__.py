@@ -11,7 +11,7 @@ import geopandas as gpd
 from rapida.components.landuse.stac import interpolate_stac_source, download_stac
 from rapida.components.landuse.prediction import predict
 from rapida.components.landuse.constants import STAC_MAP
-from rapida.constants import GTIFF_CREATION_OPTIONS
+from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
 from rapida.core.variable import Variable
 from rapida.project.project import Project
@@ -307,7 +307,7 @@ class LanduseVariable(Variable):
         if dst_layer in lnames:
             polygons_layer = dst_layer
         else:
-            polygons_layer = constants.POLYGONS_LAYER_NAME
+            polygons_layer = POLYGONS_LAYER_NAME
         if self.operator:
             assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
 

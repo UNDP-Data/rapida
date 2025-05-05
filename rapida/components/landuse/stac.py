@@ -19,8 +19,7 @@ from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
-
-from rapida.constants import GTIFF_CREATION_OPTIONS
+import numpy as np
 from rapida.util import geo
 import time
 
@@ -130,7 +129,7 @@ def s3_to_http(url):
         return url
 
 
-def harmonize_to_old(data):
+def harmonize_to_old(data, nodata_value):
     """
     Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
 
@@ -138,8 +137,10 @@ def harmonize_to_old(data):
 
     Parameters
     ----------
-    data : xarray.DataArray
+    data : np.ndarray
         A DataArray with dimensions (e.g., time, band, y, x).
+    nodata_value : int
+        The value representing no data.
 
     Returns
     -------
@@ -147,7 +148,8 @@ def harmonize_to_old(data):
         The input data with an offset of 1000 subtracted.
     """
     offset = 1000
-    return data - offset
+    harmonized = np.where(data != nodata_value, data - offset, data)
+    return harmonized
 
 
 async def download_from_https_async(
@@ -220,15 +222,16 @@ async def download_from_https_async(
             data = src.read()
             dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
 
+            nodata = src.nodata if src.nodata is not None else no_data_value
+
             if acquisition_date >= cutoff:
-                data = harmonize_to_old(data)  # Ensure harmonize_to_old is defined
+                data = harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
 
             transform, width, height = calculate_default_transform(
                 src.crs, dst_crs, src.width, src.height, *src.bounds
             )
 
             profile = src.profile.copy()
-            nodata = profile.get("nodata", no_data_value)
             profile.update({
                 "crs": dst_crs,
                 "transform": transform,
@@ -261,8 +264,8 @@ async def download_from_https_async(
 
 
     finally:
-        if os.path.exists(tmp_file):
-            os.remove(tmp_file)
+        # if os.path.exists(tmp_file):
+        #     os.remove(tmp_file)
         if progress and download_task:
             progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
             progress.remove_task(download_task)
@@ -376,7 +379,6 @@ def crop_asset_files(base_dir,
             return_handle=False,
             progress=progress,
             warpMemoryLimit=1024,
-            creationOptions=GTIFF_CREATION_OPTIONS,
         )
 
         if os.path.exists(vrt_path):

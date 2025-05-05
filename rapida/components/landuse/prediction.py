@@ -101,10 +101,15 @@ def preinference_check(img_paths: List):
 
 def process_tile(row, col, img_paths, buffer, row_size, col_size, landuse_nodata=255):
     logger.debug(f"Processing window at row {row}, col {col}")
-    window_width = min(256 + buffer * 2, col_size - col)
-    window_height = min(256 + buffer * 2, row_size - row)
 
-    window = Window(col, row, window_width, window_height)
+    # create buffer (64px x 64px) for original tile size
+    row_off = max(row - buffer, 0)
+    col_off = max(col - buffer, 0)
+
+    window_height = min(row + 256 + buffer, row_size) - row_off
+    window_width = min(col + 256 + buffer, col_size) - col_off
+
+    window = Window(col_off, row_off, window_width, window_height)
     raw_data = np.empty((window_height, window_width, 9), dtype="u2")
 
     nodata_mask = None
@@ -127,20 +132,18 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size, landuse_nodata
     lulc_prob = np.array(lulc_prob[0])
     lulc_prediction = np.argmax(lulc_prob, axis=-1)
 
-    start_row_in_prediction = buffer if row > 0 else 0
-    end_row_in_prediction = window_height - buffer if row + 256 < row_size else window_height
+    # crop original tile by removing buffer
+    start_row = row - row_off
+    start_col = col - col_off
+    end_row = start_row + min(256, row_size - row)
+    end_col = start_col + min(256, col_size - col)
 
-    start_col_in_prediction = buffer if col > 0 else 0
-    end_col_in_prediction = window_width - buffer if col + 256 < col_size else window_width
-
-    original_tile = lulc_prediction[start_row_in_prediction:end_row_in_prediction,
-                    start_col_in_prediction:end_col_in_prediction]
+    original_tile = lulc_prediction[start_row:end_row, start_col:end_col]
 
     # The model predicts no data pixel where value is zero as 1 (trees),
     # so remove predicted values for nodata mask after predicting
     if nodata_mask is not None:
-        mask = nodata_mask[start_row_in_prediction:end_row_in_prediction,
-                       start_col_in_prediction:end_col_in_prediction]
+        mask = nodata_mask[start_row:end_row, start_col:end_col]
         original_tile[mask] = landuse_nodata
 
     return (row, col, original_tile)
@@ -181,26 +184,8 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
                        nodata=landuse_nodata,
                        count=1,
                        compress='ZSTD',
-                       tiled=True) as dst:
-        tasks = []
-        with ProcessPoolExecutor() as executor:
-            for row in range(0, row_size, 256):
-                for col in range(0, col_size, 256):
-                    tasks.append(
-                        executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size, landuse_nodata))
-
-            if predict_task is not None:
-                progress.update(predict_task, description=f"[red]Predicting land use", total=len(tasks))
-
-            for future in tasks:
-                row, col, original_tile = future.result()
-                height, width = original_tile.shape
-                write_col = col + (buffer if col > 0 else 0)
-                write_row = row + (buffer if row > 0 else 0)
-                dst.write(original_tile.astype(np.uint8), 1, window=Window(write_col, write_row, width, height))
-                if predict_task is not None:
-                    progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
-
+                       tiled=True,
+                       photometric='palette') as dst:
         # write colormap
         landuse_colormap = {k: hex_to_rgb(v['color']) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
         dst.write_colormap(1, landuse_colormap)
@@ -211,6 +196,24 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
         }
         unique_values_json = json.dumps(statistics_unique_values, ensure_ascii=False)
         dst.update_tags(1, STATISTICS_UNIQUE_VALUES=unique_values_json)
+
+        tasks = []
+        with ProcessPoolExecutor() as executor:
+            tile_size = 256
+            for row in range(0, row_size, tile_size):
+                for col in range(0, col_size, tile_size):
+                    tasks.append(
+                        executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size, landuse_nodata))
+
+            if predict_task is not None:
+                progress.update(predict_task, description=f"[red]Predicting land use", total=len(tasks))
+
+            for future in tasks:
+                row, col, original_tile = future.result()
+                dst.write(original_tile.astype(np.uint8), 1,
+                          window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
+                if predict_task is not None:
+                    progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
 
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")

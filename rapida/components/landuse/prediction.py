@@ -99,7 +99,7 @@ def preinference_check(img_paths: List):
     return col_sizes[0], row_sizes[0]
 
 
-def process_tile(row, col, img_paths, buffer, row_size, col_size):
+def process_tile(row, col, img_paths, buffer, row_size, col_size, landuse_nodata=255):
     logger.debug(f"Processing window at row {row}, col {col}")
     window_width = min(256 + buffer * 2, col_size - col)
     window_height = min(256 + buffer * 2, row_size - row)
@@ -107,9 +107,16 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
     window = Window(col, row, window_width, window_height)
     raw_data = np.empty((window_height, window_width, 9), dtype="u2")
 
+    nodata_mask = None
+
     for i, file_path in enumerate(img_paths):
         with rasterio.open(file_path) as src:
-            raw_data[:, :, i] = src.read(1, window=window)
+            band_data = src.read(1, window=window)
+            raw_data[:, :, i] = band_data
+
+            # create mask for nodata pixels
+            if nodata_mask is None and src.nodata is not None:
+                nodata_mask = (band_data == src.nodata)
 
     normalized_data = normalize(raw_data)
     nhwc_image = tf.expand_dims(tf.cast(normalized_data, dtype=tf.float32), axis=0)
@@ -128,6 +135,14 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
 
     original_tile = lulc_prediction[start_row_in_prediction:end_row_in_prediction,
                     start_col_in_prediction:end_col_in_prediction]
+
+    # The model predicts no data pixel where value is zero as 1 (trees),
+    # so remove predicted values for nodata mask after predicting
+    if nodata_mask is not None:
+        mask = nodata_mask[start_row_in_prediction:end_row_in_prediction,
+                       start_col_in_prediction:end_col_in_prediction]
+        original_tile[mask] = landuse_nodata
+
     return (row, col, original_tile)
 
 
@@ -143,6 +158,7 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
 
     col_size, row_size = preinference_check(img_paths)
     buffer = 64
+    landuse_nodata = 255
 
     if predict_task is not None:
         progress.update(predict_task, description="[cyan]Opening first image to get metadata")
@@ -162,6 +178,7 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
                        height=row_size,
                        crs=crs,
                        transform=dst_transform,
+                       nodata=landuse_nodata,
                        count=1,
                        compress='ZSTD',
                        tiled=True) as dst:
@@ -170,7 +187,7 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
             for row in range(0, row_size, 256):
                 for col in range(0, col_size, 256):
                     tasks.append(
-                        executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size))
+                        executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size, landuse_nodata))
 
             if predict_task is not None:
                 progress.update(predict_task, description=f"[red]Predicting land use", total=len(tasks))

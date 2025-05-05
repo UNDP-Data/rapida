@@ -194,8 +194,10 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
 
             for future in tasks:
                 row, col, original_tile = future.result()
-                dst.write(original_tile.astype(np.uint8), 1,
-                          window=Window(col, row, min(256, col_size - col), min(256, row_size - row)))
+                height, width = original_tile.shape
+                write_col = col + (buffer if col > 0 else 0)
+                write_row = row + (buffer if row > 0 else 0)
+                dst.write(original_tile.astype(np.uint8), 1, window=Window(write_col, write_row, width, height))
                 if predict_task is not None:
                     progress.update(predict_task, description=f"Predicted at row {row}, col {col}", advance=1)
 

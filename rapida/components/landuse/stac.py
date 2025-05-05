@@ -264,8 +264,8 @@ async def download_from_https_async(
 
 
     finally:
-        # if os.path.exists(tmp_file):
-        #     os.remove(tmp_file)
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
         if progress and download_task:
             progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
             progress.remove_task(download_task)

@@ -7,6 +7,8 @@ from glob import glob
 from collections import defaultdict
 import concurrent.futures
 import threading
+from typing import Optional
+from calendar import monthrange
 
 from osgeo import gdal
 from datetime import datetime, date
@@ -17,16 +19,15 @@ from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
+import numpy as np
+import shapely
+from shapely.ops import voronoi_diagram
+from shapely.geometry import Point, MultiPoint, Polygon
 from rapida.util import geo
 import time
 
 
 logger = logging.getLogger('rapida')
-
-
-STAC_MAP = {
-    'earth-search': 'https://earth-search.aws.element84.com/v1'
-}
 
 
 def interpolate_stac_source(source: str) -> dict[str, str]:
@@ -48,18 +49,69 @@ def interpolate_stac_source(source: str) -> dict[str, str]:
     }
 
 
-def create_date_range(target_year: int) -> str:
+def create_date_range(target_year: int, target_month: Optional[int] = None, duration: int = 6) -> str:
     """
-    create date range from start date to end date for a given target year
+    Generate a date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.
 
-    :param target_year: target year
-    :return: date range formatted as YYYY-MM-DD/YYYY-MM-DD. But maximum date is always today's date.
+    The end date is determined based on the provided target year and optional target month:
+    - If target_year is None or in the future → use current year.
+    - If target_month is None:
+        - If target_year is current year → use today as end_date.
+        - If target_year is past → use December as default month.
+    - If target_month is in the future (within current year) → clamp to current month.
+    - end_date = today (if current year and current/future month), else last day of target_month.
+    - start_date = end_date - `duration` months (manual calculation, no external lib).
+
+    The start date is computed by subtracting `duration` months from the end date,
+    accounting for varying month lengths and year boundaries.
+
+    :param target_year: The year of interest.
+    :param target_month: The month of interest (1–12), optional.
+    :param duration: Number of months to go back from the end date (default is 6).
+    :return: A date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.
     """
-    start_date = date(target_year, 1, 1)
-    end_of_year = date(target_year, 12, 31)
     today = date.today()
+    current_year = today.year
+    current_month = today.month
 
-    end_date = min(today, end_of_year)
+    def subtract_months(from_date: date, months: int) -> date:
+        year = from_date.year
+        month = from_date.month - months
+
+        while month <= 0:
+            month += 12
+            year -= 1
+
+        day = min(from_date.day, monthrange(year, month)[1])
+        return date(year, month, day)
+
+    # normalize year
+    if target_year is None or target_year > current_year:
+        target_year = current_year
+
+    # normalize month
+    if target_month is None:
+        if target_year < current_year:
+            target_month = 12  # Use December for past years
+    else:
+        if target_year == current_year and target_month > current_month:
+            target_month = current_month
+
+            # Determine end_date
+    if target_year == current_year:
+        if target_month is None or target_month >= current_month:
+            end_date = today
+        else:
+            last_day = monthrange(target_year, target_month)[1]
+            end_date = date(target_year, target_month, last_day)
+    else:
+        if target_month is None:
+            end_date = date(target_year, 12, 31)
+        else:
+            last_day = monthrange(target_year, target_month)[1]
+            end_date = date(target_year, target_month, last_day)
+
+    start_date = subtract_months(end_date, duration)
 
     return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
 
@@ -80,7 +132,7 @@ def s3_to_http(url):
         return url
 
 
-def harmonize_to_old(data):
+def harmonize_to_old(data, nodata_value):
     """
     Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
 
@@ -88,8 +140,10 @@ def harmonize_to_old(data):
 
     Parameters
     ----------
-    data : xarray.DataArray
+    data : np.ndarray
         A DataArray with dimensions (e.g., time, band, y, x).
+    nodata_value : int
+        The value representing no data.
 
     Returns
     -------
@@ -97,7 +151,8 @@ def harmonize_to_old(data):
         The input data with an offset of 1000 subtracted.
     """
     offset = 1000
-    return data - offset
+    harmonized = np.where(data != nodata_value, data - offset, data)
+    return harmonized
 
 
 async def download_from_https_async(
@@ -105,6 +160,8 @@ async def download_from_https_async(
         target: str,
         target_srs: str,
         no_data_value: int = 0,
+        item_datetime: str = None,
+        cloud_cover: float = None,
         progress=None,
 ) -> str:
     download_task = None
@@ -115,12 +172,25 @@ async def download_from_https_async(
     extension = os.path.splitext(file_url)[1]
     download_file = f"{target}.tif"
 
-    if os.path.exists(download_file):
-        return download_file
-
     tmp_file = f"{target}{extension}.tmp"
 
     try:
+        # fetch content-length from remote file header
+        async with httpx.AsyncClient() as client:
+            head_resp = await client.head(file_url)
+            head_resp.raise_for_status()
+            remote_content_length = head_resp.headers.get("content-length")
+            if remote_content_length is None:
+                raise ValueError("No content-length in response headers")
+            remote_content_length = int(remote_content_length)
+
+        if os.path.exists(download_file):
+            with rasterio.open(download_file) as src:
+                meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
+                if meta_content_length and int(meta_content_length) == remote_content_length:
+                    logging.debug(f"file already exists. Skipped: {download_file}")
+                    return download_file
+
         pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
         match = re.search(pattern, file_url)
         if match:
@@ -155,15 +225,16 @@ async def download_from_https_async(
             data = src.read()
             dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
 
+            nodata = src.nodata if src.nodata is not None else no_data_value
+
             if acquisition_date >= cutoff:
-                data = harmonize_to_old(data)  # Ensure harmonize_to_old is defined
+                data = harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
 
             transform, width, height = calculate_default_transform(
                 src.crs, dst_crs, src.width, src.height, *src.bounds
             )
 
             profile = src.profile.copy()
-            nodata = profile.get("nodata", no_data_value)
             profile.update({
                 "crs": dst_crs,
                 "transform": transform,
@@ -176,6 +247,11 @@ async def download_from_https_async(
             })
 
             with rasterio.open(download_file, "w", **profile) as dst:
+                dst.update_tags(JP2_CONTENT_LENGTH=str(remote_content_length))
+                if item_datetime:
+                    dst.update_tags(ITEM_DATETIME=item_datetime)
+                if cloud_cover:
+                    dst.update_tags(CLOUD_COVER=cloud_cover)
                 for i in range(1, src.count + 1):
                     reproject(
                         source=data[i - 1],
@@ -255,7 +331,7 @@ def crop_asset_files(base_dir,
 
     for jp2_path in glob(os.path.join(base_dir, "**", "B??.tif"), recursive=True):
         filename = os.path.basename(jp2_path)
-        band_name = os.path.splitext(filename)[0]  # "B02" 部分だけ取る
+        band_name = os.path.splitext(filename)[0]
         band_files[band_name].append(jp2_path)
 
     # get highest resolution from all bands
@@ -322,6 +398,63 @@ def crop_asset_files(base_dir,
     return output_files
 
 
+def merge_or_voronoi(df: gpd.GeoDataFrame, scene_size=110000) -> list[Polygon]:
+    """
+    Merge or split input polygons into voronoi depending on their spatial extent.
+
+    If the total area covered by the input polygons is smaller than or equal to a Sentinel-2 scene
+    (approximately 110 km x 110 km), merge all polygons into a single one for STAC search.
+
+    If the area is larger, split it using Voronoi polygons by creating multiple points inside a merged polygon.
+
+    :param df: Input GeoDataFrame containing search polygons.
+    :param scene_size:  Approximate size of a Sentinel-2 scene in meters (default is 110000).
+    :return A list of merged or split polygons to be used for STAC search.
+    """
+    original_crs = df.crs
+    # reproject to 3857 to ease to compute area in meters.
+    df_3857 = df.to_crs(epsg=3857)
+
+    merged = df_3857.geometry.union_all()
+    merged = merged.simplify(tolerance=1000, preserve_topology=False)
+    total_area = merged.area
+
+    if total_area <= scene_size ** 2:
+        # Area is small enough to be covered by a single STAC search
+        return [gpd.GeoSeries([merged], crs=3857).to_crs(original_crs).iloc[0]]
+
+    # Generate internal grid points spaced equally based on scene size
+    minx, miny, maxx, maxy = merged.bounds
+    # create double size of scene to be able to cover the whole scene area
+    spacing = scene_size * 2
+    nx = int(np.ceil((maxx - minx) / spacing))
+    ny = int(np.ceil((maxy - miny) / spacing))
+
+    points = []
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            x = minx + i * spacing
+            y = miny + j * spacing
+            pt = Point(x, y)
+            if merged.contains(pt):
+                points.append(pt)
+
+    if len(points) < 2:
+        return [gpd.GeoSeries([merged], crs=3857).to_crs(original_crs).iloc[0]]
+
+    multipoint = MultiPoint(points)
+    voronoi_geom = shapely.voronoi_polygons(multipoint, extend_to=merged, only_edges=False)
+
+    # clip voronoi polygons by original polygon
+    polygons_3857 = [
+        poly.intersection(merged)
+        for poly in voronoi_geom.geoms
+        if poly.is_valid and not poly.is_empty
+    ]
+
+    # reproject final outputs to original projection
+    return gpd.GeoSeries(polygons_3857, crs=3857).to_crs(original_crs).tolist()
+
 def search_stac_items(stac_client,
                       collection_id: str,
                       df_polygon: gpd.GeoDataFrame,
@@ -343,12 +476,12 @@ def search_stac_items(stac_client,
 
     search_task = None
     if progress:
-        search_task = progress.add_task(f"[green]Searching STAC Items", total=len(df_polygon))
+        search_task = progress.add_task(f"[green]Searching STAC Items for {datetime_range}", total=len(df_polygon))
 
     latest_per_tile = {}
     lock = threading.Lock()
 
-    def search_single_polygon(idx, single_geom):
+    def search_single_polygon(single_geom):
         nonlocal latest_per_tile
 
         fc_geojson_str = gpd.GeoDataFrame(geometry=[single_geom], crs=df_polygon.crs).to_json()
@@ -369,22 +502,37 @@ def search_stac_items(stac_client,
                 if tile_id is None:
                     continue
 
-                if tile_id not in latest_per_tile or item.datetime > latest_per_tile[tile_id].datetime:
-                    if all(asset in item.assets for asset in target_assets):
+                cloud_cover = item.properties.get("eo:cloud_cover")
+                if cloud_cover is None:
+                    continue
+
+                # if item does not have all required assets, skip it.
+                if not all(asset in item.assets for asset in target_assets):
+                    continue
+
+                existing = latest_per_tile.get(tile_id)
+                if existing is None:
+                    latest_per_tile[tile_id] = item
+                else:
+                    existing_cloud = existing.properties.get("eo:cloud_cover")
+                    if existing_cloud is None:
+                        latest_per_tile[tile_id] = item
+                    elif cloud_cover < existing_cloud:
+                        # Update item if cloud cover is lower even it is older item
+                        latest_per_tile[tile_id] = item
+                    elif item.datetime > existing.datetime:
+                        # Otherwise, newer image is used
                         latest_per_tile[tile_id] = item
 
         if progress and search_task:
             progress.update(search_task, advance=1)
 
-    # simplify polygons with tolerance 0.01 (approximate 1km in equator)
-    work_df = df_polygon.copy()
-    work_df["geometry"] = work_df["geometry"].simplify(tolerance=0.01, preserve_topology=True)
+    work_geoms = merge_or_voronoi(df_polygon)
+    # gdf_out = gpd.GeoDataFrame(geometry=work_geoms, crs=df_polygon.crs)
+    # gdf_out.to_file("voronoi_regions.geojson", driver="GeoJSON")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(search_single_polygon, idx, row.geometry)
-            for idx, row in work_df.iterrows()
-        ]
+        futures = [executor.submit(search_single_polygon, geom) for geom in work_geoms]
         concurrent.futures.wait(futures)
 
     if progress and search_task:
@@ -399,6 +547,7 @@ async def download_stac(
     polygons_layer_name: str,
     output_dir: str,
     target_year: int,
+    target_month:int,
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
@@ -428,33 +577,34 @@ async def download_stac(
 
     df_polygon = gpd.read_file(geopackage_file_path, layer=polygons_layer_name)
     df_polygon.to_crs(epsg=4326, inplace=True)
-    bbox = df_polygon.total_bounds
 
     if progress and stac_task:
         progress.update(stac_task, description="[yellow]Searching for STAC items...")
 
-    datetime = create_date_range(target_year)
-
+    datetime_range = create_date_range(target_year, target_month, duration=12)
+    logger.debug(f"datetime range for searching: {datetime_range}")
     latest_per_tile = search_stac_items(stac_client=client,
                       collection_id=collection_id,
                       df_polygon=df_polygon,
-                      datetime_range=datetime,
+                      datetime_range=datetime_range,
                       target_assets=target_assets,
                       progress=progress,)
 
     asset_urls = []
     for item in latest_per_tile.values():
         tile_id = item.properties["grid:code"]
+        item_datetime = item.datetime
+        cloud_cover = item.properties.get("eo:cloud_cover")
         assets = item.get_assets()
         for key, asset in item.assets.items():
             if key in target_assets:
                 asset_meta = assets[key].to_dict()
                 band_meta = asset_meta['raster:bands'][0]
                 no_data = band_meta['nodata']
-                asset_urls.append((asset.href, key, tile_id, no_data))
+                asset_urls.append((asset.href, key, tile_id, no_data, item_datetime, cloud_cover))
 
     if not asset_urls:
-        raise RuntimeError(f"No assets found in {stac_url} for target area")
+        raise RuntimeError(f"No assets found for target area and date range: {datetime_range}")
 
     if progress and stac_task:
         progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
@@ -466,7 +616,7 @@ async def download_stac(
 
     semaphore = asyncio.Semaphore(max_workers)
 
-    async def download_asset(url, asset_key, tile_id, nodata, semaphore):
+    async def download_asset(url, asset_key, tile_id, nodata, target_datetime,cloud_cover, semaphore):
         url = s3_to_http(url)
         band_name = target_assets[asset_key]
         asset_nodata[band_name] = nodata
@@ -477,8 +627,8 @@ async def download_stac(
         target_path = os.path.join(download_dir, band_name)
 
         async with semaphore:
-            # retry max 3 times if any connection error occurs
-            max_retries = 3
+            # retry max 5 times if any connection error occurs
+            max_retries = 5
             for attempt in range(1, max_retries + 1):
                 try:
                     result = await download_from_https_async(
@@ -487,6 +637,8 @@ async def download_stac(
                         target_srs=target_srs,
                         progress=progress,
                         no_data_value=nodata,
+                        item_datetime=target_datetime,
+                        cloud_cover=cloud_cover,
                     )
                     if progress and stac_task:
                         progress.update(stac_task, description=f"[green]Saved {tile_id}:{band_name}", advance=1)
@@ -506,8 +658,8 @@ async def download_stac(
                     break
 
     tasks = [
-        asyncio.create_task(download_asset(url, asset_key, tile_id, nodata, semaphore), name=f"{tile_id}:{target_assets[asset_key]}")
-        for url, asset_key, tile_id, nodata in asset_urls
+        asyncio.create_task(download_asset(url, asset_key, tile_id, nodata, asset_datetime, cloud_cover, semaphore), name=f"{tile_id}:{target_assets[asset_key]}")
+        for url, asset_key, tile_id, nodata, asset_datetime, cloud_cover in asset_urls
     ]
 
     try:
@@ -544,3 +696,4 @@ async def download_stac(
     logger.debug(f"Download completed: {t4 - t1} seconds")
 
     return output_files
+

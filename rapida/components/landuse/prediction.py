@@ -1,4 +1,6 @@
 import os
+import json
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
 from concurrent.futures import ProcessPoolExecutor
@@ -6,6 +8,7 @@ from typing import List
 import numpy as np
 import rasterio
 from rasterio.windows import Window
+from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
 from rapida.util.setup_logger import setup_logger
 
 logger = setup_logger('rapida')
@@ -96,17 +99,29 @@ def preinference_check(img_paths: List):
     return col_sizes[0], row_sizes[0]
 
 
-def process_tile(row, col, img_paths, buffer, row_size, col_size):
+def process_tile(row, col, img_paths, buffer, row_size, col_size, landuse_nodata=255):
     logger.debug(f"Processing window at row {row}, col {col}")
-    window_width = min(256 + buffer * 2, col_size - col)
-    window_height = min(256 + buffer * 2, row_size - row)
 
-    window = Window(col, row, window_width, window_height)
+    # create buffer (64px x 64px) for original tile size
+    row_off = max(row - buffer, 0)
+    col_off = max(col - buffer, 0)
+
+    window_height = min(row + 256 + buffer, row_size) - row_off
+    window_width = min(col + 256 + buffer, col_size) - col_off
+
+    window = Window(col_off, row_off, window_width, window_height)
     raw_data = np.empty((window_height, window_width, 9), dtype="u2")
+
+    nodata_mask = None
 
     for i, file_path in enumerate(img_paths):
         with rasterio.open(file_path) as src:
-            raw_data[:, :, i] = src.read(1, window=window)
+            band_data = src.read(1, window=window)
+            raw_data[:, :, i] = band_data
+
+            # create mask for nodata pixels
+            if nodata_mask is None and src.nodata is not None:
+                nodata_mask = (band_data == src.nodata)
 
     normalized_data = normalize(raw_data)
     nhwc_image = tf.expand_dims(tf.cast(normalized_data, dtype=tf.float32), axis=0)
@@ -117,15 +132,26 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size):
     lulc_prob = np.array(lulc_prob[0])
     lulc_prediction = np.argmax(lulc_prob, axis=-1)
 
-    start_row_in_prediction = buffer if row > 0 else 0
-    end_row_in_prediction = window_height - buffer if row + 256 < row_size else window_height
+    # crop original tile by removing buffer
+    start_row = row - row_off
+    start_col = col - col_off
+    end_row = start_row + min(256, row_size - row)
+    end_col = start_col + min(256, col_size - col)
 
-    start_col_in_prediction = buffer if col > 0 else 0
-    end_col_in_prediction = window_width - buffer if col + 256 < col_size else window_width
+    original_tile = lulc_prediction[start_row:end_row, start_col:end_col]
 
-    original_tile = lulc_prediction[start_row_in_prediction:end_row_in_prediction,
-                    start_col_in_prediction:end_col_in_prediction]
+    # The model predicts no data pixel where value is zero as 1 (trees),
+    # so remove predicted values for nodata mask after predicting
+    if nodata_mask is not None:
+        mask = nodata_mask[start_row:end_row, start_col:end_col]
+        original_tile[mask] = landuse_nodata
+
     return (row, col, original_tile)
+
+
+def hex_to_rgb(hex_color):
+    hex_color = hex_color.lstrip('#')
+    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
 
 
 def predict(img_paths: List[str], output_file_path: str, progress = None):
@@ -135,6 +161,7 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
 
     col_size, row_size = preinference_check(img_paths)
     buffer = 64
+    landuse_nodata = 255
 
     if predict_task is not None:
         progress.update(predict_task, description="[cyan]Opening first image to get metadata")
@@ -146,14 +173,37 @@ def predict(img_paths: List[str], output_file_path: str, progress = None):
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Creating output file: {output_file_path}")
 
-    with rasterio.open(output_file_path, mode='w', driver="GTiff", dtype='uint8',
-                       width=col_size, height=row_size, crs=crs, transform=dst_transform, count=1) as dst:
+    with rasterio.open(output_file_path,
+                       mode='w',
+                       driver="GTiff",
+                       dtype='uint8',
+                       width=col_size,
+                       height=row_size,
+                       crs=crs,
+                       transform=dst_transform,
+                       nodata=landuse_nodata,
+                       count=1,
+                       compress='ZSTD',
+                       tiled=True,
+                       photometric='palette') as dst:
+        # write colormap
+        landuse_colormap = {k: hex_to_rgb(v['color']) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
+        dst.write_colormap(1, landuse_colormap)
+
+        # write STATISTICS_UNIQUE_VALUES for GeoHub
+        statistics_unique_values = {
+            str(k): v['label'] for k, v in DYNAMIC_WORLD_COLORMAP.items()
+        }
+        unique_values_json = json.dumps(statistics_unique_values, ensure_ascii=False)
+        dst.update_tags(1, STATISTICS_UNIQUE_VALUES=unique_values_json)
+
         tasks = []
         with ProcessPoolExecutor() as executor:
-            for row in range(0, row_size, 256):
-                for col in range(0, col_size, 256):
+            tile_size = 256
+            for row in range(0, row_size, tile_size):
+                for col in range(0, col_size, tile_size):
                     tasks.append(
-                        executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size))
+                        executor.submit(process_tile, row, col, img_paths, buffer, row_size, col_size, landuse_nodata))
 
             if predict_task is not None:
                 progress.update(predict_task, description=f"[red]Predicting land use", total=len(tasks))

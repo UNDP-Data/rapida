@@ -20,6 +20,9 @@ from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
 import numpy as np
+import shapely
+from shapely.ops import voronoi_diagram
+from shapely.geometry import Point, MultiPoint, Polygon
 from rapida.util import geo
 import time
 
@@ -395,6 +398,63 @@ def crop_asset_files(base_dir,
     return output_files
 
 
+def merge_or_voronoi(df: gpd.GeoDataFrame, scene_size=110000) -> list[Polygon]:
+    """
+    Merge or split input polygons into voronoi depending on their spatial extent.
+
+    If the total area covered by the input polygons is smaller than or equal to a Sentinel-2 scene
+    (approximately 110 km x 110 km), merge all polygons into a single one for STAC search.
+
+    If the area is larger, split it using Voronoi polygons by creating multiple points inside a merged polygon.
+
+    :param df: Input GeoDataFrame containing search polygons.
+    :param scene_size:  Approximate size of a Sentinel-2 scene in meters (default is 110000).
+    :return A list of merged or split polygons to be used for STAC search.
+    """
+    original_crs = df.crs
+    # reproject to 3857 to ease to compute area in meters.
+    df_3857 = df.to_crs(epsg=3857)
+
+    merged = df_3857.geometry.union_all()
+    merged = merged.simplify(tolerance=1000, preserve_topology=False)
+    total_area = merged.area
+
+    if total_area <= scene_size ** 2:
+        # Area is small enough to be covered by a single STAC search
+        return [gpd.GeoSeries([merged], crs=3857).to_crs(original_crs).iloc[0]]
+
+    # Generate internal grid points spaced equally based on scene size
+    minx, miny, maxx, maxy = merged.bounds
+    # create double size of scene to be able to cover the whole scene area
+    spacing = scene_size * 2
+    nx = int(np.ceil((maxx - minx) / spacing))
+    ny = int(np.ceil((maxy - miny) / spacing))
+
+    points = []
+    for i in range(nx + 1):
+        for j in range(ny + 1):
+            x = minx + i * spacing
+            y = miny + j * spacing
+            pt = Point(x, y)
+            if merged.contains(pt):
+                points.append(pt)
+
+    if len(points) < 2:
+        return [gpd.GeoSeries([merged], crs=3857).to_crs(original_crs).iloc[0]]
+
+    multipoint = MultiPoint(points)
+    voronoi_geom = shapely.voronoi_polygons(multipoint, extend_to=merged, only_edges=False)
+
+    # clip voronoi polygons by original polygon
+    polygons_3857 = [
+        poly.intersection(merged)
+        for poly in voronoi_geom.geoms
+        if poly.is_valid and not poly.is_empty
+    ]
+
+    # reproject final outputs to original projection
+    return gpd.GeoSeries(polygons_3857, crs=3857).to_crs(original_crs).tolist()
+
 def search_stac_items(stac_client,
                       collection_id: str,
                       df_polygon: gpd.GeoDataFrame,
@@ -421,7 +481,7 @@ def search_stac_items(stac_client,
     latest_per_tile = {}
     lock = threading.Lock()
 
-    def search_single_polygon(idx, single_geom):
+    def search_single_polygon(single_geom):
         nonlocal latest_per_tile
 
         fc_geojson_str = gpd.GeoDataFrame(geometry=[single_geom], crs=df_polygon.crs).to_json()
@@ -467,15 +527,12 @@ def search_stac_items(stac_client,
         if progress and search_task:
             progress.update(search_task, advance=1)
 
-    # simplify polygons with tolerance 0.01 (approximate 1km in equator)
-    work_df = df_polygon.copy()
-    work_df["geometry"] = work_df["geometry"].simplify(tolerance=0.01, preserve_topology=True)
+    work_geoms = merge_or_voronoi(df_polygon)
+    # gdf_out = gpd.GeoDataFrame(geometry=work_geoms, crs=df_polygon.crs)
+    # gdf_out.to_file("voronoi_regions.geojson", driver="GeoJSON")
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [
-            executor.submit(search_single_polygon, idx, row.geometry)
-            for idx, row in work_df.iterrows()
-        ]
+        futures = [executor.submit(search_single_polygon, geom) for geom in work_geoms]
         concurrent.futures.wait(futures)
 
     if progress and search_task:
@@ -520,7 +577,6 @@ async def download_stac(
 
     df_polygon = gpd.read_file(geopackage_file_path, layer=polygons_layer_name)
     df_polygon.to_crs(epsg=4326, inplace=True)
-    bbox = df_polygon.total_bounds
 
     if progress and stac_task:
         progress.update(stac_task, description="[yellow]Searching for STAC items...")
@@ -640,3 +696,4 @@ async def download_stac(
     logger.debug(f"Download completed: {t4 - t1} seconds")
 
     return output_files
+

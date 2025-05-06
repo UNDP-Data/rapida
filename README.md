@@ -1,5 +1,70 @@
-# rapida
-A repo to hold python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc  
+# RAPIDA – A semi-automated geospatial analysis tool for rapid crisis response.
+
+At it's core,**rapida** is a python library and command line tool built on top of several
+curated geospatial datasets associated with specific geospatial risk's exposure components /variables
+capable to perform semi-automated assessments (zonal statistics) over a specific area of interest.
+
+Essentially, **rapida** operates with a special folder or project that contains
+       
+  - specific metadata in json format
+  - vector data layers in [GPKG](https://gdal.org/en/stable/drivers/vector/gpkg.html) format
+  - raster data in [COG](https://gdal.org/en/stable/drivers/raster/cog.html) format
+
+A typical **rapida** session consists of following steps:
+
+
+```mermaid
+flowchart LR
+    
+    i([🟢 Init]) --> a([🔐 Auth])
+    as{{🔍 Assess?}}
+    %% Switch to top-to-bottom (TB) direction for vertical alignment
+    subgraph vertical [ ]
+        direction TB
+        as <-->|🌥️cloud / 🖧remote| db[(🌍 Data)]
+    end
+    a --> vertical
+    vertical --> u{{📤 upload}}
+   
+   
+    
+
+```
+
+## Features 
+
+
+- [x] fetching/downloading and curating (h3id) administrative boundaries from [OSM](https://wiki.openstreetmap.org/wiki/Key:admin_level) / [OCHA@COD](https://codgis.itos.uga.edu/arcgis/rest/services) sources
+- [x] conducting geospatial assessments over and area of interest containing geospatial polygons
+  - [x] buildings
+  - [x] deprivation/poverty
+  - [x] electrical grid
+  - [x] GDP
+  - [x] land use
+  - [x] population
+  - [x] roads
+- [x] integration with UNDP Azure cloud storage and [UNDP GeoHub](https://geohub.data.undp.org/)
+  - [x] concept of project (create, list, delete, upload, download)
+- [x] integration with JupyterHub
+  - [x] geospatial visualization
+  - [x] notebooks
+- [x] rich UI/UX 
+
+## Core software components & libs
++ GDAL www.gdal.org
++ rasterio https://github.com/rasterio/rasterio
++ exactextract https://github.com/isciences/exactextract
++ geopandas https://github.com/geopandas/geopandas
++ rich https://github.com/Textualize/rich/tree/master
++ click https://github.com/pallets/click
++ tensorflow https://www.tensorflow.org/
+
+... and others
+
+
+## Data
+
+> **rapida** operates
 
 ## Installation
 

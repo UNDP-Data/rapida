@@ -13,6 +13,8 @@ import click
 import nest_asyncio
 nest_asyncio.apply()
 
+
+
 class RapidaCommandGroup(click.Group):
     def list_commands(self, ctx):
         return self.commands.keys()

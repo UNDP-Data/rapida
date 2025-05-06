@@ -697,10 +697,3 @@ async def download_stac(
 
     return output_files
 
-
-if __name__ == "__main__":
-    path_shp = "/data/rwanda_cell.gpkg"
-    gdf = gpd.read_file(path_shp)
-    work_geoms = merge_or_voronoi(gdf)
-    gdf_out = gpd.GeoDataFrame(geometry=work_geoms, crs=gdf.crs)
-    gdf_out.to_file("/data/voronoi_regions.geojson", driver="GeoJSON")

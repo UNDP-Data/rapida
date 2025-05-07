@@ -1,6 +1,8 @@
 import concurrent
 import os
 import json
+import time
+
 import psutil
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
@@ -158,6 +160,7 @@ def hex_to_rgb(hex_color):
 
 
 def predict(img_paths: List[str], output_file_path: str, num_workers=None, progress = None):
+    t1 = time.time()
     predict_task = None
     if progress:
         predict_task = progress.add_task(f"[cyan]Starting land use prediction")
@@ -260,6 +263,9 @@ def predict(img_paths: List[str], output_file_path: str, num_workers=None, progr
                         raise
                     except StopIteration:
                         continue
+
+    t2 = time.time()
+    logger.debug(f"total time: {t2 - t1}")
 
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")

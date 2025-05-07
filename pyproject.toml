@@ -46,7 +46,8 @@ dependencies = [
     "requests-oauthlib",
     "fiona",
     "nest_asyncio",
-    "tensorflow"
+    "tensorflow",
+    "psutil"
 ]
 
 [project.optional-dependencies]

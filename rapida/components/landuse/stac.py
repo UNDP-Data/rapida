@@ -9,21 +9,17 @@ import concurrent.futures
 import threading
 from typing import Optional
 from calendar import monthrange
-
 from osgeo import gdal
 from datetime import datetime, date
 from rich.progress import Progress
 import pystac_client
 import rasterio
-from rasterio.warp import reproject, Resampling, calculate_default_transform
 from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
 import numpy as np
 import shapely
-from shapely.ops import voronoi_diagram
 from shapely.geometry import Point, MultiPoint, Polygon
-from rapida.util import geo
 import time
 
 
@@ -159,11 +155,26 @@ async def download_from_https_async(
         file_url: str,
         target: str,
         target_srs: str,
+        geopackage_file_path,
+        polygons_layer_name,
         no_data_value: int = 0,
         item_datetime: str = None,
         cloud_cover: float = None,
         progress=None,
 ) -> str:
+    """
+    Download JP2 file from STAC server, then reproject and crop by project area, and transform to GeoTiff file.
+
+    :param file_url: file URL to download
+    :param target: target file name without extension
+    :param geopackage_file_path: path to geopackage file
+    :param polygons_layer_name: name of layer polygon layer in geopackage to mask
+    :param no_data_value: nodata value. default is 0
+    :param item_datetime: item datetime string
+    :param cloud_cover: cloud cover percentage
+    :param progress: rich progress instance
+    :return: output file URL
+    """
     download_task = None
     if progress is not None:
         download_task = progress.add_task(
@@ -288,41 +299,38 @@ async def download_from_https_async(
             if acquisition_date >= cutoff:
                 data = harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
 
-            transform, width, height = calculate_default_transform(
-                src.crs, dst_crs, src.width, src.height, *src.bounds
+            profile = src.profile
+            profile.update(driver="GTiff", dtype=data.dtype, count=src.count)
+
+            vsimem_path = "/vsimem/in.tif"
+            with rasterio.MemoryFile() as memfile:
+                with memfile.open(**profile) as dataset:
+                    dataset.write(data)
+                gdal.FileFromMemBuffer(vsimem_path, memfile.read())
+
+            warp_options = gdal.WarpOptions(
+                dstSRS=target_srs.ExportToWkt(),
+                format="GTiff",
+                creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
+                srcNodata=nodata,
+                dstNodata=nodata,
+                resampleAlg="near",
+                cutlineDSName=geopackage_file_path,
+                cutlineLayer=polygons_layer_name,
+                cropToCutline=True,
             )
 
-            profile = src.profile.copy()
-            profile.update({
-                "crs": dst_crs,
-                "transform": transform,
-                "width": width,
-                "height": height,
-                "driver": "GTiff",
-                "compress": "ZSTD",
-                "tiled": True,
-                "nodata": nodata,
-            })
-
-            with rasterio.open(download_file, "w", **profile) as dst:
-                dst.update_tags(JP2_CONTENT_LENGTH=str(remote_content_length))
-                if item_datetime:
-                    dst.update_tags(ITEM_DATETIME=item_datetime)
-                if cloud_cover:
-                    dst.update_tags(CLOUD_COVER=cloud_cover)
-                for i in range(1, src.count + 1):
-                    reproject(
-                        source=data[i - 1],
-                        destination=rasterio.band(dst, i),
-                        src_transform=src.transform,
-                        src_crs=src.crs,
-                        dst_transform=transform,
-                        dst_crs=dst_crs,
-                        resampling=Resampling.nearest,
-                        src_nodata=nodata,
-                        dst_nodata=nodata,
-                    )
-
+            rds = gdal.Warp(destNameOrDestDS=download_file,
+                      srcDSOrSrcDSTab=vsimem_path,
+                      options=warp_options)
+            metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
+            if item_datetime is not None:
+                metadata["ITEM_DATETIME"] = item_datetime
+            if cloud_cover is not None:
+                metadata["CLOUD_COVER"] = str(cloud_cover)
+            rds.SetMetadata(metadata)
+            gdal.Unlink(vsimem_path)
+            rds = None
 
     finally:
         if os.path.exists(tmp_file):
@@ -359,8 +367,6 @@ def get_bounds_and_resolution(file_paths):
 
 def crop_asset_files(base_dir,
                      target_srs,
-                     geopackage_file_path,
-                     polygons_layer_name,
                      asset_nodata: dict[str, int],
                      progress: Progress = None,):
     """
@@ -369,8 +375,6 @@ def crop_asset_files(base_dir,
 
     :param base_dir: Root directory for downloaded sentinel data
     :param target_srs: target projection CRS
-    :param geopackage_file_path: path to geopackage file
-    :param polygons_layer_name: name of layer polygon layer in geopackage to mask
     :param progress: rich progress object
     """
     post_task = None
@@ -409,7 +413,6 @@ def crop_asset_files(base_dir,
         if progress is not None and post_task is not None:
             progress.update(post_task, description="[red] Creating VRT...")
         vrt_path = os.path.join(base_dir, f"{band_name}.vrt")
-        masked_path = os.path.join(base_dir, f"{band_name}.tif")
 
         # get maximum bounds from all files
         bounds = get_bounds_and_resolution(files)[0]
@@ -432,20 +435,7 @@ def crop_asset_files(base_dir,
         if progress is not None and post_task is not None:
             progress.update(post_task, description="[red] Cropping VRT...")
 
-        # crop VRT by project area to GeoTiff
-        geo.import_raster(
-            source=vrt_path, dst=masked_path, target_srs=target_srs,
-            x_res=xRes, y_res=yRes,
-            crop_ds=geopackage_file_path, crop_layer_name=polygons_layer_name,
-            return_handle=False,
-            progress=progress,
-            warpMemoryLimit=1024,
-        )
-
-        if os.path.exists(vrt_path):
-            os.remove(vrt_path)
-
-        output_files.append(masked_path)
+        output_files.append(vrt_path)
 
         if progress is not None and post_task is not None:
             progress.update(post_task, description=f"[red] Processed {band_name}", advance=1)
@@ -668,7 +658,7 @@ async def download_stac(
         progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
 
     t2 = time.time()
-    logger.debug(f"STAC Item search: {t2 - t1} seconds")
+    logger.info(f"STAC Item search: {t2 - t1} seconds")
 
     asset_nodata = {}
 
@@ -697,6 +687,8 @@ async def download_stac(
                         no_data_value=nodata,
                         item_datetime=target_datetime,
                         cloud_cover=cloud_cover,
+                        geopackage_file_path=geopackage_file_path,
+                        polygons_layer_name=polygons_layer_name,
                     )
                     if progress and stac_task:
                         progress.update(stac_task, description=f"[green]Saved {tile_id}:{band_name}", advance=1)
@@ -740,8 +732,6 @@ async def download_stac(
     output_files = crop_asset_files(
         base_dir=output_dir,
         target_srs=target_srs,
-        geopackage_file_path=geopackage_file_path,
-        polygons_layer_name=polygons_layer_name,
         asset_nodata=asset_nodata,
         progress=progress,
     )
@@ -751,7 +741,7 @@ async def download_stac(
         progress.remove_task(stac_task)
 
     t4 = time.time()
-    logger.debug(f"Download completed: {t4 - t1} seconds")
+    logger.info(f"Download completed: {t4 - t1} seconds")
 
     return output_files
 

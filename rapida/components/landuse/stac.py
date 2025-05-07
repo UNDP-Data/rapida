@@ -271,7 +271,7 @@ async def download_from_https_async(
                             raise e
                     except Exception as e:
                         logger.error(f"Download failed for {start}:{end}: {e}")
-                        break
+                        raise e
 
             tasks = [fetch_range(start, end, url, semaphore) for start, end in ranges]
 

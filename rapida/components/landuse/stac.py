@@ -203,20 +203,78 @@ async def download_from_https_async(
 
         cutoff = datetime(2022, 1, 25)
 
-        async with httpx.AsyncClient() as client:
-            async with client.stream("GET", file_url) as response:
-                response.raise_for_status()
-                total = int(response.headers.get("content-length", 0))
+        if progress is not None and download_task is not None:
+            progress.update(download_task, total=remote_content_length)
 
-                if progress is not None and download_task is not None:
-                    progress.update(download_task, total=total)
+        async def download_file_in_parallel(url, file_path, total_size, chunk_count=10, max_concurrent=5):
+            """
+            download file in parallel with the number of chunk count given
 
-                with open(tmp_file, "wb") as f:
-                    async for chunk in response.aiter_bytes(chunk_size=8192):
-                        f.write(chunk)
-                        if progress is not None and download_task is not None:
-                            progress.update(download_task, advance=len(chunk))
+            :param url: URL to download
+            :param file_path: file path to write
+            :param total_size: total size of file
+            :param chunk_count: Number of chunks to split download into
+            :param max_concurrent: Maximum number of concurrent HTTP requests
+            :return: downloaded file path
+            """
+            chunk_size = total_size // chunk_count
+            ranges = [
+                (i * chunk_size, total_size - 1 if i == chunk_count - 1 else (i + 1) * chunk_size - 1)
+                for i in range(chunk_count)
+            ]
 
+            with open(file_path, "wb") as f:
+                f.truncate(total_size)
+
+            semaphore = asyncio.Semaphore(max_concurrent)
+
+            async def fetch_range(start, end, data_url, semaphore, max_retries=3, retry_delay=2):
+                """
+                Fetch a byte range with retry support.
+
+                :param start: Byte range start
+                :param end: Byte range end
+                :param data_url: URL to fetch from
+                :param semaphore: asyncio.Semaphore instance for concurrency limiting
+                :param max_retries: Max retry attempts
+                :param retry_delay: Initial delay between retries (seconds)
+                :return: (start_offset, content_bytes)
+                """
+                attempt = 0
+                headers = {"Range": f"bytes={start}-{end}"}
+
+                while attempt < max_retries:
+                    try:
+                        async with semaphore:
+                            async with httpx.AsyncClient() as client:
+                                response = await client.get(data_url, headers=headers)
+                                response.raise_for_status()
+                                return start, response.content
+                    except asyncio.CancelledError:
+                        raise
+                    except (httpx.RequestError, httpx.TimeoutException) as e:
+                        attempt += 1
+                        if attempt < max_retries:
+                            await asyncio.sleep(retry_delay * attempt)
+                        else:
+                            raise e
+                    except Exception as e:
+                        logger.error(f"Download failed for {start}:{end}: {e}")
+                        break
+
+            tasks = [fetch_range(start, end, url, semaphore) for start, end in ranges]
+
+            for task in asyncio.as_completed(tasks):
+                start, content = await task
+                with open(file_path, "r+b") as f:
+                    f.seek(start)
+                    f.write(content)
+                if progress and download_task:
+                    progress.update(download_task, advance=len(content))
+
+            return file_path
+
+        await download_file_in_parallel(file_url, tmp_file, remote_content_length)
 
         if progress and download_task:
             progress.update(download_task, description=f"[blue] Reprojecting...")

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import math
 import os
 import re
 from glob import glob

@@ -166,7 +166,7 @@ def predict(img_paths: List[str], output_file_path: str, num_workers=None, progr
         predict_task = progress.add_task(f"[cyan]Starting land use prediction")
 
     col_size, row_size = preinference_check(img_paths)
-    tile_size=256
+    tile_size=1024
     buffer = 64
     landuse_nodata = 255
 
@@ -265,7 +265,7 @@ def predict(img_paths: List[str], output_file_path: str, num_workers=None, progr
                         continue
 
     t2 = time.time()
-    logger.debug(f"total time: {t2 - t1}")
+    logger.debug(f"total time of prediction: {t2 - t1}")
 
     if predict_task is not None:
         progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")

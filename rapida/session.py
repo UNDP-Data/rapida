@@ -311,6 +311,16 @@ class Session(object):
         component = self.get_component(component=component)
         return component[variable]
 
+    def get_variable_title(self, component:str= None, variable=None ):
+        """
+        Gets the title for a given variable from a component
+        :param component:
+        :param variable:
+        :return:
+        """
+        component = self.get_component(component=component)
+        return component[variable]['title']
+
 
 def is_rapida_initialized():
     """

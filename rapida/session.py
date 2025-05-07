@@ -321,6 +321,20 @@ class Session(object):
         component = self.get_component(component=component)
         return component[variable]['title']
 
+    def get_var_id_from_title(self, title=None ):
+        """
+        Gets the var_id for a given title from a component
+        :param title:
+        :return:
+        """
+        components = self.get_components()
+        for comp in components:
+            variables = self.get_variables(component=comp)
+            for var in variables:
+                if self.get_variable_title(component=comp, variable=var) == title:
+                    return var
+        return None
+
 
 def is_rapida_initialized():
     """

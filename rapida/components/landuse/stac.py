@@ -234,7 +234,6 @@ async def download_from_https_async(
 
         with rasterio.open(tmp_file) as src:
             data = src.read()
-            dst_crs = CRS.from_wkt(target_srs.ExportToWkt())
 
             nodata = src.nodata if src.nodata is not None else no_data_value
 
@@ -250,24 +249,6 @@ async def download_from_https_async(
                     dataset.write(data)
                 gdal.FileFromMemBuffer(vsimem_path, memfile.read())
 
-        # load clip layer to make 1km buffer
-        # prediction model does not work along edge of data, so 1km buffer can be created before clipping.
-        df_poly = gpd.read_file(geopackage_file_path, layer=polygons_layer_name)
-        df_poly = df_poly.to_crs(dst_crs.to_string())
-
-        merged = df_poly.geometry.unary_union
-        buffered = merged.buffer(1000)
-        # also, make simplify with tolerance of 1km to reduce nodes
-        simplified = buffered.simplify(tolerance=1000, preserve_topology=True)
-        simplified_geom = gpd.GeoDataFrame(geometry=[simplified], crs=dst_crs.to_string())
-        # In some circumstances, I got error like "TopologyException: side location conflict",
-        # so use make_valid to fix some invalid polygons
-        simplified_geom["geometry"] = simplified_geom["geometry"].make_valid()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_cutline_path = os.path.join(tmpdir, "cutline.gpkg")
-            simplified_geom.to_file(tmp_cutline_path, layer=polygons_layer_name, driver="GPKG")
-
             warp_options = gdal.WarpOptions(
                     dstSRS=target_srs.ExportToWkt(),
                     format="GTiff",
@@ -275,7 +256,7 @@ async def download_from_https_async(
                     srcNodata=nodata,
                     dstNodata=nodata,
                     resampleAlg="near",
-                    cutlineDSName=tmp_cutline_path,
+                    cutlineDSName=geopackage_file_path,
                     cutlineLayer=polygons_layer_name,
                     cropToCutline=True,
                 )
@@ -291,7 +272,6 @@ async def download_from_https_async(
             rds.SetMetadata(metadata)
             gdal.Unlink(vsimem_path)
             rds = None
-
     finally:
         if os.path.exists(tmp_file):
             os.remove(tmp_file)
@@ -548,6 +528,37 @@ def search_stac_items(stac_client,
 
     return latest_per_tile
 
+
+def make_buffer_polygon(geopackage_file_path, polygons_layer_name, buffer=1000, gpkg_name="cutline.gpkg"):
+    """
+    load clip layer to make 1km buffer
+    prediction model does not work along edge of data, so 1km buffer can be created before clipping.
+
+    also, make simplify with tolerance of 1km to reduce nodes.
+
+    In some circumstances, I got error like "TopologyException: side location conflict",
+    so use make_valid to fix some invalid polygons
+
+    :param: geopackage_file_path: path to geopackage file
+    :param: polygons_layer_name: layer name
+    :param: buffer: buffer size
+    :param: gpkg_name: name of gpkg file
+    """
+    df_polygon = gpd.read_file(geopackage_file_path, layer=polygons_layer_name)
+    original_crs = df_polygon.crs
+
+    merged = df_polygon.geometry.unary_union
+    buffered = merged.buffer(buffer)
+    simplified = buffered.simplify(tolerance=buffer, preserve_topology=True)
+    simplified_geom = gpd.GeoDataFrame(geometry=[simplified], crs=original_crs)
+
+    simplified_geom["geometry"] = simplified_geom["geometry"].make_valid()
+
+    tmp_cutline_path = os.path.join(os.path.dirname(geopackage_file_path), gpkg_name)
+    simplified_geom.to_file(tmp_cutline_path, layer=polygons_layer_name, driver="GPKG")
+    return tmp_cutline_path
+
+
 async def download_stac(
     stac_url: str,
     collection_id: str,
@@ -622,6 +633,8 @@ async def download_stac(
 
     asset_nodata = {}
 
+    tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)
+
     semaphore = asyncio.Semaphore(max_workers)
 
     async def download_asset(url, asset_key, tile_id, nodata, target_datetime,cloud_cover, semaphore):
@@ -647,7 +660,7 @@ async def download_stac(
                         no_data_value=nodata,
                         item_datetime=target_datetime,
                         cloud_cover=cloud_cover,
-                        geopackage_file_path=geopackage_file_path,
+                        geopackage_file_path=tmp_cutline_path,
                         polygons_layer_name=polygons_layer_name,
                     )
                     if progress and stac_task:
@@ -682,6 +695,9 @@ async def download_stac(
 
         await asyncio.gather(*tasks, return_exceptions=True)
         raise
+
+    if os.path.exists(tmp_cutline_path):
+        os.remove(tmp_cutline_path)
 
     t3 = time.time()
     logger.debug(f"STAC Item download: {t3 - t2} seconds")

@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 from glob import glob
 from collections import defaultdict
 import concurrent.futures
@@ -249,17 +250,35 @@ async def download_from_https_async(
                     dataset.write(data)
                 gdal.FileFromMemBuffer(vsimem_path, memfile.read())
 
+        # load clip layer to make 1km buffer
+        # prediction model does not work along edge of data, so 1km buffer can be created before clipping.
+        df_poly = gpd.read_file(geopackage_file_path, layer=polygons_layer_name)
+        df_poly = df_poly.to_crs(dst_crs.to_string())
+
+        merged = df_poly.geometry.unary_union
+        buffered = merged.buffer(1000)
+        # also, make simplify with tolerance of 1km to reduce nodes
+        simplified = buffered.simplify(tolerance=1000, preserve_topology=True)
+        simplified_geom = gpd.GeoDataFrame(geometry=[simplified], crs=dst_crs.to_string())
+        # In some circumstances, I got error like "TopologyException: side location conflict",
+        # so use make_valid to fix some invalid polygons
+        simplified_geom["geometry"] = simplified_geom["geometry"].make_valid()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_cutline_path = os.path.join(tmpdir, "cutline.gpkg")
+            simplified_geom.to_file(tmp_cutline_path, layer=polygons_layer_name, driver="GPKG")
+
             warp_options = gdal.WarpOptions(
-                dstSRS=target_srs.ExportToWkt(),
-                format="GTiff",
-                creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
-                srcNodata=nodata,
-                dstNodata=nodata,
-                resampleAlg="near",
-                cutlineDSName=geopackage_file_path,
-                cutlineLayer=polygons_layer_name,
-                cropToCutline=True,
-            )
+                    dstSRS=target_srs.ExportToWkt(),
+                    format="GTiff",
+                    creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
+                    srcNodata=nodata,
+                    dstNodata=nodata,
+                    resampleAlg="near",
+                    cutlineDSName=tmp_cutline_path,
+                    cutlineLayer=polygons_layer_name,
+                    cropToCutline=True,
+                )
 
             rds = gdal.Warp(destNameOrDestDS=download_file,
                       srcDSOrSrcDSTab=vsimem_path,

@@ -599,7 +599,7 @@ async def download_stac(
         progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
 
     t2 = time.time()
-    logger.info(f"STAC Item search: {t2 - t1} seconds")
+    logger.debug(f"STAC Item search: {t2 - t1} seconds")
 
     asset_nodata = {}
 
@@ -682,7 +682,7 @@ async def download_stac(
         progress.remove_task(stac_task)
 
     t4 = time.time()
-    logger.info(f"Download completed: {t4 - t1} seconds")
+    logger.debug(f"Download completed: {t4 - t1} seconds")
 
     return output_files
 

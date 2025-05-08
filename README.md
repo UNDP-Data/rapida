@@ -25,10 +25,8 @@ flowchart LR
     end
     a --> vertical
     vertical --> u{{📤 upload}}
-   
-   
+    u{{📤 upload}} --> p{{🌐 publish}}
     
-
 ```
 
 ## Features 
@@ -64,7 +62,8 @@ flowchart LR
 
 ## Data
 
-> **rapida** operates
+> [!IMPORTANT]
+> **rapida** operates on public datasets
 
 ## Installation
 

@@ -202,7 +202,7 @@ class SentinelItem(object):
         predict(
             img_paths=img_paths,
             output_file_path=self.predicted_file,
-            num_workers=1,
+            # num_workers=1,
             progress=progress,
         )
         return self.predicted_file
@@ -309,7 +309,7 @@ class SentinelItem(object):
                                 progress.update(download_task, advance=len(chunk))
 
             if progress and download_task:
-                progress.update(download_task, description=f"[blue] Reprojecting...")
+                progress.update(download_task, description=f"[blue] Reprojecting {jp2_file}...")
 
             with rasterio.open(jp2_file) as src:
                 data = src.read()

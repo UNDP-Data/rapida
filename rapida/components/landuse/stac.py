@@ -1,18 +1,18 @@
 import asyncio
 import json
 import logging
+import multiprocessing
 import os
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from typing import Optional
 from calendar import monthrange
-import psutil
 from osgeo import gdal
 from datetime import date
 from rich.progress import Progress
 import pystac_client
 import rasterio
-import httpx
 import geopandas as gpd
 import numpy as np
 import shapely
@@ -316,7 +316,7 @@ async def download_stac(
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
-    max_workers: int = None,
+    max_workers: int = 4,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -362,89 +362,76 @@ async def download_stac(
         sentinel_items.append(SentinelItem(item, mask_file=tmp_cutline_path, mask_layer=polygons_layer_name))
 
     if progress and stac_task:
-        progress.update(stac_task, description=f"[cyan]Preparing to download {len(sentinel_items)} assets", total=len(sentinel_items))
+        progress.update(stac_task, description=f"[cyan]Preparing to download {len(sentinel_items)} items", total=len(sentinel_items))
 
     t2 = time.time()
-    logger.debug(f"STAC Item search: {t2 - t1} seconds")
+    logger.info(f"STAC Item search: {t2 - t1} seconds")
 
-    if max_workers is None:
-        max_workers = psutil.cpu_count(logical=False)
+    download_futures = []
+    downloaded_items = []
 
-    semaphore = asyncio.Semaphore(max_workers)
+    output_dir = os.path.dirname(output_file)
+    os.makedirs(output_dir, exist_ok=True)
 
-    async def download_item(item: SentinelItem, semaphore):
-        output_dir = os.path.dirname(output_file)
-        os.makedirs(output_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        for item in sentinel_items:
+            future = pool.submit(item.download_assets, download_dir=output_dir, progress=progress)
+            download_futures.append((item, future))
 
-        async with semaphore:
-            # retry max 5 times if any connection error occurs
-            max_retries = 5
-            for attempt in range(1, max_retries + 1):
-                try:
-                    item.download_assets(download_dir=output_dir, progress=progress)
-                    if progress and stac_task:
-                        progress.update(stac_task, description=f"[green]Downloaded {item.id}", advance=1)
+        if progress and stac_task:
+            progress.update(stac_task, description=f"[cyan]Downloading {len(download_futures)} items",
+                            total=len(download_futures))
 
-                    item.predict(progress=progress)
+        for item, future in download_futures:
+            try:
+                future.result()
+                downloaded_items.append(item)
+                if progress and stac_task:
+                    progress.update(stac_task, description=f"[cyan]downloaded {item.id}", advance=1)
+            except KeyboardInterrupt as e:
+                logger.warning(f"Interrupted. Cancelling downloads...", )
+                raise e
+            except Exception as e:
+                logger.error(f"Download failed for {item.item.id}: {e}")
 
-                    if progress and stac_task:
-                        progress.update(stac_task, description=f"[green]Predicted {item.id}")
+    predict_task = None
+    if progress:
+        predict_task = progress.add_task(f"[cyan]Predicting...", total=len(downloaded_items))
+    for item in downloaded_items:
+        if progress and predict_task:
+            progress.update(predict_task, description=f"[cyan]Predicting {item.item.id}")
 
-                    break
-                except asyncio.CancelledError:
-                    logger.error(f"Download cancelled for {item.id}")
-                    raise
-                except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
-                    logger.warning(f"Timeout on attempt {attempt} for {item.id}: {e}")
-                    if attempt < max_retries:
-                        await asyncio.sleep(5)
-                    else:
-                        logger.error(f"Failed after {max_retries} attempts: {item.id}")
-                except Exception as e:
-                    logger.error(f"Download failed for {item.id}: {e}")
-                    break
+        item.predict(progress=progress)
 
-    tasks = [
-        asyncio.create_task(download_item(sentinel_item, semaphore), name=f"{sentinel_item.id}")
-        for sentinel_item in sentinel_items
-    ]
+        if progress and predict_task:
+            progress.update(predict_task, description=f"[cyan]Predicted {item.item.id}")
 
-    try:
-        await asyncio.gather(*tasks)
-    except KeyboardInterrupt:
-        logging.warning("Download interrupted by user. Cancelling tasks...")
-
-        for task in tasks:
-            task.cancel()
-
-        await asyncio.gather(*tasks, return_exceptions=True)
-        raise
+    if progress and predict_task:
+        progress.remove_task(predict_task)
 
     if os.path.exists(tmp_cutline_path):
         os.remove(tmp_cutline_path)
 
     t3 = time.time()
-    logger.debug(f"STAC Items processed: {t3 - t2} seconds")
+    logger.info(f"STAC Items processed: {t3 - t2} seconds")
 
     if progress and stac_task:
-        progress.update(stac_task, description="[magenta]Mosaic processed files...")
+        progress.update(stac_task, description="[green]Creating mosaic...")
 
-    nodata_value = list(sentinel_items[0].asset_nodata.values())[0]
     prediction_files = [item.predicted_file for item in sentinel_items]
 
     gdal.BuildVRT(output_file, prediction_files,
                   resampleAlg="nearest",
                   outputSRS=target_srs,
-                  srcNodata=nodata_value,
-                  VRTNodata=nodata_value,
+                  VRTNodata=255,
                   addAlpha=False)
 
     if progress and stac_task:
-        progress.update(stac_task, description="[bold green]Download and crop complete!")
+        progress.update(stac_task, description="[green]Created mosaic")
         progress.remove_task(stac_task)
 
     t4 = time.time()
-    logger.debug(f"Download completed: {t4 - t1} seconds")
+    logger.info(f"Download completed: {t4 - t1} seconds")
 
     return output_file
 

@@ -2,12 +2,11 @@ import asyncio
 import json
 import logging
 import os
-from glob import glob
-from collections import defaultdict
 import concurrent.futures
 import threading
 from typing import Optional
 from calendar import monthrange
+import psutil
 from osgeo import gdal
 from datetime import date
 from rich.progress import Progress
@@ -132,80 +131,6 @@ def get_bounds_and_resolution(file_paths):
     yRes = min(yres_list)
 
     return (left, bottom, right, top), xRes, yRes
-
-
-def crop_asset_files(base_dir,
-                     target_srs,
-                     asset_nodata: dict[str, int],
-                     progress: Progress = None,):
-    """
-    Create a VRT for each asset (eg, B02, B03), then crop downloaded data by project area.
-    The output file is geotiff file.
-
-    :param base_dir: Root directory for downloaded sentinel data
-    :param target_srs: target projection CRS
-    :param progress: rich progress object
-    """
-    post_task = None
-    if progress is not None:
-        post_task = progress.add_task(
-            description=f'[red] Postprocessing downloaded data', total=None)
-
-    band_files = defaultdict(list)
-
-    # delete all vrt and tif exists under base_dir
-    for fname in os.listdir(base_dir):
-        if fname.endswith((".tif", ".vrt", ".xml")):
-            path = os.path.join(base_dir, fname)
-            if os.path.isfile(path):
-                os.remove(path)
-
-    for jp2_path in glob(os.path.join(base_dir, "**", "B??.tif"), recursive=True):
-        filename = os.path.basename(jp2_path)
-        band_name = os.path.splitext(filename)[0]
-        band_files[band_name].append(jp2_path)
-
-
-    output_files = []
-
-    if progress is not None and post_task is not None:
-        progress.update(post_task, description=f'[red] Postprocessing...', total=len(band_files))
-
-    for band_name, files in band_files.items():
-        if progress is not None and post_task is not None:
-            progress.update(post_task, description="[red] Creating VRT...")
-        vrt_path = os.path.join(base_dir, f"{band_name}.vrt")
-
-        # get maximum bounds from all files
-        bounds, xRes, yRes = get_bounds_and_resolution(files)
-
-        nodata_value = 0
-        if asset_nodata is not None and asset_nodata[band_name]:
-            nodata_value = asset_nodata[band_name]
-
-        # create VRT with highest resolution
-        gdal.BuildVRT(vrt_path, files,
-                      outputBounds=bounds,
-                      xRes=xRes,
-                      yRes=yRes,
-                      resampleAlg="nearest",
-                      outputSRS=target_srs,
-                      srcNodata=nodata_value,
-                      VRTNodata=nodata_value,
-                      addAlpha=False)
-
-        if progress is not None and post_task is not None:
-            progress.update(post_task, description="[red] Cropping VRT...")
-
-        output_files.append(vrt_path)
-
-        if progress is not None and post_task is not None:
-            progress.update(post_task, description=f"[red] Processed {band_name}", advance=1)
-
-    if progress and post_task:
-        progress.remove_task(post_task)
-
-    return output_files
 
 
 def merge_or_voronoi(df: gpd.GeoDataFrame, scene_size=110000) -> list[Polygon]:
@@ -385,13 +310,13 @@ async def download_stac(
     collection_id: str,
     geopackage_file_path: str,
     polygons_layer_name: str,
-    output_dir: str,
+    output_file: str,
     target_year: int,
     target_month:int,
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
-    max_workers: int = 5,
+    max_workers: int = None,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -400,7 +325,7 @@ async def download_stac(
     :param collection_id: collection id
     :param geopackage_file_path: path to geopackage file
     :param polygons_layer_name: name of layer polygon layer in geopackage to mask
-    :param output_dir: output directory
+    :param output_file: output file path
     :param target_year: target year
     :param target_assets: target assets.
     :param target_srs: target projection CRS
@@ -442,9 +367,13 @@ async def download_stac(
     t2 = time.time()
     logger.debug(f"STAC Item search: {t2 - t1} seconds")
 
+    if max_workers is None:
+        max_workers = psutil.cpu_count(logical=False)
+
     semaphore = asyncio.Semaphore(max_workers)
 
     async def download_item(item: SentinelItem, semaphore):
+        output_dir = os.path.dirname(output_file)
         os.makedirs(output_dir, exist_ok=True)
 
         async with semaphore:
@@ -455,6 +384,12 @@ async def download_stac(
                     item.download_assets(download_dir=output_dir, progress=progress)
                     if progress and stac_task:
                         progress.update(stac_task, description=f"[green]Downloaded {item.id}", advance=1)
+
+                    item.predict(progress=progress)
+
+                    if progress and stac_task:
+                        progress.update(stac_task, description=f"[green]Predicted {item.id}")
+
                     break
                 except asyncio.CancelledError:
                     logger.error(f"Download cancelled for {item.id}")
@@ -489,17 +424,20 @@ async def download_stac(
         os.remove(tmp_cutline_path)
 
     t3 = time.time()
-    logger.debug(f"STAC Item download: {t3 - t2} seconds")
+    logger.debug(f"STAC Items processed: {t3 - t2} seconds")
 
     if progress and stac_task:
-        progress.update(stac_task, description="[magenta]Cropping downloaded assets...")
+        progress.update(stac_task, description="[magenta]Mosaic processed files...")
 
-    output_files = crop_asset_files(
-        base_dir=output_dir,
-        target_srs=target_srs,
-        asset_nodata=sentinel_items[0].asset_nodata,
-        progress=progress,
-    )
+    nodata_value = list(sentinel_items[0].asset_nodata.values())[0]
+    prediction_files = [item.predicted_file for item in sentinel_items]
+
+    gdal.BuildVRT(output_file, prediction_files,
+                  resampleAlg="nearest",
+                  outputSRS=target_srs,
+                  srcNodata=nodata_value,
+                  VRTNodata=nodata_value,
+                  addAlpha=False)
 
     if progress and stac_task:
         progress.update(stac_task, description="[bold green]Download and crop complete!")
@@ -508,5 +446,5 @@ async def download_stac(
     t4 = time.time()
     logger.debug(f"Download completed: {t4 - t1} seconds")
 
-    return output_files
+    return output_file
 

@@ -12,7 +12,7 @@ import rasterio
 import numpy as np
 from rich.progress import Progress
 
-# from rapida.components.landuse import predict
+from rapida.components.landuse.prediction import predict
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 
 
 class SentinelItem(object):
+    """
+    A class to manage data manipulation for a Sentinel 2 L1C item.
+    """
+
     @property
     def item(self)->pystac.Item:
         return self._item
@@ -93,6 +97,12 @@ class SentinelItem(object):
     def asset_files(self) -> dict[str, str]:
         sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
         return sorted_dict
+
+
+    @property
+    def predicted_file(self)->str:
+        predict_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "landuse_prediction.tif")
+        return predict_file
 
 
     def __init__(self, item: pystac.Item, mask_file: str, mask_layer: str):
@@ -182,20 +192,20 @@ class SentinelItem(object):
         return self.asset_files
 
 
-    # def predict(self, output_file, progress=None)->str:
-    #     """
-    #     Predict land use from downloaded assets
-    #
-    #     :param output_file: output file path to save predcited result
-    #     :return: output file path
-    #     """
-    #     img_paths = list(self.asset_files.values())
-    #     predict(
-    #         img_paths=img_paths,
-    #         output_file_path=output_file,
-    #         progress=progress,
-    #     )
-    #     return output_file
+    def predict(self, progress=None)->str:
+        """
+        Predict land use from downloaded assets
+
+        :return: output file path
+        """
+        img_paths = list(self.asset_files.values())
+        predict(
+            img_paths=img_paths,
+            output_file_path=self.predicted_file,
+            num_workers=1,
+            progress=progress,
+        )
+        return self.predicted_file
 
 
     def _s3_to_http(self, url):
@@ -365,7 +375,6 @@ if __name__ == '__main__':
     mask_file = "/data/kigali_small/data/kigali_small.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
-    prediction_file = os.path.join(download_dir, "prediction.tif")
 
     item = pystac.Item.from_file(item_url)
 
@@ -377,10 +386,10 @@ if __name__ == '__main__':
         t2 = time.time()
         logger.info(f"download time: {t2 - t1}")
 
-        # downloaded_files = list(sentinel_item.asset_files.values())
-        # logger.info(f"downloaded files: {downloaded_files}")
-        #
-        # sentinel_item.predict(output_file=prediction_file, progress=progress)
-        #
-        # t3 = time.time()
-        # logger.info(f"prediction time: {t3 - t2}, total time: {t3 - t1}")
+        downloaded_files = list(sentinel_item.asset_files.values())
+        logger.info(f"downloaded files: {downloaded_files}")
+
+        sentinel_item.predict(progress=progress)
+
+        t3 = time.time()
+        logger.info(f"prediction time: {t3 - t2}, total time: {t3 - t1}")

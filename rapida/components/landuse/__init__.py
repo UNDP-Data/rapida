@@ -10,7 +10,7 @@ import geopandas as gpd
 
 from rapida.components.landuse.stac import interpolate_stac_source, download_stac
 from rapida.components.landuse.prediction import predict
-from rapida.components.landuse.constants import STAC_MAP
+from rapida.components.landuse.constants import STAC_MAP, SENTINEL2_ASSET_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
 from rapida.core.variable import Variable
@@ -90,13 +90,7 @@ class LanduseVariable(Variable):
         """
         Dictionary of Earth search asset name and band name
         """
-        needed_assets = (
-            'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12')
-        earth_search_assets = (
-            'blue', 'green', 'red', 'rededge1', 'rededge2', 'rededge3', 'nir', 'swir16', 'swir22'
-        )
-        asset_map = dict(zip(earth_search_assets, needed_assets))
-        return asset_map
+        return SENTINEL2_ASSET_MAP
 
     @property
     def downloaded_files(self) -> List[str]:

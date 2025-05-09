@@ -106,7 +106,7 @@ class LanduseVariable(Variable):
         project = Project(os.getcwd())
         output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
         assets = list(self.target_asset.values())
-        return [os.path.join(output_dir, f"{asset}.tif") for asset in assets]
+        return [os.path.join(output_dir, f"{asset}.vrt") for asset in assets]
 
     @property
     def prediction_output_image(self) -> str:

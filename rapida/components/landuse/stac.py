@@ -1,11 +1,11 @@
 import asyncio
 import json
 import logging
-import multiprocessing
 import os
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+from queue import Queue
 from typing import Optional
 from calendar import monthrange
 from osgeo import gdal
@@ -367,44 +367,53 @@ async def download_stac(
     t2 = time.time()
     logger.info(f"STAC Item search: {t2 - t1} seconds")
 
-    download_futures = []
-    downloaded_items = []
-
     output_dir = os.path.dirname(output_file)
     os.makedirs(output_dir, exist_ok=True)
 
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        for item in sentinel_items:
-            future = pool.submit(item.download_assets, download_dir=output_dir, progress=progress)
-            download_futures.append((item, future))
-
-        if progress and stac_task:
-            progress.update(stac_task, description=f"[cyan]Downloading {len(download_futures)} items",
-                            total=len(download_futures))
-
-        for item, future in download_futures:
-            try:
-                future.result()
-                downloaded_items.append(item)
-                if progress and stac_task:
-                    progress.update(stac_task, description=f"[cyan]downloaded {item.id}", advance=1)
-            except KeyboardInterrupt as e:
-                logger.warning(f"Interrupted. Cancelling downloads...", )
-                raise e
-            except Exception as e:
-                logger.error(f"Download failed for {item.item.id}: {e}")
-
     predict_task = None
-    if progress:
-        predict_task = progress.add_task(f"[cyan]Predicting...", total=len(downloaded_items))
-    for item in downloaded_items:
-        if progress and predict_task:
+    predict_task_lock = threading.Lock()
+
+    predict_queue = Queue()
+    completed_items = []
+
+    def downloader(item: SentinelItem):
+        try:
+            item.download_assets(download_dir=output_dir, progress=progress)
+            predict_queue.put(item)
+            if progress and stac_task:
+                progress.update(stac_task, advance=1)
+        except Exception as e:
+            logger.error(f"Download failed for {item.item.id}: {e}")
+
+    def predictor():
+        nonlocal predict_task
+        while True:
+            item = predict_queue.get()
+            if item is None:
+                break
+            with predict_task_lock:
+                if predict_task is None and progress:
+                    predict_task = progress.add_task("[cyan]Predicting...", total=len(sentinel_items))
+
             progress.update(predict_task, description=f"[cyan]Predicting {item.item.id}")
+            item.predict(progress=progress)
+            completed_items.append(item)
+            progress.update(predict_task, advance=1)
+            predict_queue.task_done()
 
-        item.predict(progress=progress)
+    prediction_thread = threading.Thread(target=predictor)
+    prediction_thread.start()
 
-        if progress and predict_task:
-            progress.update(predict_task, description=f"[cyan]Predicted {item.item.id}")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for item in sentinel_items:
+            executor.submit(downloader, item)
+
+    if progress and stac_task:
+        progress.update(stac_task, description=f"[cyan]Downloaded {len(sentinel_items)} items", total=None)
+
+    predict_queue.join()
+    predict_queue.put(None)
+    prediction_thread.join()
 
     if progress and predict_task:
         progress.remove_task(predict_task)

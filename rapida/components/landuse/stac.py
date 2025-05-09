@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import re
-import tempfile
 from glob import glob
 from collections import defaultdict
 import concurrent.futures
@@ -15,7 +14,6 @@ from datetime import datetime, date
 from rich.progress import Progress
 import pystac_client
 import rasterio
-from rasterio.crs import CRS
 import httpx
 import geopandas as gpd
 import numpy as np

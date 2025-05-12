@@ -142,8 +142,16 @@ class SentinelItem(object):
         :return: Dictionary of band name -> downloaded file path
         """
         item_path = os.path.join(download_dir, self.id, "item.json")
-        with open(item_path, "w", encoding="utf-8") as f:
-            json.dump(self.item.to_dict(), f, indent=2)
+        if os.path.exists(item_path):
+            with open(item_path, "r", encoding="utf-8") as f:
+                existing_item = json.load(f)
+                if existing_item.get("id") == self.item.id:
+                    logger.warning(f"The same item ({self.id}) has already been downloaded. Skipping")
+                    return self.asset_files
+                else:
+                    # if different item id, delete old prediction file if exists
+                    if os.path.exists(self.predicted_file):
+                        os.remove(self.predicted_file)
 
         self._asset_files = {}
         loop = asyncio.new_event_loop()
@@ -194,6 +202,10 @@ class SentinelItem(object):
         loop.run_until_complete(download_all())
         loop.close()
 
+        # once all downloads are successfully done, write item.json in the folder
+        with open(item_path, "w", encoding="utf-8") as f:
+            json.dump(self.item.to_dict(), f, indent=2)
+
         return self.asset_files
 
 
@@ -203,14 +215,20 @@ class SentinelItem(object):
 
         :return: output file path
         """
-        img_paths = list(self.asset_files.values())
-        predict(
-            img_paths=img_paths,
-            output_file_path=self.predicted_file,
-            # num_workers=1,
-            progress=progress,
-        )
-        return self.predicted_file
+        try:
+            img_paths = list(self.asset_files.values())
+            predict(
+                img_paths=img_paths,
+                output_file_path=self.predicted_file,
+                # num_workers=1,
+                progress=progress,
+            )
+            return self.predicted_file
+        except Exception as e:
+            # delete incomplete predicted file if error occurs
+            if os.path.exists(self.predicted_file):
+                os.remove(self.predicted_file)
+            raise e
 
 
     def _s3_to_http(self, url):

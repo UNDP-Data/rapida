@@ -273,7 +273,7 @@ async def download_stac(
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
-    max_workers: int = 4,
+    max_workers: int = 2,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -287,6 +287,7 @@ async def download_stac(
     :param target_assets: target assets.
     :param target_srs: target projection CRS
     :param progress: rich progress object
+    :param max_workers: maximum number of workers to download JP2 file concurrently
     :return the list of output files
     """
     t1 = time.time()
@@ -336,7 +337,9 @@ async def download_stac(
     def downloader(item: SentinelItem):
         try:
             item.download_assets(download_dir=output_dir, progress=progress)
-            predict_queue.put(item)
+            if not os.path.exists(item.predicted_file):
+                # if predicted file does not exist in the folder, add prediction task to the queue
+                predict_queue.put(item)
             if progress and stac_task:
                 progress.update(stac_task, advance=1)
         except Exception as e:

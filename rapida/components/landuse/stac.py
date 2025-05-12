@@ -4,6 +4,7 @@ import os
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from datetime import datetime
 from queue import Queue
 from typing import Optional
 from calendar import monthrange
@@ -383,7 +384,22 @@ async def download_stac(
     if progress and stac_task:
         progress.update(stac_task, description="[green]Creating mosaic...")
 
-    prediction_files = [item.predicted_file for item in sentinel_items]
+    # sort items by datetime and cloud cover
+    sentinel_items_sorted = sorted(
+        sentinel_items,
+        key=lambda item: (
+            item.item.datetime or datetime.min,
+            item.item.properties.get("eo:cloud_cover", float("inf"))
+        )
+    )
+
+    # for debug en sure items are sorted by datetime and cloud cover
+    for item in sentinel_items_sorted:
+        dt = item.item.datetime.isoformat() if item.item.datetime else "None"
+        cc = item.item.properties.get("eo:cloud_cover", "None")
+        logger.debug(f"{item.id}: datetime = {dt}, cloud_cover = {cc}, file = {item.predicted_file}")
+
+    prediction_files = [item.predicted_file for item in sentinel_items_sorted]
 
     gdal.BuildVRT(output_file, prediction_files,
                   resampleAlg="nearest",

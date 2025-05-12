@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import asyncio
@@ -140,6 +141,10 @@ class SentinelItem(object):
         :param max_workers: maximum number of parallel downloads
         :return: Dictionary of band name -> downloaded file path
         """
+        item_path = os.path.join(download_dir, self.id, "item.json")
+        with open(item_path, "w", encoding="utf-8") as f:
+            json.dump(self.item.to_dict(), f, indent=2)
+
         self._asset_files = {}
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -348,7 +353,6 @@ class SentinelItem(object):
                                 srcDSOrSrcDSTab=vsimem_path,
                                 options=warp_options)
                 metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
-
                 item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
                 if item_datetime is not None:
                     metadata["ITEM_DATETIME"] = item_datetime

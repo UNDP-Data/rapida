@@ -1,9 +1,8 @@
-import asyncio
 import json
 import logging
 import os
 import concurrent.futures
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 import threading
 from queue import Queue
 from typing import Optional
@@ -12,7 +11,6 @@ from osgeo import gdal
 from datetime import date
 from rich.progress import Progress
 import pystac_client
-import rasterio
 import geopandas as gpd
 import numpy as np
 import shapely
@@ -108,29 +106,6 @@ def create_date_range(target_year: int, target_month: Optional[int] = None, dura
     start_date = subtract_months(end_date, duration)
 
     return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
-
-
-def get_bounds_and_resolution(file_paths):
-    bounds = []
-    xres_list = []
-    yres_list = []
-
-    for fp in file_paths:
-        with rasterio.open(fp) as src:
-            bounds.append(src.bounds)
-            xres, yres = src.res
-            xres_list.append(xres)
-            yres_list.append(yres)
-
-    left = min(b.left for b in bounds)
-    bottom = min(b.bottom for b in bounds)
-    right = max(b.right for b in bounds)
-    top = max(b.top for b in bounds)
-
-    xRes = min(xres_list)
-    yRes = min(yres_list)
-
-    return (left, bottom, right, top), xRes, yRes
 
 
 def merge_or_voronoi(df: gpd.GeoDataFrame, scene_size=110000) -> list[Polygon]:

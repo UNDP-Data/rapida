@@ -22,25 +22,6 @@ from rapida.components.landuse.sentinel_item import SentinelItem
 logger = logging.getLogger('rapida')
 
 
-def interpolate_stac_source(source: str) -> dict[str, str]:
-    """
-    Interpolate stac source. Source of stac should be defined like below:
-
-    {stac_id}:{collection_id}:{target band value}
-
-    :param source: stac source
-    :return: dist consist of id, collection and value
-    """
-    parts = source.split(':')
-    assert len(parts) == 3, 'Invalid source definition'
-    stac_id, collection, target_value = parts
-    return {
-        'id': stac_id,
-        'collection': collection,
-        'value': target_value
-    }
-
-
 def create_date_range(target_year: int, target_month: Optional[int] = None, duration: int = 6) -> str:
     """
     Generate a date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.

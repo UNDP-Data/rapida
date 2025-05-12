@@ -8,8 +8,7 @@ from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
 
-from rapida.components.landuse.stac import interpolate_stac_source, download_stac
-# from rapida.components.landuse.prediction import predict
+from rapida.components.landuse.stac import download_stac
 from rapida.components.landuse.constants import STAC_MAP, SENTINEL2_ASSET_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
@@ -57,7 +56,7 @@ class LanduseVariable(Variable):
         """
         STAC Server root URL
         """
-        stac_id = interpolate_stac_source(self.source)['id']
+        stac_id = self._interpolate_stac_source(self.source)['id']
         url = STAC_MAP[stac_id]
         assert url is not None, f'Unsupported stac_id {stac_id}'
         return url
@@ -67,7 +66,7 @@ class LanduseVariable(Variable):
         """
         STAC Collection ID
         """
-        collection = interpolate_stac_source(self.source)['collection']
+        collection = self._interpolate_stac_source(self.source)['collection']
         return collection
 
     @property
@@ -82,7 +81,7 @@ class LanduseVariable(Variable):
         """
         Target band value for zonal statistics
         """
-        value = interpolate_stac_source(self.source)['value']
+        value = self._interpolate_stac_source(self.source)['value']
         return int(value)
 
     @property
@@ -320,3 +319,20 @@ class LanduseVariable(Variable):
     def resolve(self, **kwargs):
         pass
 
+    def _interpolate_stac_source(self, source: str) -> dict[str, str]:
+        """
+        Interpolate stac source. Source of stac should be defined like below:
+
+        {stac_id}:{collection_id}:{target band value}
+
+        :param source: stac source
+        :return: dist consist of id, collection and value
+        """
+        parts = source.split(':')
+        assert len(parts) == 3, 'Invalid source definition'
+        stac_id, collection, target_value = parts
+        return {
+            'id': stac_id,
+            'collection': collection,
+            'value': target_value
+        }

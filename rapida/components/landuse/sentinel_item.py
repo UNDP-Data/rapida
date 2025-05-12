@@ -96,12 +96,16 @@ class SentinelItem(object):
 
     @property
     def asset_files(self) -> dict[str, str]:
+        if len(self._asset_files) == 0:
+            return {}
         sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
         return sorted_dict
 
 
     @property
     def predicted_file(self)->str:
+        if len(self.asset_files) == 0:
+            return ""
         predict_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "landuse_prediction.tif")
         return predict_file
 
@@ -141,6 +145,11 @@ class SentinelItem(object):
         :param max_workers: maximum number of parallel downloads
         :return: Dictionary of band name -> downloaded file path
         """
+        self._asset_files = {
+            band_name: os.path.join(download_dir, self.id, f"{band_name}.tif")
+            for asset_key, band_name in self.target_asset.items()
+        }
+
         item_path = os.path.join(download_dir, self.id, "item.json")
         if os.path.exists(item_path):
             with open(item_path, "r", encoding="utf-8") as f:
@@ -153,7 +162,6 @@ class SentinelItem(object):
                     if os.path.exists(self.predicted_file):
                         os.remove(self.predicted_file)
 
-        self._asset_files = {}
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         semaphore = asyncio.Semaphore(max_workers)
@@ -177,7 +185,7 @@ class SentinelItem(object):
                                 no_data_value=self.asset_nodata[band_name],
                                 progress=progress,
                             )
-                            self._asset_files[band_name] = result
+                            # self._asset_files[band_name] = result
                             return
                         except Exception as e:
                             logger.warning(f"[{band_name}] Attempt {attempt}/{max_retries} failed: {e}")

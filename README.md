@@ -60,10 +60,79 @@ flowchart LR
 ... and others
 
 
-## Data
+## Data sources
 
 > [!IMPORTANT]
-> **rapida** operates on public datasets
+> **rapida** operates with public datasets. However, some of these datasets rae currently being hosted in
+> [GeoHub](https://geohub.data.undp.org/). This is for two main reasons. First, in case a data source is available from 
+> one source only it was moved to Geohub to create a backup. Second, some data sources like population have been also 
+> curated and optimized as to facilitate the assessment process.
+
+**rapida** is about conducting geospatial assessments on  geo layers. Various properties/aspects of the layers are 
+assessed or evaluated over an area of interest. The variables can be grouped into high level components that correspond
+to major areas of evaluation in the context of crises like : population, built environment (buildings, roads), natural
+environment (land use/cover, livestock), socio-economical environment (GDP, relative wealth index, deprivation,HDI).
+
+
+<details>
+
+<summary>
+## 🧑‍🤝‍🧑 **Population**
+</summary>
+Sourced from [WorldPop](https://www.worldpop.org/) project, the components provides country based population data in 
+raster format. The constrained (conditioned by buildings), UN adjusted version was selected as it was considered the best
+match. As the most recent population dataset was generated for 2020 rapida is forecasting the 2020 population using 
+national data from World Bank that is available for several year in the past in respect to 2020. 
+From there a coefficient is computed by dividing the target or requested year (ex 2025) to 2020 and the population
+statistics computed for 2020 or base year are multiplied with this coefficient.
+</details>
+
+
+
+ 
+<details>
+
+<summary>
+## 🏙️ **Built environment**
+</summary>
+
+2. Buildings
+---
+3. Electrical grid
+---
+4. Roads
+---
+</details>
+
+
+
+ 
+<details>
+<summary>
+## 🏙️ **Natural environment**
+</summary>
+
+5.  Landuse
+---
+</details>
+
+
+<details>
+<summary>
+## 💰 **Socio-economic environment**
+</summary>
+
+6. Deprivation
+---
+7. Relative Wealth Index
+---
+8. GDP
+---
+</details>
+
+
+
+
 
 ## Installation
 

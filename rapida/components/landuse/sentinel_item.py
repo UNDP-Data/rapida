@@ -28,14 +28,25 @@ class SentinelItem(object):
 
     @property
     def item(self)->pystac.Item:
+        """
+        Get STAC Item instance
+        :return: pystac.Item instance
+        """
         return self._item
 
     @item.setter
     def item(self, item:pystac.Item):
+        """
+        Set STAC Item instance
+        :param item: pystac.Item
+        """
         self._item = item
 
     @property
     def id(self)->str:
+        """
+        ID for the class instance. It uses grid:code for unique ID.
+        """
         tile_id = self._item.properties.get("grid:code")
         if tile_id is None:
             tile_id = self._item.id
@@ -50,6 +61,9 @@ class SentinelItem(object):
 
     @property
     def target_srs(self) -> osr.SpatialReference:
+        """
+        Get target spatial reference used in the mask layer
+        """
         if self._target_srs is None:
             ds = ogr.Open(self.mask_file)
             if ds is None:
@@ -65,6 +79,9 @@ class SentinelItem(object):
 
     @property
     def min_resolution(self) -> int:
+        """
+        Get minimum resolution of assets from item JSON object
+        """
         resolutions = []
         for asset_key in self.target_asset:
             asset = self.item.assets[asset_key]
@@ -79,6 +96,9 @@ class SentinelItem(object):
 
     @property
     def asset_nodata(self) -> dict[str, int]:
+        """
+        Get no data value for asset from item JSON object
+        """
         nodata_dict = {}
         for asset_key, band_name in self.target_asset.items():
             asset = self.item.assets.get(asset_key)
@@ -96,6 +116,9 @@ class SentinelItem(object):
 
     @property
     def asset_files(self) -> dict[str, str]:
+        """
+        The dictionary of file paths to assets. If download_assets function is not called, it returns empty dict.
+        """
         if len(self._asset_files) == 0:
             return {}
         sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
@@ -104,6 +127,9 @@ class SentinelItem(object):
 
     @property
     def predicted_file(self)->str:
+        """
+        Get the file path of the predicted file. If download_assets function is not called, it returns empty string.
+        """
         if len(self.asset_files) == 0:
             return ""
         predict_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "landuse_prediction.tif")

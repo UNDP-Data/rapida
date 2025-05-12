@@ -13,3 +13,11 @@ DYNAMIC_WORLD_COLORMAP = {
 STAC_MAP = {
     'earth-search': 'https://earth-search.aws.element84.com/v1'
 }
+
+needed_assets = (
+    'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'
+)
+earth_search_assets = (
+    'blue', 'green', 'red', 'rededge1', 'rededge2', 'rededge3', 'nir', 'swir16', 'swir22'
+)
+SENTINEL2_ASSET_MAP = dict(zip(earth_search_assets, needed_assets))

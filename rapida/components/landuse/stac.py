@@ -1,47 +1,26 @@
-import asyncio
 import json
 import logging
 import os
-import re
-from glob import glob
-from collections import defaultdict
 import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
 import threading
+from datetime import datetime
+from queue import Queue
 from typing import Optional
 from calendar import monthrange
 from osgeo import gdal
-from datetime import datetime, date
+from datetime import date
 from rich.progress import Progress
 import pystac_client
-import rasterio
-import httpx
 import geopandas as gpd
 import numpy as np
 import shapely
 from shapely.geometry import Point, MultiPoint, Polygon
 import time
 
+from rapida.components.landuse.sentinel_item import SentinelItem
 
 logger = logging.getLogger('rapida')
-
-
-def interpolate_stac_source(source: str) -> dict[str, str]:
-    """
-    Interpolate stac source. Source of stac should be defined like below:
-
-    {stac_id}:{collection_id}:{target band value}
-
-    :param source: stac source
-    :return: dist consist of id, collection and value
-    """
-    parts = source.split(':')
-    assert len(parts) == 3, 'Invalid source definition'
-    stac_id, collection, target_value = parts
-    return {
-        'id': stac_id,
-        'collection': collection,
-        'value': target_value
-    }
 
 
 def create_date_range(target_year: int, target_month: Optional[int] = None, duration: int = 6) -> str:
@@ -109,279 +88,6 @@ def create_date_range(target_year: int, target_month: Optional[int] = None, dura
     start_date = subtract_months(end_date, duration)
 
     return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
-
-
-def s3_to_http(url):
-    """
-    Convert s3 protocol to http protocol
-
-    :param url: URL starts with s3://
-    :return http url
-    """
-    if url.startswith('s3://'):
-        s3_path = url
-        bucket = s3_path[5:].split('/')[0]
-        object_name = '/'.join(s3_path[5:].split('/')[1:])
-        return 'https://{0}.s3.amazonaws.com/{1}'.format(bucket, object_name)
-    else:
-        return url
-
-
-def harmonize_to_old(data, nodata_value):
-    """
-    Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
-
-    described at https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a#Baseline-Change
-
-    Parameters
-    ----------
-    data : np.ndarray
-        A DataArray with dimensions (e.g., time, band, y, x).
-    nodata_value : int
-        The value representing no data.
-
-    Returns
-    -------
-    harmonized : xarray.DataArray
-        The input data with an offset of 1000 subtracted.
-    """
-    offset = 1000
-    harmonized = np.where(data != nodata_value, data - offset, data)
-    return harmonized
-
-
-async def download_from_https_async(
-        file_url: str,
-        target: str,
-        target_srs: str,
-        geopackage_file_path,
-        polygons_layer_name,
-        no_data_value: int = 0,
-        item_datetime: str = None,
-        cloud_cover: float = None,
-        progress=None,
-) -> str:
-    """
-    Download JP2 file from STAC server, then reproject and crop by project area, and transform to GeoTiff file.
-
-    :param file_url: file URL to download
-    :param target: target file name without extension
-    :param geopackage_file_path: path to geopackage file
-    :param polygons_layer_name: name of layer polygon layer in geopackage to mask
-    :param no_data_value: nodata value. default is 0
-    :param item_datetime: item datetime string
-    :param cloud_cover: cloud cover percentage
-    :param progress: rich progress instance
-    :return: output file URL
-    """
-    download_task = None
-    if progress is not None:
-        download_task = progress.add_task(
-            description=f'[blue] Downloading {file_url}', total=None)
-
-    extension = os.path.splitext(file_url)[1]
-    download_file = f"{target}.tif"
-
-    tmp_file = f"{target}{extension}.tmp"
-
-    try:
-        # fetch content-length from remote file header
-        async with httpx.AsyncClient() as client:
-            head_resp = await client.head(file_url)
-            head_resp.raise_for_status()
-            remote_content_length = head_resp.headers.get("content-length")
-            if remote_content_length is None:
-                raise ValueError("No content-length in response headers")
-            remote_content_length = int(remote_content_length)
-
-        if os.path.exists(download_file):
-            with rasterio.open(download_file) as src:
-                meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
-                if meta_content_length and int(meta_content_length) == remote_content_length:
-                    logging.debug(f"file already exists. Skipped: {download_file}")
-                    return download_file
-
-        pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
-        match = re.search(pattern, file_url)
-        if match:
-            year, month, day = map(int, match.groups())
-            acquisition_date = datetime(year, month, day)
-            logging.debug("Extracted acquisition date: %s", acquisition_date)
-        else:
-            logging.error("Failed to extract date from file_url: %s", file_url)
-            raise ValueError(f"Could not extract date from URL: {file_url}")
-
-        cutoff = datetime(2022, 1, 25)
-
-        async with httpx.AsyncClient() as client:
-            async with client.stream("GET", file_url) as response:
-                response.raise_for_status()
-                total = int(response.headers.get("content-length", 0))
-
-                if progress is not None and download_task is not None:
-                    progress.update(download_task, total=total)
-
-                with open(tmp_file, "wb") as f:
-                    async for chunk in response.aiter_bytes():
-                        f.write(chunk)
-                        if progress is not None and download_task is not None:
-                            progress.update(download_task, advance=len(chunk))
-
-        if progress and download_task:
-            progress.update(download_task, description=f"[blue] Reprojecting...")
-
-        with rasterio.open(tmp_file) as src:
-            data = src.read()
-
-            nodata = src.nodata if src.nodata is not None else no_data_value
-
-            if acquisition_date >= cutoff:
-                data = harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
-
-            profile = src.profile
-            profile.update(driver="GTiff", dtype=data.dtype, count=src.count)
-
-            vsimem_path = "/vsimem/in.tif"
-            with rasterio.MemoryFile() as memfile:
-                with memfile.open(**profile) as dataset:
-                    dataset.write(data)
-                gdal.FileFromMemBuffer(vsimem_path, memfile.read())
-
-            warp_options = gdal.WarpOptions(
-                    dstSRS=target_srs.ExportToWkt(),
-                    format="GTiff",
-                    creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
-                    srcNodata=nodata,
-                    dstNodata=nodata,
-                    resampleAlg="near",
-                    cutlineDSName=geopackage_file_path,
-                    cutlineLayer=polygons_layer_name,
-                    cropToCutline=True,
-                )
-
-            rds = gdal.Warp(destNameOrDestDS=download_file,
-                      srcDSOrSrcDSTab=vsimem_path,
-                      options=warp_options)
-            metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
-            if item_datetime is not None:
-                metadata["ITEM_DATETIME"] = item_datetime
-            if cloud_cover is not None:
-                metadata["CLOUD_COVER"] = str(cloud_cover)
-            rds.SetMetadata(metadata)
-            gdal.Unlink(vsimem_path)
-            rds = None
-    finally:
-        if os.path.exists(tmp_file):
-            os.remove(tmp_file)
-        if progress and download_task:
-            progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
-            progress.remove_task(download_task)
-
-    return download_file
-
-
-def get_bounds_and_resolution(file_paths):
-    bounds = []
-    xres_list = []
-    yres_list = []
-
-    for fp in file_paths:
-        with rasterio.open(fp) as src:
-            bounds.append(src.bounds)
-            xres, yres = src.res
-            xres_list.append(xres)
-            yres_list.append(yres)
-
-    left = min(b.left for b in bounds)
-    bottom = min(b.bottom for b in bounds)
-    right = max(b.right for b in bounds)
-    top = max(b.top for b in bounds)
-
-    xRes = min(xres_list)
-    yRes = min(yres_list)
-
-    return (left, bottom, right, top), xRes, yRes
-
-
-def crop_asset_files(base_dir,
-                     target_srs,
-                     asset_nodata: dict[str, int],
-                     progress: Progress = None,):
-    """
-    Create a VRT for each asset (eg, B02, B03), then crop downloaded data by project area.
-    The output file is geotiff file.
-
-    :param base_dir: Root directory for downloaded sentinel data
-    :param target_srs: target projection CRS
-    :param progress: rich progress object
-    """
-    post_task = None
-    if progress is not None:
-        post_task = progress.add_task(
-            description=f'[red] Postprocessing downloaded data', total=None)
-
-    band_files = defaultdict(list)
-
-    # delete all vrt and tif exists under base_dir
-    for fname in os.listdir(base_dir):
-        if fname.endswith((".tif", ".vrt", ".xml")):
-            path = os.path.join(base_dir, fname)
-            if os.path.isfile(path):
-                os.remove(path)
-
-    for jp2_path in glob(os.path.join(base_dir, "**", "B??.tif"), recursive=True):
-        filename = os.path.basename(jp2_path)
-        band_name = os.path.splitext(filename)[0]
-        band_files[band_name].append(jp2_path)
-
-    # get highest resolution from all bands
-    subdirs = [os.path.join(base_dir, d) for d in os.listdir(base_dir)
-               if os.path.isdir(os.path.join(base_dir, d))]
-    first_subdir = subdirs[0]
-    sample_tif_files = glob(os.path.join(first_subdir, "B??.tif"))
-    _, xRes, yRes = get_bounds_and_resolution(sample_tif_files)
-
-
-    output_files = []
-
-    if progress is not None and post_task is not None:
-        progress.update(post_task, description=f'[red] Postprocessing...', total=len(band_files))
-
-    for band_name, files in band_files.items():
-        if progress is not None and post_task is not None:
-            progress.update(post_task, description="[red] Creating VRT...")
-        vrt_path = os.path.join(base_dir, f"{band_name}.vrt")
-
-        # get maximum bounds from all files
-        bounds = get_bounds_and_resolution(files)[0]
-
-        nodata_value = 0
-        if asset_nodata is not None and asset_nodata[band_name]:
-            nodata_value = asset_nodata[band_name]
-
-        # create VRT with highest resolution
-        gdal.BuildVRT(vrt_path, files,
-                      outputBounds=bounds,
-                      xRes=xRes,
-                      yRes=yRes,
-                      resampleAlg="nearest",
-                      outputSRS=target_srs,
-                      srcNodata=nodata_value,
-                      VRTNodata=nodata_value,
-                      addAlpha=False)
-
-        if progress is not None and post_task is not None:
-            progress.update(post_task, description="[red] Cropping VRT...")
-
-        output_files.append(vrt_path)
-
-        if progress is not None and post_task is not None:
-            progress.update(post_task, description=f"[red] Processed {band_name}", advance=1)
-
-    if progress and post_task:
-        progress.remove_task(post_task)
-
-    return output_files
 
 
 def merge_or_voronoi(df: gpd.GeoDataFrame, scene_size=110000) -> list[Polygon]:
@@ -495,7 +201,6 @@ def search_stac_items(stac_client,
                 # if item does not have all required assets, skip it.
                 if not all(asset in item.assets for asset in target_assets):
                     continue
-
                 existing = latest_per_tile.get(tile_id)
                 if existing is None:
                     latest_per_tile[tile_id] = item
@@ -562,13 +267,13 @@ async def download_stac(
     collection_id: str,
     geopackage_file_path: str,
     polygons_layer_name: str,
-    output_dir: str,
+    output_file: str,
     target_year: int,
     target_month:int,
     target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
-    max_workers: int = 5,
+    max_workers: int = 2,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -577,11 +282,12 @@ async def download_stac(
     :param collection_id: collection id
     :param geopackage_file_path: path to geopackage file
     :param polygons_layer_name: name of layer polygon layer in geopackage to mask
-    :param output_dir: output directory
+    :param output_file: output file path
     :param target_year: target year
     :param target_assets: target assets.
     :param target_srs: target projection CRS
     :param progress: rich progress object
+    :param max_workers: maximum number of workers to download JP2 file concurrently
     :return the list of output files
     """
     t1 = time.time()
@@ -607,115 +313,109 @@ async def download_stac(
                       target_assets=target_assets,
                       progress=progress,)
 
-    asset_urls = []
-    for item in latest_per_tile.values():
-        tile_id = item.properties["grid:code"]
-        item_datetime = item.datetime
-        cloud_cover = item.properties.get("eo:cloud_cover")
-        assets = item.get_assets()
-        for key, asset in item.assets.items():
-            if key in target_assets:
-                asset_meta = assets[key].to_dict()
-                band_meta = asset_meta['raster:bands'][0]
-                no_data = band_meta['nodata']
-                asset_urls.append((asset.href, key, tile_id, no_data, item_datetime, cloud_cover))
+    tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)
 
-    if not asset_urls:
-        raise RuntimeError(f"No assets found for target area and date range: {datetime_range}")
+    sentinel_items =  []
+    for item in latest_per_tile.values():
+        sentinel_items.append(SentinelItem(item, mask_file=tmp_cutline_path, mask_layer=polygons_layer_name))
 
     if progress and stac_task:
-        progress.update(stac_task, description=f"[cyan]Preparing to download {len(asset_urls)} assets", total=len(asset_urls))
+        progress.update(stac_task, description=f"[cyan]Preparing to download {len(sentinel_items)} items", total=len(sentinel_items))
 
     t2 = time.time()
     logger.debug(f"STAC Item search: {t2 - t1} seconds")
 
-    asset_nodata = {}
+    output_dir = os.path.dirname(output_file)
+    os.makedirs(output_dir, exist_ok=True)
 
-    tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)
+    predict_task = None
+    predict_task_lock = threading.Lock()
 
-    semaphore = asyncio.Semaphore(max_workers)
+    predict_queue = Queue()
+    completed_items = []
 
-    async def download_asset(url, asset_key, tile_id, nodata, target_datetime,cloud_cover, semaphore):
-        url = s3_to_http(url)
-        band_name = target_assets[asset_key]
-        asset_nodata[band_name] = nodata
+    def downloader(item: SentinelItem):
+        try:
+            item.download_assets(download_dir=output_dir, progress=progress)
+            if not os.path.exists(item.predicted_file):
+                # if predicted file does not exist in the folder, add prediction task to the queue
+                predict_queue.put(item)
+            if progress and stac_task:
+                progress.update(stac_task, advance=1)
+        except Exception as e:
+            logger.error(f"Download failed for {item.item.id}: {e}")
 
-        download_dir = os.path.join(output_dir, tile_id)
-        os.makedirs(download_dir, exist_ok=True)
+    def predictor():
+        nonlocal predict_task
+        while True:
+            item = predict_queue.get()
+            if item is None:
+                break
+            with predict_task_lock:
+                if predict_task is None and progress:
+                    predict_task = progress.add_task("[cyan]Predicting...", total=len(sentinel_items))
 
-        target_path = os.path.join(download_dir, band_name)
+            progress.update(predict_task, description=f"[cyan]Predicting {item.item.id}")
+            item.predict(progress=progress)
+            completed_items.append(item)
+            progress.update(predict_task, advance=1)
+            predict_queue.task_done()
 
-        async with semaphore:
-            # retry max 5 times if any connection error occurs
-            max_retries = 5
-            for attempt in range(1, max_retries + 1):
-                try:
-                    result = await download_from_https_async(
-                        file_url=url,
-                        target=target_path,
-                        target_srs=target_srs,
-                        progress=progress,
-                        no_data_value=nodata,
-                        item_datetime=target_datetime,
-                        cloud_cover=cloud_cover,
-                        geopackage_file_path=tmp_cutline_path,
-                        polygons_layer_name=polygons_layer_name,
-                    )
-                    if progress and stac_task:
-                        progress.update(stac_task, description=f"[green]Saved {tile_id}:{band_name}", advance=1)
-                    logger.debug(f"Downloaded {band_name} to {result}")
-                    break
-                except asyncio.CancelledError:
-                    logger.error(f"Download cancelled for {tile_id}:{band_name}")
-                    raise
-                except (httpx.ConnectTimeout, httpx.ReadTimeout) as e:
-                    logger.warning(f"Timeout on attempt {attempt} for {tile_id}:{band_name}: {e}")
-                    if attempt < max_retries:
-                        await asyncio.sleep(5)
-                    else:
-                        logger.error(f"Failed after {max_retries} attempts: {tile_id}:{band_name}")
-                except Exception as e:
-                    logger.error(f"Download failed for {tile_id}:{band_name}: {e}")
-                    break
+    prediction_thread = threading.Thread(target=predictor)
+    prediction_thread.start()
 
-    tasks = [
-        asyncio.create_task(download_asset(url, asset_key, tile_id, nodata, asset_datetime, cloud_cover, semaphore), name=f"{tile_id}:{target_assets[asset_key]}")
-        for url, asset_key, tile_id, nodata, asset_datetime, cloud_cover in asset_urls
-    ]
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for item in sentinel_items:
+            executor.submit(downloader, item)
 
-    try:
-        await asyncio.gather(*tasks)
-    except KeyboardInterrupt:
-        logging.warning("Download interrupted by user. Cancelling tasks...")
+    if progress and stac_task:
+        progress.update(stac_task, description=f"[cyan]Downloaded {len(sentinel_items)} items", total=None)
 
-        for task in tasks:
-            task.cancel()
+    predict_queue.join()
+    predict_queue.put(None)
+    prediction_thread.join()
 
-        await asyncio.gather(*tasks, return_exceptions=True)
-        raise
+    if progress and predict_task:
+        progress.remove_task(predict_task)
 
     if os.path.exists(tmp_cutline_path):
         os.remove(tmp_cutline_path)
 
     t3 = time.time()
-    logger.debug(f"STAC Item download: {t3 - t2} seconds")
+    logger.debug(f"STAC Items processed: {t3 - t2} seconds")
 
     if progress and stac_task:
-        progress.update(stac_task, description="[magenta]Cropping downloaded assets...")
+        progress.update(stac_task, description="[green]Creating mosaic...")
 
-    output_files = crop_asset_files(
-        base_dir=output_dir,
-        target_srs=target_srs,
-        asset_nodata=asset_nodata,
-        progress=progress,
+    # sort items by datetime and cloud cover
+    sentinel_items_sorted = sorted(
+        sentinel_items,
+        key=lambda item: (
+            item.item.datetime or datetime.min,
+            item.item.properties.get("eo:cloud_cover", float("inf"))
+        )
     )
 
+    # for debug en sure items are sorted by datetime and cloud cover
+    for item in sentinel_items_sorted:
+        dt = item.item.datetime.isoformat() if item.item.datetime else "None"
+        cc = item.item.properties.get("eo:cloud_cover", "None")
+        logger.debug(f"{item.id}: datetime = {dt}, cloud_cover = {cc}, file = {item.predicted_file}")
+
+    prediction_files = [item.predicted_file for item in sentinel_items_sorted]
+
+    gdal.BuildVRT(output_file, prediction_files,
+                  resampleAlg="nearest",
+                  outputSRS=target_srs,
+                  VRTNodata=255,
+                  addAlpha=False)
+
     if progress and stac_task:
-        progress.update(stac_task, description="[bold green]Download and crop complete!")
+        progress.update(stac_task, description="[green]Created mosaic")
         progress.remove_task(stac_task)
 
     t4 = time.time()
     logger.debug(f"Download completed: {t4 - t1} seconds")
 
-    return output_files
+    return output_file
 

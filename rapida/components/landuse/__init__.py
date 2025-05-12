@@ -8,9 +8,8 @@ from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
 
-from rapida.components.landuse.stac import interpolate_stac_source, download_stac
-from rapida.components.landuse.prediction import predict
-from rapida.components.landuse.constants import STAC_MAP
+from rapida.components.landuse.stac import download_stac
+from rapida.components.landuse.constants import STAC_MAP, SENTINEL2_ASSET_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
 from rapida.core.variable import Variable
@@ -57,7 +56,7 @@ class LanduseVariable(Variable):
         """
         STAC Server root URL
         """
-        stac_id = interpolate_stac_source(self.source)['id']
+        stac_id = self._interpolate_stac_source(self.source)['id']
         url = STAC_MAP[stac_id]
         assert url is not None, f'Unsupported stac_id {stac_id}'
         return url
@@ -67,7 +66,7 @@ class LanduseVariable(Variable):
         """
         STAC Collection ID
         """
-        collection = interpolate_stac_source(self.source)['collection']
+        collection = self._interpolate_stac_source(self.source)['collection']
         return collection
 
     @property
@@ -82,7 +81,7 @@ class LanduseVariable(Variable):
         """
         Target band value for zonal statistics
         """
-        value = interpolate_stac_source(self.source)['value']
+        value = self._interpolate_stac_source(self.source)['value']
         return int(value)
 
     @property
@@ -90,23 +89,8 @@ class LanduseVariable(Variable):
         """
         Dictionary of Earth search asset name and band name
         """
-        needed_assets = (
-            'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12')
-        earth_search_assets = (
-            'blue', 'green', 'red', 'rededge1', 'rededge2', 'rededge3', 'nir', 'swir16', 'swir22'
-        )
-        asset_map = dict(zip(earth_search_assets, needed_assets))
-        return asset_map
+        return SENTINEL2_ASSET_MAP
 
-    @property
-    def downloaded_files(self) -> List[str]:
-        """
-        The list of downloaded files for this component
-        """
-        project = Project(os.getcwd())
-        output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
-        assets = list(self.target_asset.values())
-        return [os.path.join(output_dir, f"{asset}.vrt") for asset in assets]
 
     @property
     def prediction_output_image(self) -> str:
@@ -115,7 +99,7 @@ class LanduseVariable(Variable):
         """
         project = Project(os.getcwd())
         output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
-        return os.path.join(output_dir, f"{self.component}_prediction.tif")
+        return os.path.join(output_dir, f"{self.component}_prediction.vrt")
 
 
     def __init__(self, **kwargs):
@@ -149,22 +133,12 @@ class LanduseVariable(Variable):
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', None)
 
-        output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
-
-        asset_files = self.downloaded_files
-        exists = 0
-        for asset in asset_files:
-            if os.path.exists(asset):
-                exists += 1
-        if force == False and exists == len(asset_files):
-            # if all files already exist, skip download
-            pass
-        else:
+        if force or not os.path.exists(self.prediction_output_image):
             asyncio.run(download_stac(stac_url=self.stac_url,
                           collection_id=self.collection_id,
                           geopackage_file_path=project.geopackage_file_path,
                           polygons_layer_name=project.polygons_layer_name,
-                          output_dir=output_dir,
+                          output_file=self.prediction_output_image,
                           target_year=self.target_year,
                           target_month=self.target_month,
                           target_assets=self.target_asset,
@@ -240,16 +214,10 @@ class LanduseVariable(Variable):
 
 
     def compute(self, **kwargs):
-        force = kwargs.get('force', False)
         progress = kwargs.get('progress', None)
-
-        # run the prediction only when the force or prediction image doesn't exist
-        if force or not os.path.exists(self.prediction_output_image):
-            predict(
-                img_paths=self.downloaded_files,
-                output_file_path=self.prediction_output_image,
-                progress=progress,
-            )
+        variable_task = None
+        if progress:
+            variable_task = progress.add_task(f"[green]Masking computing land use for variable {self.name}", total=100)
 
         source_value = self.target_band_value
 
@@ -260,9 +228,6 @@ class LanduseVariable(Variable):
             "BLOCKXSIZE": "256",
             "BLOCKYSIZE": "256"
         }
-
-        if progress:
-            variable_task = progress.add_task(f"[green]Masking computing land use for variable {self.name}", total=100)
 
         def progress_callback(complete, message, user_data):
             if progress and variable_task is not None:
@@ -354,3 +319,20 @@ class LanduseVariable(Variable):
     def resolve(self, **kwargs):
         pass
 
+    def _interpolate_stac_source(self, source: str) -> dict[str, str]:
+        """
+        Interpolate stac source. Source of stac should be defined like below:
+
+        {stac_id}:{collection_id}:{target band value}
+
+        :param source: stac source
+        :return: dist consist of id, collection and value
+        """
+        parts = source.split(':')
+        assert len(parts) == 3, 'Invalid source definition'
+        stac_id, collection, target_value = parts
+        return {
+            'id': stac_id,
+            'collection': collection,
+            'value': target_value
+        }

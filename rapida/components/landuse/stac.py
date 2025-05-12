@@ -322,7 +322,7 @@ async def download_stac(
         progress.update(stac_task, description=f"[cyan]Preparing to download {len(sentinel_items)} items", total=len(sentinel_items))
 
     t2 = time.time()
-    logger.info(f"STAC Item search: {t2 - t1} seconds")
+    logger.debug(f"STAC Item search: {t2 - t1} seconds")
 
     output_dir = os.path.dirname(output_file)
     os.makedirs(output_dir, exist_ok=True)
@@ -379,7 +379,7 @@ async def download_stac(
         os.remove(tmp_cutline_path)
 
     t3 = time.time()
-    logger.info(f"STAC Items processed: {t3 - t2} seconds")
+    logger.debug(f"STAC Items processed: {t3 - t2} seconds")
 
     if progress and stac_task:
         progress.update(stac_task, description="[green]Creating mosaic...")
@@ -412,7 +412,7 @@ async def download_stac(
         progress.remove_task(stac_task)
 
     t4 = time.time()
-    logger.info(f"Download completed: {t4 - t1} seconds")
+    logger.debug(f"Download completed: {t4 - t1} seconds")
 
     return output_file
 

@@ -8,7 +8,7 @@ from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
 
-from rapida.components.landuse.stac import download_stac
+from rapida.components.landuse.download import download_stac
 from rapida.components.landuse.constants import STAC_MAP, SENTINEL2_ASSET_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component

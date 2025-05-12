@@ -34,6 +34,7 @@ class StacCollection(object):
                      target_month: int,
                      target_assets: dict[str, str],
                      duration: int = 12,
+                     tile_id_prop_name: str = "grid:code",
                      max_workers: int = 5,
                      progress: Progress = None,
                      ):
@@ -45,6 +46,7 @@ class StacCollection(object):
         :param target_month: target month
         :param duration: how many months to search for
         :param target_assets: target assets
+        :param tile_id_prop_name: property name used for tile id. If not found, item.id is used.
         :param max_workers: maximum number of workers
         :param progress: rich progress object
         """
@@ -79,9 +81,9 @@ class StacCollection(object):
 
             with lock:
                 for item in items:
-                    tile_id = item.properties.get("grid:code")
+                    tile_id = item.properties.get(tile_id_prop_name)
                     if tile_id is None:
-                        continue
+                        tile_id = item.id
 
                     cloud_cover = item.properties.get("eo:cloud_cover")
                     if cloud_cover is None:

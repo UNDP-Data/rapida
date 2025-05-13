@@ -16,7 +16,7 @@ dependencies = [
     "shapely",
     "h3",
     "tqdm",
-    "GDAL == 3.10.0",
+    "GDAL >= 3.8.0",
     "azure-storage-blob",
     "overturemaps",
     "async",

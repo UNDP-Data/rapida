@@ -14,7 +14,7 @@ def generate_variables():
     license = "Creative Commons Zero 1.0 Universal"
     attribution = "Global biodiversity model for policy support, GLOBIO"
 
-    for operator in ['sum', 'count']:
+    for operator in ['sum', 'density']:
         name = operator
         if operator == 'sum':
             name = "length"
@@ -22,7 +22,7 @@ def generate_variables():
             title=f'Total {name} of roads',
             source='geohub:/api/datasets/300da70781b7a53808aab824543e6c2b',
             operator=operator,
-            percentage=True,
+            percentage=True if operator != 'density' else False,
             license=license,
             attribution=attribution,
         )

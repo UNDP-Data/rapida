@@ -256,8 +256,79 @@ The resulting data are well-suited for use in integrated assessment models, clim
 
 
 
-## Installation
-Install the project with dependencies to virtual environment as below.
+## Installation using pip
+
+rapida builds on several open source geospatial packages and has a relative large dependency tree with several native ones
+like GDAL and this ads complexity to the installation procedure.
+
+> [!IMPORTANT]
+> We recommend installing into a virtual environment as opposed toi install into the default python interpreter/system
 
 
-## Usage
+___
+1. ensure GDAL libs and binary tools are available on your system. ON linux this can be done using:
+```commandline
+    gdalinfo --version
+```
+2. create the virtual env suing tools/mean of your choice. Here there are two options
+   1. create a virtual end that includes system packages
+   ```commandline
+   pipenv --python 3 --system-packages
+   ```
+    2. create a clean virtual end and install GDAL
+   ```commandline
+   pipenv --python 3
+   GDAL_VERSION=$(gdalinfo --version | grep -oP 'GDAL \K[0-9.]+')
+   echo $GDLA_VERSION
+   pipenv run pip install --no-cache-dir --force-reinstall --no-binary=gdal gdal==$GDAL_VERSION
+   pipenv run pip list
+    Package Version
+    ------- -------
+    GDAL    3.8.4
+    pip     25.0.1
+
+   ```
+3. install rapida from github
+    1. with git available
+    ```commandline
+       pipenv run pip install git+https://github.com/UNDP-Data/rapida.git
+    ```
+   2. without
+   ```commandline
+    pipenv  run pip install https://github.com/UNDP-Data/rapida/archive/refs/heads/main.zip
+   ```
+
+4. test the installation
+```commandline
+pipenv run rapida 
+Usage: rapida [OPTIONS] COMMAND [ARGS]...
+
+  UNDP Crisis Bureau Rapida tool.
+
+  This command line tool is designed to assess various geospatial variables
+  representing exposure and vulnerability aspects of geospatial risk induced
+  by natural hazards.
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  init      initialize RAPIDA tool
+  auth      authenticate with UNDP account
+  admin     fetch administrative boundaries at various levels from OSM/OCHA
+  create    create a RAPIDA project in a new folder
+  assess    assess/evaluate a specific geospatial exposure
+            components/variables
+  list      list RAPIDA projects/folders located in default Azure file share
+  download  download a RAPIDA project from Azure file share
+  upload    upload a RAPIDA project to Azure file share
+  publish   publish RAPIDA project results to Azure and GeoHub
+  delete    delete a RAPIDA project from Azure file share
+
+```
+
+
+## Installation using Docker
+___
+
+

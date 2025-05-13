@@ -6,7 +6,6 @@ from rapida import constants
 from rapida.core.component import Component
 from rapida.core.variable import Variable
 from rapida.session import Session
-from rapida.util.fiona_chunks import gdf_chunks, gdf_columns
 from rapida.util.gpd_overlay import run_overlay
 from rapida.util.resolve_url import resolve_geohub_url
 from rapida.util.download_geodata import download_vector
@@ -240,12 +239,25 @@ class RoadsVariable(Variable):
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task, description=f'[green]Computing {self.name}.')
 
-            output_df = vector_line_zonal_stats(
-                df_polygon=df_polygon,
-                df_line=df_line,
-                operator=self.operator,
-                field_name=self.name
-            )
+            if self.operator == 'density':
+                df_polygon['area'] = df_polygon.geometry.area
+                length_sum = df_line.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))
+                length_sum_df = length_sum.reset_index(name='total_length')
+                length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
+
+                # merge with area
+                df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')
+
+                df_polygon[self.name] = df_polygon['total_length'] / df_polygon['area']
+                df_polygon.drop(columns=['total_length', 'area'], inplace=True)
+                output_df = df_polygon
+            else:
+                output_df = vector_line_zonal_stats(
+                    df_polygon=df_polygon,
+                    df_line=df_line,
+                    operator=self.operator,
+                    field_name=self.name
+                )
 
             if progress is not None and evaluate_task is not None:
                 progress.update(evaluate_task, description=f'[green]Computed {self.name}.')
@@ -255,12 +267,31 @@ class RoadsVariable(Variable):
                     progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
 
                 df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer, engine="pyogrio")
-                output_df = vector_line_zonal_stats(
-                    df_polygon=output_df,
-                    df_line=df_line_affected,
-                    operator=self.operator,
-                    field_name=self.affected_variable
-                )
+                if self.operator == 'density':
+                    df_polygon['area'] = df_polygon.geometry.area
+                    length_sum = df_line_affected.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))
+
+                    length_sum_df = length_sum.reset_index(name='total_length')
+                    length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
+
+                    # merge with area
+                    df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')
+
+                    df_polygon[self.affected_variable] = df_polygon['total_length'] / df_polygon['area']
+                    # drop columns
+                    df_polygon.drop(columns=['total_length', 'area'], inplace=True)
+                    output_df = df_polygon
+                    # testing purposes
+                    for i, row in output_df.iterrows():
+                        if row[self.affected_variable] > row[self.name]:
+                            raise ValueError(f"affected density cannot be greater than density")
+                else:
+                    output_df = vector_line_zonal_stats(
+                        df_polygon=output_df,
+                        df_line=df_line_affected,
+                        operator=self.operator,
+                        field_name=self.affected_variable
+                    )
 
                 if progress is not None and evaluate_task is not None:
                     progress.update(evaluate_task, description=f'[green]Computed {self.affected_layer}.')

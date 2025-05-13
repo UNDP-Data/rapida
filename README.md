@@ -77,7 +77,7 @@ environment (land use/cover, livestock), socio-economical environment (GDP, rela
 <details>
 
 <summary>
- 🧑‍🤝‍🧑 **Population**
+ 🧑‍🤝‍🧑 Population
 </summary>
 
 Sourced from [WorldPop](https://www.worldpop.org/) project, the components provides country based population data in 
@@ -93,14 +93,14 @@ statistics computed for 2020 or base year are multiplied with this coefficient.
  
 <details>
 
-<summary>
-🏙️ **Built environment**
+<summary style='border-bottom:px solid gray'>
+🏙️ Built environment
 </summary>
 
 The built environment refers to the human-made surroundings that provide the setting for human activity. This includes 
 all physical spaces and infrastructure constructed or significantly modified by people.
 
----
+
 
 1. Buildings
 ---
@@ -112,7 +112,6 @@ GeoParquet, FlatGeobuf and PMTiles.
 So far two spatial variables have been defined: the **number of buildings** per polygon to assess and the cumulative
 **area of buildings** per polygon to assess.
 
----
 2. Electrical grid
 ---
 
@@ -130,7 +129,7 @@ accessibility/assessment  studies.
 
 
 
----
+
 3. Roads
 ---
 
@@ -143,7 +142,7 @@ spatial consistency. Next, they were classified into five standardized types (e.
 and validated using satellite imagery and supplementary datasets. The dataset is suitable for applications 
 targeting land-use modeling, biodiversity impact assessments, and sustainable development planning.
 
----
+
 </details>
 
 
@@ -152,7 +151,7 @@ targeting land-use modeling, biodiversity impact assessments, and sustainable de
 <details>
 
 <summary>
-🌾 **Landuse**
+🌾 Landuse
 </summary>
 
 While conceptually simple, this layer features several characteristics that make its usage and applications
@@ -176,14 +175,14 @@ cloudy/snowy pixels.
 > [!IMPORTANT]
 > Predicting land use in close to real time is a computationally demanding task and should be treated with care
 
----
+
 
 </details>
 
 
 <details>
 <summary>
-💰 **Socio-economic environment**
+💰 Socio-economic environment
 </summary>
 
 The socio-economic environment refers to the social and economic conditions that influence and shape the lives, 
@@ -191,23 +190,66 @@ behaviors, and development outcomes of individuals, communities, and societies.
 
 1. Deprivation
 ---
+he Global Gridded Relative Deprivation Index (GRDI), Version 1, provides a detailed picture of relative deprivation and 
+poverty worldwide, mapped at a high spatial resolution of approximately 1 km². The index ranges from 0 (least deprived) 
+to 100 (most deprived). It is built using a combination of demographic and satellite data, carefully processed to ensure
+consistency across different regions. To create GRDI, six key factors were selected to represent different aspects of 
+deprivation, such as economic activity, child mortality, and human development. The dataset covers the entire globe, 
+integrating the best available data at either a fine-scale grid level or broader administrative boundaries.
+
+GRDI combines six key indicators to assess deprivation levels:
+
+1. Built-up Area Ratio (BUILT): Measures the proportion of land covered by buildings compared to open land. Lower values
+    indicate higher deprivation, as rural areas tend to have fewer economic opportunities.¹
+2. Child Dependency Ratio (CDR): The number of children (aged 0–14) per 100 working-age adults (15–64). 
+   A higher ratio suggests higher deprivation due to greater economic strain on households.²
+3. Infant Mortality Rate (IMR): The number of infant deaths (under one year old) per 1,000 live births. 
+   A higher IMR indicates poorer health conditions and higher deprivation.
+4. Subnational Human Development Index (SHDI): A local version of the Human Development Index (HDI), considering education,
+health, and living standards. Lower SHDI scores reflect higher deprivation.³
+5. Nighttime Lights (VNL, 2020): Measures light intensity at night, which is often linked to economic activity and infrastructure. 
+   Areas with less artificial light tend to have higher deprivation.⁴
+6. Nighttime Lights Trend (VNL Slope, 2012–2020): Tracks changes in nighttime lights over time. 
+   A decline in brightness suggests worsening deprivation, while an increase indicates economic growth.
+
+The dataset can be used to:
+- identify areas with high deprivation to guide poverty reduction efforts
+- map socioeconomic inequalities at fine spatial scales
+- support policy decisions and resource allocation for targeted interventions
 
 
-
----
 2. Relative Wealth Index
 ---
+The Meta Relative Wealth Index is a high-resolution, machine learning–derived proxy for household wealth, developed by 
+Meta’s Data for Good initiative. It estimates relative wealth scores at a 2.4 km grid level across low- and middle-income 
+countries by analyzing de-identified Facebook connectivity data and satellite imagery. 
+The RWI enables fine-scale economic analysis in data-scarce regions and supports humanitarian, development, and policy interventions.
 
 
-
----
 
 
 3. GDP
----
+___
+This dataset provides annual, global gridded estimates of Gross Domestic Product (GDP) at 0.1° spatial resolution (~10 km at the equator)
+from 2015 to 2100, fully aligned with the five Shared Socioeconomic Pathways (SSPs). 
+It offers GDP values in both constant 2015 U.S. dollars and purchasing power parity (PPP), enabling spatially explicit 
+long-term economic modeling under diverse socioeconomic scenarios.
+The dataset was up-sampled to 1km resolution and reprojected to [EPSG:3857](https://epsg.io/3857) to facilitate web usage.
 
+To construct a spatially explicit and globally consistent GDP dataset aligned with the Shared Socioeconomic Pathways (SSPs), 
+the authors began by collecting national-level GDP projections for each of the five SSP scenarios. These projections, 
+expressed in both constant 2015 U.S. dollars and purchasing power parity (PPP), were sourced from authoritative institutions 
+such as the Organisation for Economic Co-operation and Development (OECD) and the International Institute for 
+Applied Systems Analysis (IIASA). 
 
----
+Next, population data at 0.1° resolution were obtained from the SSP Public Database. 
+These gridded population distributions were used as the basis for disaggregating national GDP values. 
+The key assumption underpinning the downscaling process was that GDP per capita remains spatially uniform within each 
+country for a given year. Based on this, national GDP totals were allocated across grid cells in direct proportion to the
+local population count. This method produced a high-resolution, annual global GDP dataset spanning from 2015 to 2100, 
+consistent with the spatial and temporal dynamics of each SSP scenario. 
+The resulting data are well-suited for use in integrated assessment models, climate impact studies, land-use modeling, and other applications requiring detailed socioeconomic projections.
+
 </details>
 
 

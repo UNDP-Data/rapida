@@ -77,8 +77,9 @@ environment (land use/cover, livestock), socio-economical environment (GDP, rela
 <details>
 
 <summary>
-## 🧑‍🤝‍🧑 **Population**
+ 🧑‍🤝‍🧑 **Population**
 </summary>
+
 Sourced from [WorldPop](https://www.worldpop.org/) project, the components provides country based population data in 
 raster format. The constrained (conditioned by buildings), UN adjusted version was selected as it was considered the best
 match. As the most recent population dataset was generated for 2020 rapida is forecasting the 2020 population using 
@@ -93,14 +94,30 @@ statistics computed for 2020 or base year are multiplied with this coefficient.
 <details>
 
 <summary>
-## 🏙️ **Built environment**
+🏙️ **Built environment**
 </summary>
 
-2. Buildings
+The built environment refers to the human-made surroundings that provide the setting for human activity. This includes 
+all physical spaces and infrastructure constructed or significantly modified by people.
+
+---
+
+1. Buildings
+---
+This dataset merges Google's V3 Open Buildings, Microsoft's GlobalMLFootprints, and OpenStreetMap building footprints. 
+It contains 2,705,459,584 footprints and is divided into 200 partitions. Each footprint is labelled with its respective 
+source, either Google, Microsoft, or OpenStreetMap. It can be accessed in cloud-native geospatial formats such as 
+GeoParquet, FlatGeobuf and PMTiles.
+
+So far two spatial variables have been defined: the **number of buildings** per polygon to assess and the cumulative
+**area of buildings** per polygon to assess.
+
 ---
 3. Electrical grid
 ---
-4. Roads
+
+---
+3. Roads
 ---
 </details>
 
@@ -108,25 +125,28 @@ statistics computed for 2020 or base year are multiplied with this coefficient.
 
  
 <details>
+
 <summary>
-## 🏙️ **Natural environment**
+🌾 **Landuse**
 </summary>
 
-5.  Landuse
+The socio-economic environment refers to the social and economic conditions that influence and shape the lives, behaviors, and development outcomes of individuals, communities, and societies.
+
 ---
+
 </details>
 
 
 <details>
 <summary>
-## 💰 **Socio-economic environment**
+💰 **Socio-economic environment**
 </summary>
 
-6. Deprivation
+1. Deprivation
 ---
-7. Relative Wealth Index
+2. Relative Wealth Index
 ---
-8. GDP
+3. GDP
 ---
 </details>
 

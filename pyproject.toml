@@ -16,7 +16,7 @@ dependencies = [
     "shapely",
     "h3",
     "tqdm",
-    "GDAL >= 3.8.0",
+    "GDAL",
     "azure-storage-blob",
     "overturemaps",
     "async",
@@ -79,7 +79,9 @@ exclude = [
     ".gitignore",
     ".pre-commit-config.yaml",
     "tests",
-    "Makefile"
+    "Makefile",
+    'Pipfile',
+    'Pipfile.lock'
 ]
 
 [tool.hatch.metadata]

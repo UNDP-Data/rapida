@@ -289,14 +289,14 @@ ___
 
    ```
 3. install rapida from github
-    1. with git available
-    ```commandline
-       pipenv run pip install git+https://github.com/UNDP-Data/rapida.git
-    ```
-   2. without
-   ```commandline
-    pipenv  run pip install https://github.com/UNDP-Data/rapida/archive/refs/heads/main.zip
-   ```
+   1. with git available
+      ```commandline
+         pipenv run pip install git+https://github.com/UNDP-Data/rapida.git
+      ```
+      2. without git
+      ```commandline
+      pipenv  run pip install https://github.com/UNDP-Data/rapida/archive/refs/heads/main.zip
+      ```
 
 4. test the installation
 ```commandline
@@ -328,7 +328,20 @@ Commands:
 ```
 
 
-## Installation using Docker
-___
+## Installation using Docker on Linux
+
+rapida can be deployed as a docker container and with some shell scripting be used effectively
+on a local desktop. 
+
+1. ensure docker is installed and working. 
+> [!IMPORTANT]
+>  Avoid installing docker from snap even if it is convenient. snap docker has some
+>  specific restrictions (mount home folder, etc.)
+```commandline
+    docker --version
+```
+
+## Installation using Docker on Windows
+
 
 

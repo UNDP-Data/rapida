@@ -6,8 +6,8 @@ dist/
 data/
 *egg-info/
 .gitignore
-docker-compose.yaml
-Dockerfile
+docker-compose*.yaml
+Dockerfile*
 Pipfile
 Pipfile.lock
 .env.example

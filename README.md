@@ -428,5 +428,82 @@ There are several key parameters in the launcher that ensure this process is suc
 
 ## Installation using Docker on Windows
 
+TO set up docker on windows (11, 10,) follow the steps below:
+1. ### install Docker
+   1. start command prompt by clicking on Windows icon and type **Command Prompt**
+   2. install Windows Subsystem for Linux v 2
+    ```commandline
+    C:\Users\rapida>wsl --install -d Debian
+    Downloading: Windows Subsystem for Linux 2.4.13
+    Installing: Windows Subsystem for Linux 2.4.13
+    Windows Subsystem for Linux 2.4.13 has been installed.
+    Installing Windows optional component: VirtualMachinePlatform
+    
+    Deployment Image Servicing and Management tool
+    Version: 10.0.26100.1150
+    
+    Image Version: 10.0.26100.4061
+    
+    Enabling feature(s)
+    [==========================100.0%==========================]
+    The operation completed successfully.
+    The requested operation is successful. Changes will not be effective until the system is rebooted.
+    The requested operation is successful. Changes will not be effective until the system is rebooted.
+    ```
 
+   3. Restart the machine as instructed by the OS
+   4. Veryfy WSL and the installed distribution
+    ```commandline
+    C:\Users\rapida>wsl --list --verbose
+      NAME      STATE           VERSION
+    * Debian    Stopped         2
+    ```
+   5. Install docker , from https://www.docker.com/products/docker-desktop/ and restart
 
+2. ### Create RAPIDA Docker-Based Launcher
+
+    The goal is to run the rapida tool from the Windows command line just like any regular executable, 
+using a .bat file that wraps a Docker container. 
+
+    1. Create the Launcher Script
+
+     Create a file named rapida.bat in a folder that is in your system PATH (e.g., C:\Program Files\Rapida\rapida.bat or any custom tools folder).
+   2. copy/paste the folowing content
+   ```bash
+    @echo off
+    REM RAPIDA Docker Launcher for Windows
+    setlocal ENABLEDELAYEDEXPANSION
+    
+    REM Set default command
+    set CMD=rapida
+    if not "%~1"=="" (
+        set CMD=%~1
+        shift
+    )
+    
+    REM Set version and timestamp
+    set VERSION=main
+    for /f %%i in ('powershell -Command "Get-Date -UFormat %%s"') do set TIMESTAMP=%%i
+    
+    REM Set current working directory
+    set "CWD=%cd%"
+    
+    REM Run Docker container
+    docker run --rm -it ^
+      -u 1000:1000 ^
+      -e USER=%USERNAME% ^
+      --name rapida%TIMESTAMP% ^
+      -m 2GB ^
+      --cpus 1 ^
+      -e GDAL_NUM_THREADS=1 ^
+      -w /data ^
+      -v "%CWD%":/data ^
+      -v "%USERPROFILE%":"%USERPROFILE%" ^
+      -v "C:\data":/data ^
+      -v "%TEMP%":/tmp ^
+      ghcr.io/undp-data/rapida:%VERSION% ^
+      %CMD% %*
+   ``` 
+> [IMPORTANT]
+> Make sure to set the core resources available to the container(CPU, RAM) according to your own system capabilities
+   

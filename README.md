@@ -328,7 +328,7 @@ Commands:
 ```
 
 
-## Installation using Docker on Linux
+## Installation using Docker on Linux/Mac
 
 rapida can be deployed as a docker container and with some shell scripting be used effectively
 on a local desktop. 

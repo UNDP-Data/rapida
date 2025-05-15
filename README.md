@@ -172,7 +172,7 @@ for every image selected in a specific time interval with less than 5% cloud cov
 The last step that is not yet implemented is to generate the cloud prediction  and use the layer to mask/out filter
 cloudy/snowy pixels.
 
-> [!IMPORTANT]
+> **Note**
 > Predicting land use in close to real time is a computationally demanding task and should be treated with care
 
 

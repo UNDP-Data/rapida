@@ -70,10 +70,7 @@ jobs:
       - name: Run tests in container
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}:/rapida \
-            -w /rapida \
             -e USER=docker \
-            --entrypoint /bin/bash \
             ${{ needs.build-image.outputs.tags }} \
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 

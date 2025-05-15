@@ -340,6 +340,68 @@ on a local desktop.
 ```commandline
     docker --version
 ```
+2. create rapida  docker based launcher
+
+```bash
+#!/usr/bin/bash
+
+if [ -z "$1" ]; then
+  command="rapida"
+else
+  command="$1"
+  shift # Remove the command from the arguments if present
+fi
+VERSION="main"
+timestamp=$(date +%s)
+docker run --rm -it -u 1000:1000 -e USER=$USER --name rapida$timestamp -m 32GB --cpus 8 -e GDAL_NUM_THREADS=8 -w $PWD -v $PWD:$PWD -v /home:/home -v /data:/data -v /tmp:/tmp ghcr.io/undp-da>
+
+
+```
+
+**rapida** docker image is based on ghcr.io/osgeo/gdal:ubuntu-small-$VERSION. This is an ubuntu based image with
+a non-root ubuntu user (1000:1000) and featuring bash shell. 
+The above launcher script ensures that rapida tool, installed inside the container can be called form the local host like
+any regular command.
+
+```commandline
+pipenv run rapida 
+Usage: rapida [OPTIONS] COMMAND [ARGS]...
+
+  UNDP Crisis Bureau Rapida tool.
+
+  This command line tool is designed to assess various geospatial variables
+  representing exposure and vulnerability aspects of geospatial risk induced
+  by natural hazards.
+
+Options:
+  -h, --help  Show this message and exit.
+
+Commands:
+  init      initialize RAPIDA tool
+  auth      authenticate with UNDP account
+  admin     fetch administrative boundaries at various levels from OSM/OCHA
+  create    create a RAPIDA project in a new folder
+  assess    assess/evaluate a specific geospatial exposure
+            components/variables
+  list      list RAPIDA projects/folders located in default Azure file share
+  download  download a RAPIDA project from Azure file share
+  upload    upload a RAPIDA project to Azure file share
+  publish   publish RAPIDA project results to Azure and GeoHub
+  delete    delete a RAPIDA project from Azure file share
+
+```
+
+There are several key parameters in the launcher that ensure this process is successful:
+
+- rapida is installed as non-root in a virtual env created by pipenv and made available in the container as a regular script
+- the container is run with local logged in linux user using -u 1000:1000
+- the USER env variable is **REQUIRED** by rapida to store the auth file
+- rapida is a project based tool that requires the comamnd to be invoked from within the folder. The current user folder
+ is always passed inside the container as working folder using -w flag
+- the /home folder is mounted to persist the config files between invoking multiple sessions
+- the timestamp ensures tmultiple project can be assessed at the same time by ensuring every run creates a container with
+  a unique name
+
 
 ## Installation using Docker on Windows
 

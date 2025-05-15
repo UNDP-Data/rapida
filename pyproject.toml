@@ -16,7 +16,7 @@ dependencies = [
     "shapely",
     "h3",
     "tqdm",
-    "GDAL == 3.10.0",
+    "GDAL",
     "azure-storage-blob",
     "overturemaps",
     "async",
@@ -46,7 +46,7 @@ dependencies = [
     "requests-oauthlib",
     "fiona",
     "nest_asyncio",
-    "tensorflow",
+    "tensorflow==2.16.1",
     "psutil"
 ]
 
@@ -79,7 +79,9 @@ exclude = [
     ".gitignore",
     ".pre-commit-config.yaml",
     "tests",
-    "Makefile"
+    "Makefile",
+    'Pipfile',
+    'Pipfile.lock'
 ]
 
 [tool.hatch.metadata]

@@ -70,8 +70,6 @@ jobs:
       - name: Run tests in container
         run: |
           docker run --rm \
-            -v ${{ github.workspace }}:/app \
-            -w /app \
             -e USER=docker \
             --entrypoint /bin/bash \
             ${{ needs.build-image.outputs.tags }} \

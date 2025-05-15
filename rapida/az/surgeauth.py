@@ -100,10 +100,10 @@ class SurgeTokenCredential(TokenCredential):
         # Azure AD Configuration
         # UNDP tenant ID
         self.token = None
-        self.tenant_id = os.environ['TENANT_ID']
+        self.tenant_id = os.environ.get('TENANT_ID', 'b3e5db5e-2944-4837-99f5-7488ace54319')
         # public client id for AZURE CLI available from:
         # https://learn.microsoft.com/en-us/troubleshoot/entra/entra-id/governance/verify-first-party-apps-sign-in#application-ids-of-commonly-used-microsoft-applications
-        self.client_id = os.environ['CLIENT_ID']
+        self.client_id = os.environ.get('CLIENT_ID', '04b07795-8ddb-461a-bbee-02f9e1bf7b46')
         self.authority = f"https://login.microsoftonline.com/{self.tenant_id}"
         self.redirect_uri = "https://login.microsoftonline.com/common/oauth2/nativeclient"
         self.auth_url = f"{self.authority}/oauth2/v2.0/authorize"

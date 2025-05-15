@@ -3,15 +3,5 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-    volumes:
-      - ./Makefile:/app/Makefile
-      - ./rapida:/app/rapida # mount app folder to container
-      - ./tests:/app/tests
-      # uncomment to mount token info from local
-      # - ~/.rapida:/root/.rapida
-      # uncomment to mount data folder from local
-      # - ./data:/data
-    ports:
-      - 8100:8000
-    env_file:
-      - .env
+    image: rapida:latest
+

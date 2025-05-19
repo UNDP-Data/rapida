@@ -428,5 +428,63 @@ There are several key parameters in the launcher that ensure this process is suc
 
 ## Installation using Docker on Windows
 
+As Docker Engine is not available as a standalone install on Windows for architectural and technical reasons
+we recommend Windows users to use Rancher Desktop as Docker desktop is not open source.
+Technically all Windows container managers use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
 
+1. ### install Rancher
+   1. download Rancher desktop from https://rancherdesktop.io/
+   2. install Rancher
+   3. test docker is available
+    ```commandline
+    C:\Users\rapida>docker --version
+    Docker version 27.5.1-rd, build 0c97515
+    ```
 
+2. ### Create RAPIDA Docker-Based Launcher
+
+    The goal is to run the rapida tool from the Windows command line just like any regular executable, 
+using a .bat file that wraps a Docker container. 
+
+    1. Create the Launcher Script
+
+     Create a file named rapida.bat in a folder that is in your system PATH (e.g., C:\Program Files\Rapida\rapida.bat or any custom tools folder).
+   2. copy/paste the folowing content
+   ```bash
+    @echo off
+    REM RAPIDA Docker Launcher for Windows
+    setlocal ENABLEDELAYEDEXPANSION
+    
+    REM Set default command
+    set CMD=rapida
+    if not "%~1"=="" (
+        set CMD=%~1
+        shift
+    )
+    
+    REM Set version and timestamp
+    set VERSION=main
+    for /f %%i in ('powershell -Command "Get-Date -UFormat %%s"') do set TIMESTAMP=%%i
+    
+    REM Set current working directory
+    set "CWD=%cd%"
+    
+    REM Run Docker container
+    docker run --rm -it ^
+      -u 1000:1000 ^
+      -e USER=%USERNAME% ^
+      --name rapida%TIMESTAMP% ^
+      -m 2GB ^
+      --cpus 1 ^
+      -e GDAL_NUM_THREADS=1 ^
+      -w /data ^
+      -v "%CWD%":/data ^
+      -v "%USERPROFILE%":"%USERPROFILE%" ^
+      -v "C:\data":/data ^
+      -v "%TEMP%":/tmp ^
+      ghcr.io/undp-data/rapida:%VERSION% ^
+      %CMD% %*
+   ``` 
+> [IMPORTANT]
+> Make sure to set the core resources available to the container(CPU, RAM) according to your own system capabilities
+   

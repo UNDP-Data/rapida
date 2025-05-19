@@ -428,37 +428,18 @@ There are several key parameters in the launcher that ensure this process is suc
 
 ## Installation using Docker on Windows
 
-TO set up docker on windows (11, 10,) follow the steps below:
-1. ### install Docker
-   1. start command prompt by clicking on Windows icon and type **Command Prompt**
-   2. install Windows Subsystem for Linux v 2
-    ```commandline
-    C:\Users\rapida>wsl --install -d Debian
-    Downloading: Windows Subsystem for Linux 2.4.13
-    Installing: Windows Subsystem for Linux 2.4.13
-    Windows Subsystem for Linux 2.4.13 has been installed.
-    Installing Windows optional component: VirtualMachinePlatform
-    
-    Deployment Image Servicing and Management tool
-    Version: 10.0.26100.1150
-    
-    Image Version: 10.0.26100.4061
-    
-    Enabling feature(s)
-    [==========================100.0%==========================]
-    The operation completed successfully.
-    The requested operation is successful. Changes will not be effective until the system is rebooted.
-    The requested operation is successful. Changes will not be effective until the system is rebooted.
-    ```
+As Docker Engine is not available as a standalone install on Windows for architectural and technical reasons
+we recommend Windows users to use Rancher Desktop as Docker desktop is not open source.
+Technically all Windows container managers use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
 
-   3. Restart the machine as instructed by the OS
-   4. Veryfy WSL and the installed distribution
+1. ### install Rancher
+   1. download Rancher desktop from https://rancherdesktop.io/
+   2. install Rancher
+   3. test docker is available
     ```commandline
-    C:\Users\rapida>wsl --list --verbose
-      NAME      STATE           VERSION
-    * Debian    Stopped         2
+    C:\Users\rapida>docker --version
+    Docker version 27.5.1-rd, build 0c97515
     ```
-   5. Install docker , from https://www.docker.com/products/docker-desktop/ and restart
 
 2. ### Create RAPIDA Docker-Based Launcher
 

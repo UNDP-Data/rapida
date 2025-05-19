@@ -231,8 +231,15 @@ class SurgeTokenCredential(TokenCredential):
         auth_url, state = oauth.authorization_url(self.auth_url)
         auth_code = None
 
-        with sync_playwright() as p:
-            with p.chromium.launch(headless=True, args=["--no-sandbox"]) as browser: # Use headless=True for invisible mode
+        with (sync_playwright() as p):
+            with p.chromium.launch(headless=True,
+                                   args=[   "--disable-gpu",
+                                            "--disable-dev-shm-usage",
+                                            "--no-sandbox",
+                                            "--single-process",
+                                            "--disable-setuid-sandbox",
+                                            "--use-gl=egl"
+                                    ]) as browser: # Use headless=True for invisible mode
                 error_msg = None
                 page = browser.new_page()
 

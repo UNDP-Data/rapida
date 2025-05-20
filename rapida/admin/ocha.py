@@ -13,6 +13,7 @@ import shapely
 from rapida.admin.util import is_int
 from tqdm import tqdm
 from rapida.util.http_get_json import http_get_json
+from rapida.util.validate import validate
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ def countries_for_bbox(bounding_box=None):
     """
     str_bbox = map(str, bounding_box)
     url = f'https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/World_Countries_(Generalized)/FeatureServer/0/query?where=1%3D1&outFields=*&geometry={",".join(str_bbox)}&geometryType=esriGeometryEnvelope&inSR=4326&spatialRel=esriSpatialRelIntersects&returnGeometry=false&outSR=4326&f=json'
+
     try:
         timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
         data = http_get_json(url=url, timeout=timeout)
@@ -54,6 +56,7 @@ def fetch_ocha_countries(bounding_box = None, ):
     :return:
     """
     url = os.path.join(OCHA_COD_ARCGIS_SERVER_ROOT, 'COD_External?f=pjson')
+
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
     try:
         data = http_get_json(url=url, timeout=timeout)
@@ -83,7 +86,7 @@ def fetch_ocha_countries(bounding_box = None, ):
                     countries.append(service_country)
         return tuple(set(countries))
     except Exception as e:
-        logger.error(f'Failed to fetch available countries. {e}')
+        logger.error(f'Failed to fetch available countries with error: {e}')
         raise
 
 
@@ -96,6 +99,7 @@ def fetch_ocha_admin_levels(iso3_country=None):
     Example: {0: ('Admin0', 0), 1: ('Admin1', 1), 2: ('Admin2', 2)}
     """
     url = f'{os.path.join(OCHA_COD_ARCGIS_SERVER_ROOT, ARCGIS_COD_SERVICE)}/{iso3_country}_pcode/MapServer?f=pjson'
+
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
     try:
         data = http_get_json(url=url, timeout=timeout)
@@ -170,8 +174,11 @@ def fetch_admin(bbox=None, admin_level=None, clip=False,h3id_precision=7, ):
             assert pycountry.countries.get(alpha_3=k) is not  None, f'The admin_level dict key is not an iso3 country code'
             assert is_int(v), f'The value corresponding to {k} is not an integer admin level'
 
-
-    ocha_countries = fetch_ocha_countries()
+    try:
+        ocha_countries = fetch_ocha_countries()
+    except Exception as e:
+        logger.error(f'Failed to fetch available countries for {bbox}. {e}')
+        return
 
 
     timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)

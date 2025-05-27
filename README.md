@@ -289,11 +289,11 @@ ___
 
    ```
 3. install rapida from github
-   1. with git available
+   1. with git binaries available
       ```commandline
          pipenv run pip install git+https://github.com/UNDP-Data/rapida.git
       ```
-      2. without git
+      2. without git binaries
       ```commandline
       pipenv  run pip install https://github.com/UNDP-Data/rapida/archive/refs/heads/main.zip
       ```
@@ -426,65 +426,257 @@ There are several key parameters in the launcher that ensure this process is suc
   a unique name
 
 
+## Installation on Windows
+
 ## Installation using Docker on Windows
 
 As Docker Engine is not available as a standalone install on Windows for architectural and technical reasons
-we recommend Windows users to use Rancher Desktop as Docker desktop is not open source.
-Technically all Windows container managers use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
+and as a result we recommend Windows users to use [WSL](https://learn.microsoft.com/en-us/windows/wsl/).
 
-1. ### install Rancher
-   1. download Rancher desktop from https://rancherdesktop.io/
-   2. install Rancher
-   3. test docker is available
+1. [install WSL](https://learn.microsoft.com/en-us/windows/wsl/install) 
+2. install Ubuntu inside WSL
+   * go to **Start**->type ***Terminal*** and select the application
+   * list available wsl images
+   ```commandline
+   wsl --list --online
+    The following is a list of valid distributions that can be installed.
+    Install using 'wsl.exe --install <Distro>'.
+    
+    NAME                            FRIENDLY NAME
+    AlmaLinux-8                     AlmaLinux OS 8
+    AlmaLinux-9                     AlmaLinux OS 9
+    AlmaLinux-Kitten-10             AlmaLinux OS Kitten 10
+    Debian                          Debian GNU/Linux
+    FedoraLinux-42                  Fedora Linux 42
+    SUSE-Linux-Enterprise-15-SP5    SUSE Linux Enterprise 15 SP5
+    SUSE-Linux-Enterprise-15-SP6    SUSE Linux Enterprise 15 SP6
+    Ubuntu                          Ubuntu
+    Ubuntu-24.04                    Ubuntu 24.04 LTS
+    archlinux                       Arch Linux
+    kali-linux                      Kali Linux Rolling
+    openSUSE-Tumbleweed             openSUSE Tumbleweed
+    openSUSE-Leap-15.6              openSUSE Leap 15.6
+    Ubuntu-18.04                    Ubuntu 18.04 LTS
+    Ubuntu-20.04                    Ubuntu 20.04 LTS
+    Ubuntu-22.04                    Ubuntu 22.04 LTS
+    OracleLinux_7_9                 Oracle Linux 7.9
+    OracleLinux_8_7                 Oracle Linux 8.7
+    OracleLinux_9_1                 Oracle Linux 9.1
+   ```
+   * install Ubuntu 22.04 LTS
     ```commandline
-    C:\Users\rapida>docker --version
-    Docker version 27.5.1-rd, build 0c97515
+    PS C:\Users\user> wsl --install Ubuntu-22.04
+    wsl: Using legacy distribution registration. Consider using a tar based distribution instead.
+    Installing: Ubuntu 22.04 LTS
+    Ubuntu 22.04 LTS has been installed.
+    Launching Ubuntu 22.04 LTS...
+    Installing, this may take a few minutes...
+    Please create a default UNIX user account. The username does not need to match your Windows username.
+    For more information visit: https://aka.ms/wslusers
+    Enter new UNIX username: rapida
+    New password:
+    Retype new password:
+    passwd: password updated successfully
+    Installation successful!
+    To run a command as administrator (user "root"), use "sudo <command>".
+    See "man sudo_root" for details.
+    
+    Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.167.4-microsoft-standard-WSL2 x86_64)
+    
+     * Documentation:  https://help.ubuntu.com
+       * Management:     https://landscape.canonical.com
+       * Support:        https://ubuntu.com/pro
+    
+     System information as of Fri May 23 09:30:30 UTC 2025
+    
+      System load:  1.78                Processes:             43
+      Usage of /:   0.1% of 1006.85GB   Users logged in:       0
+      Memory usage: 18%                 IPv4 address for eth0: 172.20.135.28
+      Swap usage:   0%
+    
+    
+    This message is shown once a day. To disable it please create the
+    /home/rapida/.hushlogin file.
     ```
+3. install docker inside Ubuntu
 
-2. ### Create RAPIDA Docker-Based Launcher
+    * Follow the detailed instruction on how to install docker on ubuntu 22.04
+    from [apt repo](https://docs.docker.com/engine/install/ubuntu/#install-using-the-repository)
+    * ensure doker can be run by non-root user
+    
+        Detailed instructions for ubuntu are available [here](https://docs.docker.com/engine/install/linux-postinstall/)
+        ```commandline
+        sudo usermod -aG docker $USER
+        ```
+4. make docker available on Windows host from inside WSL ubuntu
 
-    The goal is to run the rapida tool from the Windows command line just like any regular executable, 
-using a .bat file that wraps a Docker container. 
+   * This step requires creating a  shell script to launch docker and placing it somewhere in the path
+    as **docker.bat** 
+   ```commandline
+   @echo off
+   REM Forward docker CLI commands to Docker inside WSL Ubuntu
+    
+   REM Pass all arguments from Windows CLI to WSL docker
+   wsl docker %*
+   ```
+   * Close your current terminal and start a new one
+   
+   ```commandline
+    docker
+    Usage:  docker [OPTIONS] COMMAND
+    
+    A self-sufficient runtime for containers
+    
+    Common Commands:
+      run         Create and run a new container from an image
+      exec        Execute a command in a running container
+      ps          List containers
+      build       Build an image from a Dockerfile
+      bake        Build from a file
+      pull        Download an image from a registry
+      push        Upload an image to a registry
+      images      List images
+      login       Authenticate to a registry
+      logout      Log out from a registry
+      search      Search Docker Hub for images
+      version     Show the Docker version information
+      info        Display system-wide information
 
-    1. Create the Launcher Script
+   ```
+   5. create launcher script for rapida
 
-     Create a file named rapida.bat in a folder that is in your system PATH (e.g., C:\Program Files\Rapida\rapida.bat or any custom tools folder).
-   2. copy/paste the folowing content
-   ```bash
-    @echo off
-    REM RAPIDA Docker Launcher for Windows
-    setlocal ENABLEDELAYEDEXPANSION
+       Rapida tool can be launched now from windows host as a docker image.
+       ```commandline
+       @echo off
+       REM RAPIDA Docker Launcher for Windows
+       setlocal ENABLEDELAYEDEXPANSION
     
-    REM Set default command
-    set CMD=rapida
-    if not "%~1"=="" (
-        set CMD=%~1
-        shift
-    )
+       REM Set version and timestamp
+       set VERSION=main
+       for /f %%i in ('powershell -Command "Get-Date -UFormat %%s"') do set TIMESTAMP=%%i
     
-    REM Set version and timestamp
-    set VERSION=main
-    for /f %%i in ('powershell -Command "Get-Date -UFormat %%s"') do set TIMESTAMP=%%i
+       REM Get current directory and convert Windows path to WSL path
+       set "CWD=%cd%"
     
-    REM Set current working directory
-    set "CWD=%cd%"
+       REM Extract drive letter (e.g. C:) and convert to lowercase (e.g. c)
+       set "DRIVE_LETTER=%CWD:~0,1%"
+       set "DRIVE_LETTER=!DRIVE_LETTER:A=a!"
+       set "DRIVE_LETTER=!DRIVE_LETTER:B=b!"
+       set "DRIVE_LETTER=!DRIVE_LETTER:C=c!"
+       set "DRIVE_LETTER=!DRIVE_LETTER:D=d!"
+       set "DRIVE_LETTER=!DRIVE_LETTER:E=e!"
+       set "DRIVE_LETTER=!DRIVE_LETTER:F=f!"
+       REM Add more drives if needed
     
-    REM Run Docker container
-    docker run --rm -it ^
-      -u 1000:1000 ^
-      -e USER=%USERNAME% ^
-      --name rapida%TIMESTAMP% ^
-      -m 2GB ^
-      --cpus 1 ^
-      -e GDAL_NUM_THREADS=1 ^
-      -w /data ^
-      -v "%CWD%":/data ^
-      -v "%USERPROFILE%":"%USERPROFILE%" ^
-      -v "C:\data":/data ^
-      -v "%TEMP%":/tmp ^
-      ghcr.io/undp-data/rapida:%VERSION% ^
-      %CMD% %*
-   ``` 
+       REM Remove drive letter and colon from path
+       set "DIR_PATH=%CWD:~2%"
+       REM Replace backslashes with forward slashes
+       set "DIR_PATH=!DIR_PATH:\=/!"
+    
+       REM Compose WSL-style path for current directory
+       set "WSL_PATH=/mnt/!DRIVE_LETTER!!DIR_PATH!"
+    
+       REM Convert USERPROFILE path to WSL path
+       set "UP=%USERPROFILE%"
+       set "UP_DRIVE_LETTER=%UP:~0,1%"
+       set "UP_DRIVE_LETTER=!UP_DRIVE_LETTER:A=a!"
+       set "UP_DRIVE_LETTER=!UP_DRIVE_LETTER:B=b!"
+       set "UP_DRIVE_LETTER=!UP_DRIVE_LETTER:C=c!"
+       set "UP_DRIVE_LETTER=!UP_DRIVE_LETTER:D=d!"
+       set "UP_DRIVE_LETTER=!UP_DRIVE_LETTER:E=e!"
+       set "UP_DRIVE_LETTER=!UP_DRIVE_LETTER:F=f!"
+       set "UP_PATH=%UP:~2%"
+       set "UP_PATH=!UP_PATH:\=/!"
+       set "WSL_USERPROFILE=/mnt/!UP_DRIVE_LETTER!!UP_PATH!"
+    
+       REM Convert TEMP path to WSL path
+       set "TMP=%TEMP%"
+       set "TMP_DRIVE_LETTER=%TMP:~0,1%"
+       set "TMP_DRIVE_LETTER=!TMP_DRIVE_LETTER:A=a!"
+       set "TMP_DRIVE_LETTER=!TMP_DRIVE_LETTER:B=b!"
+       set "TMP_DRIVE_LETTER=!TMP_DRIVE_LETTER:C=c!"
+       set "TMP_DRIVE_LETTER=!TMP_DRIVE_LETTER:D=d!"
+       set "TMP_DRIVE_LETTER=!TMP_DRIVE_LETTER:E=e!"
+       set "TMP_DRIVE_LETTER=!TMP_DRIVE_LETTER:F=f!"
+       set "TMP_PATH=%TMP:~2%"
+       set "TMP_PATH=!TMP_PATH:\=/!"
+       set "WSL_TEMP=/mnt/!TMP_DRIVE_LETTER!!TMP_PATH!"
+    
+       REM Debug output (optional)
+       echo Using WSL path: !WSL_PATH!
+       echo Mounting home: !WSL_USERPROFILE!
+       echo Mounting temp: !WSL_TEMP!
+    
+       REM Run Docker container
+    
+       docker run --rm -it  -e USER=%USERNAME% --name rapida!TIMESTAMP! -m 2GB --cpus 1 -e GDAL_NUM_THREADS=2 -w "!WSL_PATH!" -v "!WSL_USERPROFILE!":/home ghcr.io/undp-data/rapida:main rapida %*
+    
+       endlocal
+       ``` 
+       * save the following code as ***rapida.bat*** and place it somewhere in the %PATH
+
+       * invoke rapida tool script.
+   
+       This will download the rapida tool docker image and launch it as 
+       a container passing all arguments to the tool running  inside
+       ``` commandline
+           rapida
+           Using WSL path: /mnt/c/Users/user
+           Mounting home: /mnt/c/Users/user
+           Mounting temp: /mnt/c/Users/user/AppData/Local/Temp
+           Unable to find image 'ghcr.io/undp-data/rapida:main' locally
+           main: Pulling from undp-data/rapida
+           802008e7f761: Pull complete
+           4f4fb700ef54: Pull complete
+           fd687a47324c: Pull complete
+           7939e7897b12: Pull complete
+           fa651c41f8c7: Pull complete
+           38b9cd78de61: Pull complete
+           f649ebe50e7d: Pull complete
+           92352e5c32d8: Pull complete
+           10f330ceb2c0: Pull complete
+           dd65c27e736a: Pull complete
+           a2c83972aefb: Pull complete
+           f273dccc7b00: Pull complete
+           fa0c7185a1fb: Pull complete
+           e10e0828bfe2: Pull complete
+           876f61e413c0: Pull complete
+           20236d1d4682: Pull complete
+           668bd6a01f96: Pull complete
+           73f86a700b9a: Pull complete
+           24383bcdcdf2: Pull complete
+           1714f3185e4c: Pull complete
+           c0ac30670e71: Pull complete
+           27e8db7e84ce: Pull complete
+           5d33408236ec: Pull complete
+           Digest: sha256:a462002cb9e41547c980da6563679ac33e624a87ad3c9ae22b3df031f756224d
+           Status: Downloaded newer image for ghcr.io/undp-data/rapida:main
+           Usage: rapida [OPTIONS] COMMAND [ARGS]...
+        
+             UNDP Crisis Bureau Rapida tool.
+        
+             This command line tool is designed to assess various geospatial variables
+             representing exposure and vulnerability aspects of geospatial risk induced
+             by natural hazards.
+        
+           Options:
+             -h, --help  Show this message and exit.
+        
+           Commands:
+             init      initialize RAPIDA tool
+             auth      authenticate with UNDP account
+             admin     fetch administrative boundaries at various levels from OSM/OCHA
+             create    create a RAPIDA project in a new folder
+             assess    assess/evaluate a specific geospatial exposure
+                       components/variables
+             list      list RAPIDA projects/folders located in default Azure file share
+             download  download a RAPIDA project from Azure file share
+             upload    upload a RAPIDA project to Azure file share
+             publish   publish RAPIDA project results to Azure and GeoHub
+             delete    delete a RAPIDA project from Azure file share
+       ```
+6. test rapida
+
 > [IMPORTANT]
 > Make sure to set the core resources available to the container(CPU, RAM) according to your own system capabilities
    

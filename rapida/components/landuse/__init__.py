@@ -9,7 +9,7 @@ from rich.progress import Progress
 import geopandas as gpd
 
 from rapida.components.landuse.download import download_stac
-from rapida.components.landuse.constants import STAC_MAP, SENTINEL2_ASSET_MAP
+from rapida.components.landuse.constants import STAC_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
 from rapida.core.variable import Variable
@@ -84,13 +84,6 @@ class LanduseVariable(Variable):
         value = self._interpolate_stac_source(self.source)['value']
         return int(value)
 
-    @property
-    def target_asset(self) -> dict[str, str]:
-        """
-        Dictionary of Earth search asset name and band name
-        """
-        return SENTINEL2_ASSET_MAP
-
 
     @property
     def prediction_output_image(self) -> str:
@@ -141,7 +134,6 @@ class LanduseVariable(Variable):
                           output_file=self.prediction_output_image,
                           target_year=self.target_year,
                           target_month=self.target_month,
-                          target_assets=self.target_asset,
                           target_srs=project.target_srs,
                           progress=progress))
 

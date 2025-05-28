@@ -53,7 +53,6 @@ async def download_stac(
     output_file: str,
     target_year: int,
     target_month:int,
-    target_assets: dict[str, str],
     target_srs,
     progress: Progress = None,
     max_workers: int = 2,
@@ -67,7 +66,6 @@ async def download_stac(
     :param polygons_layer_name: name of layer polygon layer in geopackage to mask
     :param output_file: output file path
     :param target_year: target year
-    :param target_assets: target assets.
     :param target_srs: target projection CRS
     :param progress: rich progress object
     :param max_workers: maximum number of workers to download JP2 file concurrently
@@ -91,7 +89,6 @@ async def download_stac(
                       target_year=target_year,
                       target_month=target_month,
                       duration=12,
-                      target_assets=target_assets,
                       progress=progress,)
 
     tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)
@@ -136,8 +133,12 @@ async def download_stac(
                 if predict_task is None and progress:
                     predict_task = progress.add_task("[cyan]Predicting...", total=len(sentinel_items))
 
-            progress.update(predict_task, description=f"[cyan]Predicting {item.item.id}")
+            progress.update(predict_task, description=f"[cyan]Creating cloud mask {item.item.id}")
+            item.detect_cloud(progress=progress)
+
+            progress.update(predict_task, description=f"[cyan]Predicting landuse {item.item.id}")
             item.predict(progress=progress)
+
             completed_items.append(item)
             progress.update(predict_task, advance=1)
             predict_queue.task_done()

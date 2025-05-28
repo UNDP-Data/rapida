@@ -12,6 +12,7 @@ import numpy as np
 import shapely
 from shapely.geometry import Point, MultiPoint, Polygon
 
+from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
@@ -32,7 +33,7 @@ class StacCollection(object):
                      collection_id: str,
                      target_year: int,
                      target_month: int,
-                     target_assets: dict[str, str],
+                     target_assets: dict[str, str] = SENTINEL2_ASSET_MAP,
                      duration: int = 12,
                      tile_id_prop_name: str = "grid:code",
                      max_workers: int = 5,
@@ -251,7 +252,7 @@ if __name__ == '__main__':
     setup_logger()
 
     stac_url = "https://earth-search.aws.element84.com/v1"
-    mask_file = "/data/kigali/data/kigali.gpkg"
+    mask_file = "/data/kigali_small/data/kigali_small.gpkg"
     mask_layer = "polygons"
     collection_id = "sentinel-2-l1c"
 
@@ -259,21 +260,12 @@ if __name__ == '__main__':
                                      mask_file=mask_file,
                                      mask_layer=mask_layer)
 
-    needed_assets = (
-        'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'
-    )
-    earth_search_assets = (
-        'blue', 'green', 'red', 'rededge1', 'rededge2', 'rededge3', 'nir', 'swir16', 'swir22'
-    )
-    asset_map = dict(zip(earth_search_assets, needed_assets))
-
     with Progress() as progress:
         latest_per_tile = stac_collection.search_items(
             collection_id=collection_id,
             target_year=2025,
             target_month=4,
             duration=12,
-            target_assets=asset_map,
             progress=progress, )
 
         logger.info(latest_per_tile)

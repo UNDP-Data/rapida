@@ -13,6 +13,7 @@ import rasterio
 import numpy as np
 from rich.progress import Progress
 
+from rapida.components.landuse.cloud import cloud_detect
 from rapida.components.landuse.prediction import predict
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
@@ -57,7 +58,7 @@ class SentinelItem(object):
         """
         Dictionary of Earth search asset name and band name
         """
-        return SENTINEL2_ASSET_MAP
+        return self._target_asset
 
     @property
     def target_srs(self) -> osr.SpatialReference:
@@ -121,8 +122,8 @@ class SentinelItem(object):
         """
         if len(self._asset_files) == 0:
             return {}
-        sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
-        return sorted_dict
+        # sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
+        return self._asset_files
 
 
     @property
@@ -135,6 +136,16 @@ class SentinelItem(object):
         predict_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "landuse_prediction.tif")
         return predict_file
 
+    @property
+    def cloud_mask_file(self) -> str:
+        """
+        Get the file path of the cloud mask file. If download_assets function is not called, it returns empty string.
+        """
+        if len(self.asset_files) == 0:
+            return ""
+        cloud_mask_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "cloud_mask.tif")
+        return cloud_mask_file
+
 
     def __init__(self, item: pystac.Item, mask_file: str, mask_layer: str):
         """
@@ -145,6 +156,7 @@ class SentinelItem(object):
         :param mask_layer: layer name to clip by
         """
         self.item = item
+        self._target_asset = SENTINEL2_ASSET_MAP
         self._target_srs = None
         self._asset_files = {}
         self.mask_file = mask_file
@@ -162,7 +174,7 @@ class SentinelItem(object):
     def download_assets(self,
                         download_dir: str,
                         progress=None,
-                        max_workers: int = 9) -> Dict[str, str]:
+                        max_workers: int = 12) -> Dict[str, str]:
         """
         Download all required bands for this STAC item in parallel.
 
@@ -187,6 +199,8 @@ class SentinelItem(object):
                     # if different item id, delete old prediction file if exists
                     if os.path.exists(self.predicted_file):
                         os.remove(self.predicted_file)
+                    if os.path.exists(self.cloud_mask_file):
+                        os.remove(self.cloud_mask_file)
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -249,20 +263,94 @@ class SentinelItem(object):
 
         :return: output file path
         """
+        land_use_target_bands = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12']
+        temp_file = f"{self.predicted_file}.tmp"
         try:
-            img_paths = list(self.asset_files.values())
+
+            img_paths = [self.asset_files[band] for band in land_use_target_bands]
             predict(
                 img_paths=img_paths,
-                output_file_path=self.predicted_file,
+                output_file_path=temp_file,
                 # num_workers=1,
                 progress=progress,
             )
+            self._mask_cloud_pixels(temp_file, self.predicted_file)
             return self.predicted_file
         except Exception as e:
             # delete incomplete predicted file if error occurs
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
             if os.path.exists(self.predicted_file):
                 os.remove(self.predicted_file)
             raise e
+
+    def detect_cloud(self, progress=None)->str:
+        """
+        Detect cloud from downloaded assets
+
+        :return: output file path
+        """
+        cloud_target_bands = ["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"]
+        try:
+            img_paths = [self.asset_files[band] for band in cloud_target_bands]
+            cloud_detect(
+                img_paths=img_paths,
+                output_file_path=self.cloud_mask_file,
+                # num_workers=1,
+                progress=progress,
+            )
+            return self.cloud_mask_file
+        except Exception as e:
+            # delete incomplete predicted file if error occurs
+            if os.path.exists(self.cloud_mask_file):
+                os.remove(self.cloud_mask_file)
+            raise e
+
+    def _mask_cloud_pixels(self, input_file: str, output_file: str)-> str:
+        """
+        Mask cloud pixels from land use prediction image
+
+        :param input_file: input file path of land use prediction image
+        :param output_file: output file path of mask prediction image
+        :return: output file path of mask prediction image
+        """
+        if not os.path.exists(self.cloud_mask_file):
+            os.rename(input_file, output_file)
+            return output_file
+
+        with rasterio.open(input_file) as pred_src, \
+                rasterio.open(self.cloud_mask_file) as cloud_src:
+            pred_data = pred_src.read(1)
+            cloud_mask = cloud_src.read(1)
+
+            nodata_value = pred_src.nodata if pred_src.nodata is not None else 255
+            band_count = pred_src.count
+
+            # Apply mask
+            masked_data = np.where(cloud_mask == 1, nodata_value, pred_data)
+            # Copy metadata profile
+            profile = pred_src.profile.copy()
+            profile.update({
+                'nodata': nodata_value,
+                'count': band_count,
+            })
+            profile.pop('photometric', None)
+
+            # Write masked output
+            with rasterio.open(output_file, "w", **profile) as dst:
+                dst.write(masked_data, 1)
+
+                for b in range(1, band_count + 1):
+                    # copy band colormap
+                    colormap = pred_src.colormap(b)
+                    dst.write_colormap(b, colormap)
+
+                    # Copy band-metadata
+                    band_tags = pred_src.tags(b)
+                    if band_tags:
+                        dst.update_tags(b, **band_tags)
+
+        return output_file
 
 
     def _s3_to_http(self, url):
@@ -428,7 +516,7 @@ if __name__ == '__main__':
     setup_logger()
 
     item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
-    mask_file = "/data/kigali_small/data/kigali_small.gpkg"
+    mask_file = "/data/kigali/data/kigali.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
 
@@ -448,4 +536,9 @@ if __name__ == '__main__':
         sentinel_item.predict(progress=progress)
 
         t3 = time.time()
-        logger.info(f"prediction time: {t3 - t2}, total time: {t3 - t1}")
+        logger.info(f"landuse prediction time: {t3 - t2}, total time: {t3 - t1}")
+
+        sentinel_item.detect_cloud(progress=progress)
+
+        t4 = time.time()
+        logger.info(f"cloud detection time: {t4 - t3}, total time: {t4 - t1}")

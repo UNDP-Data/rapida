@@ -46,12 +46,9 @@ class SentinelItem(object):
     @property
     def id(self)->str:
         """
-        ID for the class instance. It uses grid:code for unique ID.
+        ID for the class instance. It uses item ID of STAC
         """
-        tile_id = self._item.properties.get("grid:code")
-        if tile_id is None:
-            tile_id = self._item.id
-        return tile_id
+        return self._item.id
 
     @property
     def target_asset(self) -> dict[str, str]:

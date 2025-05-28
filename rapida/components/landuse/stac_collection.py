@@ -2,16 +2,17 @@ import json
 import logging
 import concurrent.futures
 import threading
-from typing import Optional
+from typing import Optional, Any, Dict
 from calendar import monthrange
 from datetime import date
 from rich.progress import Progress
+import pystac
 import pystac_client
 import geopandas as gpd
 import numpy as np
 import shapely
-from shapely.geometry import Point, MultiPoint, Polygon
-
+from shapely.geometry import Point, MultiPoint, Polygon, shape, mapping
+from shapely.ops import unary_union
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
@@ -35,7 +36,6 @@ class StacCollection(object):
                      target_month: int,
                      target_assets: dict[str, str] = SENTINEL2_ASSET_MAP,
                      duration: int = 12,
-                     tile_id_prop_name: str = "grid:code",
                      max_workers: int = 5,
                      progress: Progress = None,
                      ):
@@ -47,7 +47,6 @@ class StacCollection(object):
         :param target_month: target month
         :param duration: how many months to search for
         :param target_assets: target assets
-        :param tile_id_prop_name: property name used for tile id. If not found, item.id is used.
         :param max_workers: maximum number of workers
         :param progress: rich progress object
         """
@@ -65,6 +64,9 @@ class StacCollection(object):
         latest_per_tile = {}
         lock = threading.Lock()
 
+        merged_geom = unary_union(df_polygon['geometry'])
+        intersects_geometry = mapping(merged_geom)
+
         def search_single_polygon(single_geom):
             nonlocal latest_per_tile
 
@@ -78,13 +80,22 @@ class StacCollection(object):
                 query={"eo:cloud_cover": {"lt": 5}},
                 datetime=datetime_range,
             )
-            items = list(search.items())
+
+            # only use items which covers more than 10% of the entire project area
+            logger.debug(
+                [
+                    f"{self._intersection_percent(item, intersects_geometry):.2f}"
+                    for item in search.items()
+                ]
+            )
+            items_gt_10_percent = (
+                item for item in search.items() if self._intersection_percent(item, intersects_geometry) > 10
+            )
+            items = list(items_gt_10_percent)
 
             with lock:
                 for item in items:
-                    tile_id = item.properties.get(tile_id_prop_name)
-                    if tile_id is None:
-                        tile_id = item.id
+                    tile_id = item.id
 
                     cloud_cover = item.properties.get("eo:cloud_cover")
                     if cloud_cover is None:
@@ -246,6 +257,20 @@ class StacCollection(object):
 
         # reproject final outputs to original projection
         return gpd.GeoSeries(polygons_3857, crs=3857).to_crs(original_crs).tolist()
+
+    def _intersection_percent(self, item: pystac.Item, aoi: Dict[str, Any]) -> float:
+        """
+        The percentage that the Item's geometry intersects the AOI. An Item that
+        completely covers the AOI has a value of 100.
+        """
+        geom_item = shape(item.geometry)
+        geom_aoi = shape(aoi)
+
+        intersected_geom = geom_aoi.intersection(geom_item)
+
+        intersection_percent = (intersected_geom.area * 100) / geom_aoi.area
+
+        return intersection_percent
 
 
 if __name__ == '__main__':

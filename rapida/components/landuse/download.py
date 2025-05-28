@@ -55,7 +55,7 @@ async def download_stac(
     target_month:int,
     target_srs,
     progress: Progress = None,
-    max_workers: int = 2,
+    max_workers: int = 1,
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required

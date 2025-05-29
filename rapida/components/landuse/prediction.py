@@ -1,4 +1,5 @@
 import concurrent
+import datetime
 import os
 import json
 import time
@@ -11,6 +12,7 @@ from concurrent.futures import ProcessPoolExecutor
 import threading
 from typing import List
 import numpy as np
+import pystac
 import rasterio
 from rasterio.windows import Window
 from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
@@ -104,7 +106,32 @@ def preinference_check(img_paths: List):
     return col_sizes[0], row_sizes[0]
 
 
-def process_tile(row, col, img_paths, buffer, row_size, col_size, tile_size=256, landuse_nodata=255):
+def harmonize_to_old(data, target_datetime, nodata_value=0):
+    """
+    Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
+    described at https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a#Baseline-Change
+
+    :param data: Sentinel-2 data to harmonize
+    :param target_datetime: Target datetime of the item
+    :param nodata_value: nodata value to exclude from harmonization
+    :return: harmonized data. The input data with an offset of 1000 subtracted.
+    """
+    cutoff = datetime.datetime(2022, 1, 25, tzinfo=datetime.timezone.utc)
+    offset = 1000
+    if target_datetime >= cutoff:
+        harmonized = np.where(data != nodata_value, data - offset, data)
+        return harmonized
+    else:
+        return data
+
+def process_tile(row, col,
+                 img_paths,
+                 target_datetime,
+                 buffer,
+                 row_size,
+                 col_size,
+                 tile_size=256,
+                 landuse_nodata=255):
     logger.debug(f"Processing window at row {row}, col {col}")
 
     # create buffer (64px x 64px) for original tile size
@@ -122,7 +149,8 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size, tile_size=256,
     for i, file_path in enumerate(img_paths):
         with rasterio.open(file_path) as src:
             band_data = src.read(1, window=window)
-            raw_data[:, :, i] = band_data
+            harmonized_data = harmonize_to_old(band_data, target_datetime)
+            raw_data[:, :, i] = harmonized_data
 
             # create mask for nodata pixels
             if nodata_mask is None and src.nodata is not None:
@@ -159,7 +187,11 @@ def hex_to_rgb(hex_color):
     return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
 
 
-def predict(img_paths: List[str], output_file_path: str, num_workers=None, progress = None):
+def predict(img_paths: List[str],
+            output_file_path: str,
+            item: pystac.Item,
+            num_workers=None,
+            progress = None):
     t1 = time.time()
     predict_task = None
     if progress:
@@ -226,7 +258,7 @@ def predict(img_paths: List[str], output_file_path: str, num_workers=None, progr
             for _ in range(num_workers):
                 row, col = next(job_iter)
                 task_id = progress.add_task(f"[green]Processing tile ({row}, {col})", total=None) if progress else None
-                fut = executor.submit(process_tile, row, col, img_paths,
+                fut = executor.submit(process_tile, row, col, img_paths, item.datetime,
                                       buffer, row_size, col_size,
                                       tile_size, landuse_nodata)
                 running_futures[fut] = (row, col, task_id)

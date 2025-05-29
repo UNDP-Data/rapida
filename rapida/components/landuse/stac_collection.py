@@ -81,15 +81,16 @@ class StacCollection(object):
                 datetime=datetime_range,
             )
 
+            intersect_percentages = {}
+            for item in search.items():
+                percentage = self._intersection_percent(item, intersects_geometry)
+                cloud_cover = item.properties.get("eo:cloud_cover")
+                logger.debug(f"{item.id}: intersects) {percentage}:.2f %; cloud cover) {cloud_cover}:.2f %")
+                intersect_percentages[item.id] = percentage
+
             # only use items which covers more than 10% of the entire project area
-            logger.debug(
-                [
-                    f"{self._intersection_percent(item, intersects_geometry):.2f}"
-                    for item in search.items()
-                ]
-            )
             items_gt_10_percent = (
-                item for item in search.items() if self._intersection_percent(item, intersects_geometry) > 10
+                item for item in search.items() if intersect_percentages[item.id] > 10
             )
             items = list(items_gt_10_percent)
 

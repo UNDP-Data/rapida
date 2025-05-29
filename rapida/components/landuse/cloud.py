@@ -1,4 +1,5 @@
 import concurrent
+import datetime
 import os
 import time
 import psutil
@@ -6,6 +7,7 @@ from concurrent.futures import ProcessPoolExecutor
 import threading
 from typing import List
 import numpy as np
+import pystac
 import rasterio
 from rasterio.windows import Window
 from s2cloudless import S2PixelCloudDetector, download_bands_and_valid_data_mask
@@ -35,7 +37,42 @@ def preinference_check(img_paths: List):
     return col_sizes[0], row_sizes[0]
 
 
-def process_tile(row, col, img_paths, buffer, row_size, col_size, tile_size=256, scale=0.0001):
+def harmonize_to_old(data, target_datetime, reflectance_conversion_factor, nodata_value=0):
+    """
+    Harmonize new Sentinel-2 data to the old baseline.
+
+    ESA updated the Sentinel-2 processing baseline to version 04.00 in January, 2022, which introduced breaking changes to the interpretation of digital numbers (DN).
+
+    It is described at:
+
+    - https://github.com/sentinel-hub/sentinel2-cloud-detector?tab=readme-ov-file#input-sentinel-2-scenes
+    - https://docs.sentinel-hub.com/api/latest/data/sentinel-2-l1c/#harmonize-values
+
+    :param data: Sentinel-2 data to harmonize
+    :param target_datetime: Target datetime of the item
+    :param nodata_value: nodata value to exclude from harmonization
+    :return: harmonized data. The input data with an offset of 1000 subtracted.
+    """
+    cutoff = datetime.datetime(2022, 1, 25, tzinfo=datetime.timezone.utc)
+    reflectance_factor = 10000
+    offset = 1000
+    if target_datetime >= cutoff:
+        harmonized = np.where(data != nodata_value, (data - offset).astype(np.float32) * reflectance_conversion_factor/ reflectance_factor, data)
+        harmonized = np.clip(harmonized, 0, None)
+        return harmonized
+    else:
+        harmonized = np.where(data != nodata_value, data.astype(np.float32) * reflectance_conversion_factor / reflectance_factor, data)
+        harmonized = np.clip(harmonized, 0, None)
+        return harmonized
+
+
+def process_tile(row, col,
+                 img_paths,
+                 item: pystac.Item,
+                 buffer,
+                 row_size,
+                 col_size,
+                 tile_size=256):
     logger.debug(f"Processing window at row {row}, col {col}")
 
     # create buffer (64px x 64px) for original tile size
@@ -54,10 +91,13 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size, tile_size=256,
             band_data = src.read(1, window=window)
             raw_data[:, :, i] = band_data
 
-    raw_data = raw_data.astype(np.float32) * scale
+    reflectance_conversion_factor = item.properties.get("s2:reflectance_conversion_factor")
+    raw_data = harmonize_to_old(raw_data, item.datetime, reflectance_conversion_factor)
 
     cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2, all_bands=False)
-    cloud_mask = cloud_detector.get_cloud_masks(raw_data[np.newaxis, ...])
+    cloud_prob = cloud_detector.get_cloud_probability_maps(raw_data[np.newaxis, ...])
+    logger.debug(f"Cloud detection probability: {cloud_prob}")
+    cloud_mask = cloud_detector.get_mask_from_prob(cloud_prob)
 
     # crop original tile by removing buffer
     start_row = row - row_off
@@ -72,6 +112,7 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size, tile_size=256,
 
 def cloud_detect(img_paths: List[str],
                  output_file_path: str,
+                 item: pystac.Item,
                  num_workers=None,
                  progress = None):
     t1 = time.time()
@@ -127,7 +168,7 @@ def cloud_detect(img_paths: List[str],
             for _ in range(num_workers):
                 row, col = next(job_iter)
                 task_id = progress.add_task(f"[green]Processing tile ({row}, {col})", total=None) if progress else None
-                fut = executor.submit(process_tile, row, col, img_paths,
+                fut = executor.submit(process_tile, row, col, img_paths, item,
                                       buffer, row_size, col_size,
                                       tile_size)
                 running_futures[fut] = (row, col, task_id)
@@ -155,7 +196,7 @@ def cloud_detect(img_paths: List[str],
                     try:
                         row, col = next(job_iter)
                         task_id = progress.add_task(f"[green]Processing tile ({row}, {col})", total=None) if progress else None
-                        fut = executor.submit(process_tile, row, col, img_paths,
+                        fut = executor.submit(process_tile, row, col, img_paths, item,
                                               buffer, row_size, col_size,
                                               tile_size)
                         running_futures[fut] = (row, col, task_id)
@@ -177,24 +218,19 @@ def cloud_detect(img_paths: List[str],
 
 
 if __name__ == "__main__":
-    # img_paths = ['/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B01.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B02.tif',
-    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B04.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B05.tif',
-    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B08.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B8A.tif',
-    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B09.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B10.tif',
-    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B11.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B12.tif']
-    # output_file_path = "/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/cloud.tif"
+    img_paths = ['/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B01.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B02.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B04.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B05.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B08.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B8A.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B09.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B10.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B11.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B12.tif']
+    output_file_path = "/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/cloud.tif"
+    item_url = '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/item.json'
 
-    img_paths = ['/data/sentinel_tests/MGRS-35MRT/B01.tif', '/data/sentinel_tests/MGRS-35MRT/B02.tif',
-                 '/data/sentinel_tests/MGRS-35MRT/B04.tif', '/data/sentinel_tests/MGRS-35MRT/B05.tif',
-                 '/data/sentinel_tests/MGRS-35MRT/B08.tif', '/data/sentinel_tests/MGRS-35MRT/B8A.tif',
-                 '/data/sentinel_tests/MGRS-35MRT/B09.tif', '/data/sentinel_tests/MGRS-35MRT/B10.tif',
-                 '/data/sentinel_tests/MGRS-35MRT/B11.tif', '/data/sentinel_tests/MGRS-35MRT/B12.tif']
-
-    output_file_path="/data/sentinel_tests/MGRS-35MRT/cloud_2.tif"
+    item = pystac.Item.from_file(item_url)
 
     with Progress() as progress:
         t1 = time.time()
-        cloud_detect(img_paths=img_paths, output_file_path=output_file_path, progress=progress)
+        cloud_detect(img_paths=img_paths, output_file_path=output_file_path, item=item, progress=progress)
         t2 = time.time()
 
         logger.info(f"prediction time: {t2 - t1}")

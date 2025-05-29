@@ -268,6 +268,7 @@ class SentinelItem(object):
             predict(
                 img_paths=img_paths,
                 output_file_path=temp_file,
+                item=self.item,
                 # num_workers=1,
                 progress=progress,
             )
@@ -293,6 +294,7 @@ class SentinelItem(object):
             cloud_detect(
                 img_paths=img_paths,
                 output_file_path=self.cloud_mask_file,
+                item=self.item,
                 # num_workers=1,
                 progress=progress,
             )
@@ -424,17 +426,17 @@ class SentinelItem(object):
                         logging.debug(f"file already exists. Skipped: {download_file}")
                         return download_file
 
-            pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
-            match = re.search(pattern, file_url)
-            if match:
-                year, month, day = map(int, match.groups())
-                acquisition_date = datetime(year, month, day)
-                logging.debug("Extracted acquisition date: %s", acquisition_date)
-            else:
-                logging.error("Failed to extract date from file_url: %s", file_url)
-                raise ValueError(f"Could not extract date from URL: {file_url}")
-
-            cutoff = datetime(2022, 1, 25)
+            # pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
+            # match = re.search(pattern, file_url)
+            # if match:
+            #     year, month, day = map(int, match.groups())
+            #     acquisition_date = datetime(year, month, day)
+            #     logging.debug("Extracted acquisition date: %s", acquisition_date)
+            # else:
+            #     logging.error("Failed to extract date from file_url: %s", file_url)
+            #     raise ValueError(f"Could not extract date from URL: {file_url}")
+            #
+            # cutoff = datetime(2022, 1, 25)
 
             async with httpx.AsyncClient() as client:
                 async with client.stream("GET", file_url) as response:
@@ -458,8 +460,8 @@ class SentinelItem(object):
 
                 nodata = src.nodata if src.nodata is not None else no_data_value
 
-                if acquisition_date >= cutoff:
-                    data = self._harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
+                # if acquisition_date >= cutoff:
+                #     data = self._harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
 
                 profile = src.profile
                 profile.update(driver="GTiff", dtype=data.dtype, count=src.count)
@@ -513,7 +515,7 @@ if __name__ == '__main__':
     setup_logger()
 
     item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
-    mask_file = "/data/kigali/data/kigali.gpkg"
+    mask_file = "/data/kigali_small/data/kigali_small.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
 

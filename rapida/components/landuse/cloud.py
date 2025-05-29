@@ -56,7 +56,7 @@ def process_tile(row, col, img_paths, buffer, row_size, col_size, tile_size=256,
 
     raw_data = raw_data.astype(np.float32) * scale
 
-    cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=1, dilation_size=1, all_bands=False)
+    cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2, all_bands=False)
     cloud_mask = cloud_detector.get_cloud_masks(raw_data[np.newaxis, ...])
 
     # crop original tile by removing buffer
@@ -143,6 +143,7 @@ def cloud_detect(img_paths: List[str],
                     with write_lock:
                         dst.write(original_tile.astype(np.float32), 1,
                                   window=Window(col, row, min(tile_size, col_size - col), min(tile_size, row_size - row)))
+                        dst.update_stats()
 
                     if progress:
                         if predict_task:
@@ -176,13 +177,20 @@ def cloud_detect(img_paths: List[str],
 
 
 if __name__ == "__main__":
+    # img_paths = ['/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B01.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B02.tif',
+    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B04.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B05.tif',
+    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B08.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B8A.tif',
+    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B09.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B10.tif',
+    #              '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B11.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B12.tif']
+    # output_file_path = "/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/cloud.tif"
+
     img_paths = ['/data/sentinel_tests/MGRS-35MRT/B01.tif', '/data/sentinel_tests/MGRS-35MRT/B02.tif',
                  '/data/sentinel_tests/MGRS-35MRT/B04.tif', '/data/sentinel_tests/MGRS-35MRT/B05.tif',
                  '/data/sentinel_tests/MGRS-35MRT/B08.tif', '/data/sentinel_tests/MGRS-35MRT/B8A.tif',
                  '/data/sentinel_tests/MGRS-35MRT/B09.tif', '/data/sentinel_tests/MGRS-35MRT/B10.tif',
                  '/data/sentinel_tests/MGRS-35MRT/B11.tif', '/data/sentinel_tests/MGRS-35MRT/B12.tif']
 
-    output_file_path="/data/sentinel_tests/MGRS-35MRT/cloud.tif"
+    output_file_path="/data/sentinel_tests/MGRS-35MRT/cloud_2.tif"
 
     with Progress() as progress:
         t1 = time.time()

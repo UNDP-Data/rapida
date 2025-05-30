@@ -1,9 +1,10 @@
-
+import asyncio
 import logging
 import os
 
 from rapida.admin.osm import fetch_admin as fetch_osm_admin, ADMIN_LEVELS
 from rapida.admin.ocha import fetch_admin as fetch_ocha_admin
+from rapida.admin.cgaz import fetch_admin as fetch_cgaz_admin
 from rapida.session import is_rapida_initialized
 from rapida.util.bbox_param_type import BboxParamType
 from rapida.util.setup_logger import setup_logger
@@ -171,3 +172,54 @@ def ocha(bbox=None,admin_level=None,  clip=False, h3id_precision=7, destination_
         return
     save(geojson_dict=geojson, dst_path=destination_path, layer_name=f'admin{admin_level}')
 
+
+@admin.command(no_args_is_help=True)
+@click.argument('destination_path', type=click.Path())
+@click.option('-b', '--bbox', required=True, type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north' )
+@click.option('-l','--admin_level',
+                required=True,
+                type=click.IntRange(min=0, max=2, clamp=False),
+                help='UNDP admin level from where to extract the admin features'
+                )
+@click.option('--clip',
+
+    is_flag=True,
+    default=False,
+    help="Whether to clip the data to the bounding box."
+)
+@click.option('--debug',
+
+    is_flag=True,
+    default=False,
+    help="Set log level to debug"
+)
+def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=False):
+    """
+    Fetch admin boundaries from CGAZ
+
+    Parameters
+    ----------
+    bbox : tuple
+        Bounding box in the format (xmin, ymin, xmax, ymax)
+    admin_level : int
+    clip : bool
+        Whether to clip the data to the bounding box.
+    destination_path : str
+        Path to save the output GeoJSON file
+    debug : bool
+
+    Returns
+    -------
+
+    """
+    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+    if not is_rapida_initialized():
+        return
+
+    geojson = asyncio.run(fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip))
+    if not geojson:
+        logger.error('Could not extract admin boundaries from CGAZ for the provided bbox')
+        return
+    save(geojson_dict=geojson, dst_path=destination_path, layer_name=f'admin{admin_level}')

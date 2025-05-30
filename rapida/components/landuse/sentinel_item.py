@@ -3,12 +3,13 @@ import logging
 import multiprocessing
 import os
 import asyncio
+import threading
 import time
 import re
 import httpx
 import pystac
 from typing import Dict
-from datetime import datetime
+from queue import Queue
 from osgeo import ogr, osr, gdal
 import rasterio
 import numpy as np
@@ -214,6 +215,9 @@ class SentinelItem(object):
         asyncio.set_event_loop(loop)
         semaphore = asyncio.Semaphore(max_workers)
 
+        reproject_queue = Queue()
+        completed_items = []
+
         async def download_all():
             async def download_one(asset_key: str, band_name: str):
                 asset = self.item.assets[asset_key]
@@ -226,14 +230,22 @@ class SentinelItem(object):
                 for attempt in range(1, max_retries + 1):
                     async with semaphore:
                         try:
-                            result = await self._download_asset(
+                            jp2_file, remote_content_length = await self._download_asset(
                                 file_url=url,
                                 target=target_path,
-                                target_srs=self.target_srs,
-                                no_data_value=self.asset_nodata[band_name],
                                 progress=progress,
                             )
-                            # self._asset_files[band_name] = result
+
+                            metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
+                            item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
+                            if item_datetime is not None:
+                                metadata["ITEM_DATETIME"] = item_datetime
+                            cloud_cover = self.item.properties.get("eo:cloud_cover")
+                            if cloud_cover is not None:
+                                metadata["CLOUD_COVER"] = str(cloud_cover)
+
+                            reproject_queue.put((jp2_file, self.target_srs, self.asset_nodata[band_name], metadata))
+
                             return
                         except Exception as e:
                             logger.warning(f"[{band_name}] Attempt {attempt}/{max_retries} failed: {e}")
@@ -255,8 +267,34 @@ class SentinelItem(object):
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
 
+        def reprojector():
+            while True:
+                item = reproject_queue.get()
+                if item is None:
+                    reproject_queue.task_done()
+                    break
+                jp2_file, target_srs, nodata_value, metadata = item
+
+                reprojected_file = jp2_file.replace('.jp2', '.tif')
+                self._reproject_asset(jp2_file=jp2_file,
+                                      output_file=reprojected_file,
+                                      target_srs=self.target_srs,
+                                      no_data_value=nodata_value,
+                                      metadata=metadata,
+                                      progress=progress)
+
+                completed_items.append(reprojected_file)
+                reproject_queue.task_done()
+
+        reproject_thread = threading.Thread(target=reprojector)
+        reproject_thread.start()
+
         loop.run_until_complete(download_all())
         loop.close()
+
+        reproject_queue.put(None)
+        reproject_queue.join()
+        reproject_thread.join()
 
         # once all downloads are successfully done, write item.json in the folder
         with open(item_path, "w", encoding="utf-8") as f:
@@ -382,10 +420,8 @@ class SentinelItem(object):
             self,
             file_url: str,
             target: str,
-            target_srs: str,
-            no_data_value: int = 0,
             progress=None,
-    ) -> str:
+    ) -> tuple[str, int]:
         """
         Download JP2 file from STAC server, then reproject and crop by project area, and transform to GeoTiff file.
 
@@ -404,7 +440,6 @@ class SentinelItem(object):
         download_file = f"{target}.tif"
 
         jp2_file = f"{target}{extension}"
-        tout = multiprocessing.Event()
 
         try:
             # fetch content-length from remote file header
@@ -421,7 +456,11 @@ class SentinelItem(object):
                     meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
                     if meta_content_length and int(meta_content_length) == remote_content_length:
                         logging.debug(f"file already exists. Skipped: {download_file}")
-                        return download_file
+                        return jp2_file, remote_content_length
+                    else:
+                        os.remove(download_file)
+                        if os.path.exists(jp2_file):
+                            os.remove(jp2_file)
             if not os.path.exists(jp2_file):
                 async with httpx.AsyncClient() as client:
                     async with client.stream("GET", file_url) as response:
@@ -437,8 +476,41 @@ class SentinelItem(object):
                                 if progress is not None and download_task is not None:
                                     progress.update(download_task, advance=len(chunk))
 
+            return jp2_file, remote_content_length
+        finally:
             if progress and download_task:
-                progress.update(download_task, description=f"[blue] Reprojecting {jp2_file}...", total=100)
+                progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
+                progress.remove_task(download_task)
+
+
+
+    def _reproject_asset(self,
+                       jp2_file: str,
+                       output_file: str,
+                       target_srs: str,
+                       metadata: dict,
+                       no_data_value: int = 0,
+                       progress=None,
+                       ):
+        """
+        Reproject jp2 file to target SRS, and upscale resolution to 10m
+
+        :param jp2_file: jp2 file URL
+        :param target_srs: target SRS
+        :param metadata: metadata to be written to reprojected file
+        :param no_data_value: nodata value. default is 0
+        :param progress: rich progress instance
+        """
+        if os.path.exists(output_file):
+            return output_file
+        reproject_task = None
+        if progress is not None:
+            reproject_task = progress.add_task(
+                description=f'[blue] Reprojecting {jp2_file}', total=100)
+
+        tout = multiprocessing.Event()
+
+        try:
 
             with rasterio.open(jp2_file) as src:
                 nodata = src.nodata if src.nodata is not None else no_data_value
@@ -459,29 +531,20 @@ class SentinelItem(object):
                 cutlineLayer=self.mask_layer,
                 cropToCutline=True,
                 callback=gdal_callback,
-                callback_data=(progress, download_task, tout)
+                callback_data=(progress, reproject_task, tout)
             )
 
-            rds = gdal.Warp(destNameOrDestDS=download_file,
+            with gdal.Warp(destNameOrDestDS=output_file,
                             srcDSOrSrcDSTab=jp2_file,
-                            options=warp_options)
-            metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
-            item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
-            if item_datetime is not None:
-                metadata["ITEM_DATETIME"] = item_datetime
-            cloud_cover = self.item.properties.get("eo:cloud_cover")
-            if cloud_cover is not None:
-                metadata["CLOUD_COVER"] = str(cloud_cover)
-            rds.SetMetadata(metadata)
-            rds = None
+                            options=warp_options) as rds:
+                rds.SetMetadata(metadata)
+            return output_file
+        except Exception as e:
+            raise e
         finally:
-            # if os.path.exists(jp2_file):
-            #     os.remove(jp2_file)
-            if progress and download_task:
-                progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
-                progress.remove_task(download_task)
+            if progress and reproject_task:
+                progress.remove_task(reproject_task)
 
-        return download_file
 
 
 if __name__ == '__main__':

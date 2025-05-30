@@ -94,7 +94,7 @@ def process_tile(row, col,
     reflectance_conversion_factor = item.properties.get("s2:reflectance_conversion_factor")
     raw_data = harmonize_to_old(raw_data, item.datetime, reflectance_conversion_factor)
 
-    cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2, all_bands=False)
+    cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=8, dilation_size=2, all_bands=False)
     cloud_prob = cloud_detector.get_cloud_probability_maps(raw_data[np.newaxis, ...])
     logger.debug(f"Cloud detection probability: {cloud_prob}")
     cloud_mask = cloud_detector.get_mask_from_prob(cloud_prob)

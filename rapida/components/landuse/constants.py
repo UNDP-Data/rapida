@@ -14,10 +14,19 @@ STAC_MAP = {
     'earth-search': 'https://earth-search.aws.element84.com/v1'
 }
 
-needed_assets = (
-    'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'
-)
-earth_search_assets = (
-    'blue', 'green', 'red', 'rededge1', 'rededge2', 'rededge3', 'nir', 'swir16', 'swir22'
-)
-SENTINEL2_ASSET_MAP = dict(zip(earth_search_assets, needed_assets))
+# mapping asset name and band name
+SENTINEL2_ASSET_MAP = {
+    "coastal": "B01", # cloud
+    "blue": "B02", # land use, cloud
+    "green": "B03", # land use
+    "red": "B04", # land use, cloud
+    "rededge1": "B05", # land use, cloud
+    "rededge2": "B06", # land use
+    "rededge3": "B07", # land use
+    "nir": "B08", # land use, cloud
+    "nir08": "B8A", # cloud
+    "nir09": "B09", # cloud
+    "cirrus": "B10", # cloud
+    "swir16": "B11", # land use, cloud
+    "swir22": "B12", # land use, cloud
+}

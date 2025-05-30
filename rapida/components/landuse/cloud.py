@@ -1,13 +1,8 @@
 import concurrent
 import datetime
 import os
-import json
 import time
-
 import psutil
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
 from concurrent.futures import ProcessPoolExecutor
 import threading
 from typing import List
@@ -15,80 +10,16 @@ import numpy as np
 import pystac
 import rasterio
 from rasterio.windows import Window
-from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
+from s2cloudless import S2PixelCloudDetector, download_bands_and_valid_data_mask
+from rich.progress import Progress
 from rapida.util.setup_logger import setup_logger
+
 
 logger = setup_logger('rapida')
 
-try:
-    import tensorflow as tf
-    from absl import logging as absl_logging
-    absl_logging.set_verbosity(absl_logging.ERROR)
-except Exception as ie:
-    tf = None
-
-
-def normalize(image):
-    """
-    :param image:
-    :return:
-    """
-    norm_percentiles = np.array([
-        [1.7417268007636313, 2.023298706048351],
-        [1.7261204997060209, 2.038905204308012],
-        [1.6798346251414997, 2.179592821212937],
-        [1.7734969472909623, 2.2890068333026603],
-        [2.289154079164943, 2.6171674549378166],
-        [2.382939712192371, 2.773418590375327],
-        [2.3828939530384052, 2.7578332604178284],
-        [2.1952484264967844, 2.789092484314204],
-        [1.554812948247501, 2.4140534947492487]
-    ])
-
-    image = np.log(image * 0.005 + 1)
-    image = (image - norm_percentiles[:, 0]) / norm_percentiles[:, 1]
-    image = np.exp(image * 5 - 1)
-    image = image / (image + 1)
-    return image
-
-
-
-
-
-def load_model():
-    """
-    Load the model from the saved path
-    This is the model from Dynamic World
-    """
-    folder = os.path.dirname(__file__)
-
-    model_path = os.path.join(folder, 'model', 'forward')
-
-    # model_path = "./model/forward"
-    model = tf.saved_model.load(model_path)
-    return model
-
-def create_multi_band_image(input_files, output_file):
-    """
-    Create a multi-band image from the input files
-    :param input_files:
-    :param output_file:
-    :return:
-    """
-    raw_data = np.empty(shape=(len(input_files),), dtype="u2")
-    with rasterio.open(input_files[0]) as src:
-        meta = src.meta.copy()
-        meta.update(count=len(input_files))
-
-    with rasterio.open(output_file, "w", **meta) as dst:
-        for i, file in enumerate(input_files):
-            with rasterio.open(file) as src:
-                raw_data[:, :, i] = src.read(1)
-    logger.debug(f"Multi-band image saved as {output_file}")
-    return output_file
 
 def preinference_check(img_paths: List):
-    assert len(img_paths) > 0 and len(img_paths) == 9, "9 bands are required for prediction with this model"
+    assert len(img_paths) > 0 and len(img_paths) == 10, "10 bands are required for cloud detection"
     col_sizes = []
     row_sizes = []
     for img_path in img_paths:
@@ -106,10 +37,16 @@ def preinference_check(img_paths: List):
     return col_sizes[0], row_sizes[0]
 
 
-def harmonize_to_old(data, target_datetime, nodata_value=0):
+def harmonize_to_old(data, target_datetime, reflectance_conversion_factor, nodata_value=0):
     """
-    Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
-    described at https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a#Baseline-Change
+    Harmonize new Sentinel-2 data to the old baseline.
+
+    ESA updated the Sentinel-2 processing baseline to version 04.00 in January, 2022, which introduced breaking changes to the interpretation of digital numbers (DN).
+
+    It is described at:
+
+    - https://github.com/sentinel-hub/sentinel2-cloud-detector?tab=readme-ov-file#input-sentinel-2-scenes
+    - https://docs.sentinel-hub.com/api/latest/data/sentinel-2-l1c/#harmonize-values
 
     :param data: Sentinel-2 data to harmonize
     :param target_datetime: Target datetime of the item
@@ -117,21 +54,25 @@ def harmonize_to_old(data, target_datetime, nodata_value=0):
     :return: harmonized data. The input data with an offset of 1000 subtracted.
     """
     cutoff = datetime.datetime(2022, 1, 25, tzinfo=datetime.timezone.utc)
+    reflectance_factor = 10000
     offset = 1000
     if target_datetime >= cutoff:
-        harmonized = np.where(data != nodata_value, data - offset, data)
+        harmonized = np.where(data != nodata_value, (data - offset).astype(np.float32) * reflectance_conversion_factor/ reflectance_factor, data)
+        harmonized = np.clip(harmonized, 0, None)
         return harmonized
     else:
-        return data
+        harmonized = np.where(data != nodata_value, data.astype(np.float32) * reflectance_conversion_factor / reflectance_factor, data)
+        harmonized = np.clip(harmonized, 0, None)
+        return harmonized
+
 
 def process_tile(row, col,
                  img_paths,
-                 target_datetime,
+                 item: pystac.Item,
                  buffer,
                  row_size,
                  col_size,
-                 tile_size=256,
-                 landuse_nodata=255):
+                 tile_size=256):
     logger.debug(f"Processing window at row {row}, col {col}")
 
     # create buffer (64px x 64px) for original tile size
@@ -142,28 +83,21 @@ def process_tile(row, col,
     window_width = min(col + tile_size + buffer, col_size) - col_off
 
     window = Window(col_off, row_off, window_width, window_height)
-    raw_data = np.empty((window_height, window_width, 9), dtype="u2")
 
-    nodata_mask = None
+    raw_data = np.empty((window_height, window_width, 10), dtype="u2")
 
     for i, file_path in enumerate(img_paths):
         with rasterio.open(file_path) as src:
             band_data = src.read(1, window=window)
-            harmonized_data = harmonize_to_old(band_data, target_datetime)
-            raw_data[:, :, i] = harmonized_data
+            raw_data[:, :, i] = band_data
 
-            # create mask for nodata pixels
-            if nodata_mask is None and src.nodata is not None:
-                nodata_mask = (band_data == src.nodata)
+    reflectance_conversion_factor = item.properties.get("s2:reflectance_conversion_factor")
+    raw_data = harmonize_to_old(raw_data, item.datetime, reflectance_conversion_factor)
 
-    normalized_data = normalize(raw_data)
-    nhwc_image = tf.expand_dims(tf.cast(normalized_data, dtype=tf.float32), axis=0)
-    logger.debug("Running model inference")
-    forward_model = load_model()
-    lulc_logits = forward_model(nhwc_image)
-    lulc_prob = tf.nn.softmax(lulc_logits)
-    lulc_prob = np.array(lulc_prob[0])
-    lulc_prediction = np.argmax(lulc_prob, axis=-1)
+    cloud_detector = S2PixelCloudDetector(threshold=0.4, average_over=8, dilation_size=2, all_bands=False)
+    cloud_prob = cloud_detector.get_cloud_probability_maps(raw_data[np.newaxis, ...])
+    logger.debug(f"Cloud detection probability: {cloud_prob}")
+    cloud_mask = cloud_detector.get_mask_from_prob(cloud_prob)
 
     # crop original tile by removing buffer
     start_row = row - row_off
@@ -171,36 +105,24 @@ def process_tile(row, col,
     end_row = start_row + min(tile_size, row_size - row)
     end_col = start_col + min(tile_size, col_size - col)
 
-    original_tile = lulc_prediction[start_row:end_row, start_col:end_col]
-
-    # The model predicts no data pixel where value is zero as 1 (trees),
-    # so remove predicted values for nodata mask after predicting
-    if nodata_mask is not None:
-        mask = nodata_mask[start_row:end_row, start_col:end_col]
-        original_tile[mask] = landuse_nodata
+    original_tile = cloud_mask[0][start_row:end_row, start_col:end_col]
 
     return (row, col, original_tile)
 
 
-def hex_to_rgb(hex_color):
-    hex_color = hex_color.lstrip('#')
-    return tuple(int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
-
-
-def predict(img_paths: List[str],
-            output_file_path: str,
-            item: pystac.Item,
-            num_workers=None,
-            progress = None):
+def cloud_detect(img_paths: List[str],
+                 output_file_path: str,
+                 item: pystac.Item,
+                 num_workers=None,
+                 progress = None):
     t1 = time.time()
     predict_task = None
     if progress:
-        predict_task = progress.add_task(f"[cyan]Starting land use prediction")
+        predict_task = progress.add_task(f"[cyan]Starting cloud detection")
 
     col_size, row_size = preinference_check(img_paths)
     tile_size=1024
     buffer = 64
-    landuse_nodata = 255
 
     if predict_task is not None:
         progress.update(predict_task, description="[cyan]Opening first image to get metadata")
@@ -215,26 +137,14 @@ def predict(img_paths: List[str],
     with rasterio.open(output_file_path,
                        mode='w',
                        driver="GTiff",
-                       dtype='uint8',
+                       dtype='float32',
                        width=col_size,
                        height=row_size,
                        crs=crs,
                        transform=dst_transform,
-                       nodata=landuse_nodata,
                        count=1,
                        compress='ZSTD',
-                       tiled=True,
-                       photometric='palette') as dst:
-        # write colormap
-        landuse_colormap = {k: hex_to_rgb(v['color']) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
-        dst.write_colormap(1, landuse_colormap)
-
-        # write STATISTICS_UNIQUE_VALUES for GeoHub
-        statistics_unique_values = {
-            str(k): v['label'] for k, v in DYNAMIC_WORLD_COLORMAP.items()
-        }
-        unique_values_json = json.dumps(statistics_unique_values, ensure_ascii=False)
-        dst.update_tags(1, STATISTICS_UNIQUE_VALUES=unique_values_json)
+                       tiled=True) as dst:
 
         tile_jobs = [
             (row, col)
@@ -243,7 +153,7 @@ def predict(img_paths: List[str],
         ]
 
         if predict_task:
-            progress.update(predict_task, description=f"[cyan]Running prediction for {len(tile_jobs)} tiles", total=len(tile_jobs))
+            progress.update(predict_task, description=f"[cyan]Running cloud detection for {len(tile_jobs)} tiles", total=len(tile_jobs))
 
         write_lock = threading.Lock()
 
@@ -258,9 +168,9 @@ def predict(img_paths: List[str],
             for _ in range(num_workers):
                 row, col = next(job_iter)
                 task_id = progress.add_task(f"[green]Processing tile ({row}, {col})", total=None) if progress else None
-                fut = executor.submit(process_tile, row, col, img_paths, item.datetime,
+                fut = executor.submit(process_tile, row, col, img_paths, item,
                                       buffer, row_size, col_size,
-                                      tile_size, landuse_nodata)
+                                      tile_size)
                 running_futures[fut] = (row, col, task_id)
 
             while running_futures:
@@ -272,8 +182,9 @@ def predict(img_paths: List[str],
                     row, col, original_tile = fut.result()
 
                     with write_lock:
-                        dst.write(original_tile.astype(np.uint8), 1,
+                        dst.write(original_tile.astype(np.float32), 1,
                                   window=Window(col, row, min(tile_size, col_size - col), min(tile_size, row_size - row)))
+                        dst.update_stats()
 
                     if progress:
                         if predict_task:
@@ -285,26 +196,43 @@ def predict(img_paths: List[str],
                     try:
                         row, col = next(job_iter)
                         task_id = progress.add_task(f"[green]Processing tile ({row}, {col})", total=None) if progress else None
-                        fut = executor.submit(process_tile, row, col, img_paths, item.datetime,
+                        fut = executor.submit(process_tile, row, col, img_paths, item,
                                               buffer, row_size, col_size,
-                                              tile_size, landuse_nodata)
+                                              tile_size)
                         running_futures[fut] = (row, col, task_id)
                     except KeyboardInterrupt:
-                        logger.info("Prediction interrupted by user. Cancelling tasks..")
+                        logger.info("Cloud detection interrupted by user. Cancelling tasks..")
                         executor.shutdown(wait=True, cancel_futures=True)
                         raise
                     except StopIteration:
                         continue
 
     t2 = time.time()
-    logger.debug(f"total time of prediction: {t2 - t1}")
+    logger.debug(f"total time of cloud detection: {t2 - t1}")
 
     if predict_task is not None:
-        progress.update(predict_task, description=f"[cyan]Prediction process completed successfully")
+        progress.update(predict_task, description=f"[cyan]Cloud detection process completed successfully")
         progress.remove_task(predict_task)
     return output_file_path
 
 
 
 if __name__ == "__main__":
-    pass
+    img_paths = ['/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B01.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B02.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B04.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B05.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B08.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B8A.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B09.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B10.tif',
+                 '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B11.tif', '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/B12.tif']
+    output_file_path = "/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/cloud.tif"
+    item_url = '/data/sentinel_tests/S2C_35MRT_20250225_0_L1C/item.json'
+
+    item = pystac.Item.from_file(item_url)
+
+    with Progress() as progress:
+        t1 = time.time()
+        cloud_detect(img_paths=img_paths, output_file_path=output_file_path, item=item, progress=progress)
+        t2 = time.time()
+
+        logger.info(f"prediction time: {t2 - t1}")
+
+

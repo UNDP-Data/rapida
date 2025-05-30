@@ -1,5 +1,6 @@
 import json
 import logging
+import multiprocessing
 import os
 import asyncio
 import time
@@ -20,6 +21,16 @@ from rapida.util.setup_logger import setup_logger
 
 
 logger = logging.getLogger(__name__)
+
+
+def gdal_callback(complete, message, data):
+    if data:
+        progressbar, task, timeout_event = data
+        if progressbar is not None and task is not None:
+            progressbar.update(task, completed=int(complete * 100))
+        if timeout_event and timeout_event.is_set():
+            logger.info(f'GDAL was signalled to stop...')
+            return 0
 
 
 class SentinelItem(object):
@@ -393,6 +404,7 @@ class SentinelItem(object):
         download_file = f"{target}.tif"
 
         jp2_file = f"{target}{extension}"
+        tout = multiprocessing.Event()
 
         try:
             # fetch content-length from remote file header
@@ -410,23 +422,23 @@ class SentinelItem(object):
                     if meta_content_length and int(meta_content_length) == remote_content_length:
                         logging.debug(f"file already exists. Skipped: {download_file}")
                         return download_file
+            if not os.path.exists(jp2_file):
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("GET", file_url) as response:
+                        response.raise_for_status()
+                        total = int(response.headers.get("content-length", 0))
 
-            async with httpx.AsyncClient() as client:
-                async with client.stream("GET", file_url) as response:
-                    response.raise_for_status()
-                    total = int(response.headers.get("content-length", 0))
+                        if progress is not None and download_task is not None:
+                            progress.update(download_task, total=total)
 
-                    if progress is not None and download_task is not None:
-                        progress.update(download_task, total=total)
-
-                    with open(jp2_file, "wb") as f:
-                        async for chunk in response.aiter_bytes():
-                            f.write(chunk)
-                            if progress is not None and download_task is not None:
-                                progress.update(download_task, advance=len(chunk))
+                        with open(jp2_file, "wb") as f:
+                            async for chunk in response.aiter_bytes():
+                                f.write(chunk)
+                                if progress is not None and download_task is not None:
+                                    progress.update(download_task, advance=len(chunk))
 
             if progress and download_task:
-                progress.update(download_task, description=f"[blue] Reprojecting {jp2_file}...")
+                progress.update(download_task, description=f"[blue] Reprojecting {jp2_file}...", total=100)
 
             with rasterio.open(jp2_file) as src:
                 nodata = src.nodata if src.nodata is not None else no_data_value
@@ -442,9 +454,12 @@ class SentinelItem(object):
                 srcNodata=nodata,
                 dstNodata=nodata,
                 resampleAlg="bilinear",
-                # cutlineDSName=self.mask_file,
-                # cutlineLayer=self.mask_layer,
-                # cropToCutline=True,
+                targetAlignedPixels=True,
+                cutlineDSName=self.mask_file,
+                cutlineLayer=self.mask_layer,
+                cropToCutline=True,
+                callback=gdal_callback,
+                callback_data=(progress, download_task, tout)
             )
 
             rds = gdal.Warp(destNameOrDestDS=download_file,

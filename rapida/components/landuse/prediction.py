@@ -285,7 +285,7 @@ def predict(img_paths: List[str],
                     try:
                         row, col = next(job_iter)
                         task_id = progress.add_task(f"[green]Processing tile ({row}, {col})", total=None) if progress else None
-                        fut = executor.submit(process_tile, row, col, img_paths,
+                        fut = executor.submit(process_tile, row, col, img_paths, item.datetime,
                                               buffer, row_size, col_size,
                                               tile_size, landuse_nodata)
                         running_futures[fut] = (row, col, task_id)

@@ -63,16 +63,16 @@ class SentinelItem(object):
         Get target spatial reference used in the mask layer
         """
         if self._target_srs is None:
-            ds = ogr.Open(self.mask_file)
-            if ds is None:
-                raise RuntimeError(f"Could not open GeoPackage: {self.mask_file}")
-            layer = ds.GetLayerByName(self.mask_layer)
-            if layer is None:
-                raise RuntimeError(f"Layer '{self.mask_layer}' not found in GeoPackage")
-            srs = layer.GetSpatialRef()
-            if srs is None:
-                raise RuntimeError(f"No CRS found in layer '{self.mask_layer}'")
-            self._target_srs = srs
+            with ogr.Open(self.mask_file) as ds:
+                if ds is None:
+                    raise RuntimeError(f"Could not open GeoPackage: {self.mask_file}")
+                layer = ds.GetLayerByName(self.mask_layer)
+                if layer is None:
+                    raise RuntimeError(f"Layer '{self.mask_layer}' not found in GeoPackage")
+                srs = layer.GetSpatialRef()
+                if srs is None:
+                    raise RuntimeError(f"No CRS found in layer '{self.mask_layer}'")
+                self._target_srs = srs
         return self._target_srs
 
     @property
@@ -337,8 +337,6 @@ class SentinelItem(object):
 
             # Write masked output
             with rasterio.open(output_file, "w", **profile) as dst:
-                dst.write(masked_data, 1)
-
                 for b in range(1, band_count + 1):
                     # copy band colormap
                     colormap = pred_src.colormap(b)
@@ -348,6 +346,7 @@ class SentinelItem(object):
                     band_tags = pred_src.tags(b)
                     if band_tags:
                         dst.update_tags(b, **band_tags)
+                dst.write(masked_data, 1)
 
         return output_file
 
@@ -366,20 +365,6 @@ class SentinelItem(object):
             return 'https://{0}.s3.amazonaws.com/{1}'.format(bucket, object_name)
         else:
             return url
-
-
-    def _harmonize_to_old(self, data, nodata_value):
-        """
-        Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
-        described at https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a#Baseline-Change
-
-        :param data: Sentinel-2 data to harmonize
-        :param nodata_value: nodata value to exclude from harmonization
-        :return: harmonized data. The input data with an offset of 1000 subtracted.
-        """
-        offset = 1000
-        harmonized = np.where(data != nodata_value, data - offset, data)
-        return harmonized
 
 
     async def _download_asset(
@@ -426,18 +411,6 @@ class SentinelItem(object):
                         logging.debug(f"file already exists. Skipped: {download_file}")
                         return download_file
 
-            # pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
-            # match = re.search(pattern, file_url)
-            # if match:
-            #     year, month, day = map(int, match.groups())
-            #     acquisition_date = datetime(year, month, day)
-            #     logging.debug("Extracted acquisition date: %s", acquisition_date)
-            # else:
-            #     logging.error("Failed to extract date from file_url: %s", file_url)
-            #     raise ValueError(f"Could not extract date from URL: {file_url}")
-            #
-            # cutoff = datetime(2022, 1, 25)
-
             async with httpx.AsyncClient() as client:
                 async with client.stream("GET", file_url) as response:
                     response.raise_for_status()
@@ -456,54 +429,39 @@ class SentinelItem(object):
                 progress.update(download_task, description=f"[blue] Reprojecting {jp2_file}...")
 
             with rasterio.open(jp2_file) as src:
-                data = src.read()
-
                 nodata = src.nodata if src.nodata is not None else no_data_value
 
-                # if acquisition_date >= cutoff:
-                #     data = self._harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
+            xRes = yRes = self.min_resolution
 
-                profile = src.profile
-                profile.update(driver="GTiff", dtype=data.dtype, count=src.count)
+            warp_options = gdal.WarpOptions(
+                dstSRS=target_srs.ExportToWkt(),
+                format="GTiff",
+                xRes=xRes,
+                yRes=yRes,
+                creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
+                srcNodata=nodata,
+                dstNodata=nodata,
+                resampleAlg="near",
+                # cutlineDSName=self.mask_file,
+                # cutlineLayer=self.mask_layer,
+                # cropToCutline=True,
+            )
 
-                vsimem_path = "/vsimem/in.tif"
-                with rasterio.MemoryFile() as memfile:
-                    with memfile.open(**profile) as dataset:
-                        dataset.write(data)
-                    gdal.FileFromMemBuffer(vsimem_path, memfile.read())
-
-                xRes = yRes = self.min_resolution
-
-                warp_options = gdal.WarpOptions(
-                    dstSRS=target_srs.ExportToWkt(),
-                    format="GTiff",
-                    xRes=xRes,
-                    yRes=yRes,
-                    creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
-                    srcNodata=nodata,
-                    dstNodata=nodata,
-                    resampleAlg="near",
-                    cutlineDSName=self.mask_file,
-                    cutlineLayer=self.mask_layer,
-                    cropToCutline=True,
-                )
-
-                rds = gdal.Warp(destNameOrDestDS=download_file,
-                                srcDSOrSrcDSTab=vsimem_path,
-                                options=warp_options)
-                metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
-                item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
-                if item_datetime is not None:
-                    metadata["ITEM_DATETIME"] = item_datetime
-                cloud_cover = self.item.properties.get("eo:cloud_cover")
-                if cloud_cover is not None:
-                    metadata["CLOUD_COVER"] = str(cloud_cover)
-                rds.SetMetadata(metadata)
-                gdal.Unlink(vsimem_path)
-                rds = None
+            rds = gdal.Warp(destNameOrDestDS=download_file,
+                            srcDSOrSrcDSTab=jp2_file,
+                            options=warp_options)
+            metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
+            item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
+            if item_datetime is not None:
+                metadata["ITEM_DATETIME"] = item_datetime
+            cloud_cover = self.item.properties.get("eo:cloud_cover")
+            if cloud_cover is not None:
+                metadata["CLOUD_COVER"] = str(cloud_cover)
+            rds.SetMetadata(metadata)
+            rds = None
         finally:
-            if os.path.exists(jp2_file):
-                os.remove(jp2_file)
+            # if os.path.exists(jp2_file):
+            #     os.remove(jp2_file)
             if progress and download_task:
                 progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
                 progress.remove_task(download_task)
@@ -514,7 +472,8 @@ class SentinelItem(object):
 if __name__ == '__main__':
     setup_logger()
 
-    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
+    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
     mask_file = "/data/kigali_small/data/kigali_small.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
@@ -532,12 +491,13 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        sentinel_item.predict(progress=progress)
-
-        t3 = time.time()
-        logger.info(f"landuse prediction time: {t3 - t2}, total time: {t3 - t1}")
-
         sentinel_item.detect_cloud(progress=progress)
 
+        t3 = time.time()
+        logger.info(f"cloud detection time: {t3 - t2}")
+
+        sentinel_item.predict(progress=progress)
+
         t4 = time.time()
-        logger.info(f"cloud detection time: {t4 - t3}, total time: {t4 - t1}")
+        logger.info(f"landuse prediction time: {t4 - t3}, total time: {t4 - t1}")
+

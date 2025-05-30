@@ -29,7 +29,7 @@ def countries_for_bbox(bounding_box=None):
         logger.error(f'Failed to fetch countries that intersect bbox {bounding_box}. {e}')
         raise
 
-async def save_geojson(directory, client, url, country, level, progress, task_id):
+async def download_geojson(directory, client, url, country, level, progress, task_id):
     try:
         progress.console.log(f"[yellow]Fetching metadata for {country} ADM{level} from {url}")
         response = await client.get(url)
@@ -117,7 +117,7 @@ async def fetch_admin(bbox=None, admin_level=None, clip=False):
                 for country, level in admin_levels.items():
                     url = f"{CGAZ_GEOBOUNDARIES_ROOT}/{country}/ADM{level}/"
                     task_id = progress.add_task(f"[cyan]Downloading {country} ADM{level}", total=100)
-                    task = save_geojson(tmpdirname, client, url, country, level, progress, task_id)
+                    task = download_geojson(tmpdirname, client, url, country, level, progress, task_id)
                     tasks.append(task)
 
                 results = await asyncio.gather(*tasks, return_exceptions=True)

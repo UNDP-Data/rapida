@@ -47,7 +47,8 @@ dependencies = [
     "fiona",
     "nest_asyncio",
     "tensorflow==2.16.1",
-    "psutil"
+    "psutil",
+    "geojson"
 ]
 
 [project.optional-dependencies]

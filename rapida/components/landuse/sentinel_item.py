@@ -441,7 +441,7 @@ class SentinelItem(object):
                 creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
                 srcNodata=nodata,
                 dstNodata=nodata,
-                resampleAlg="near",
+                resampleAlg="bilinear",
                 # cutlineDSName=self.mask_file,
                 # cutlineLayer=self.mask_layer,
                 # cropToCutline=True,

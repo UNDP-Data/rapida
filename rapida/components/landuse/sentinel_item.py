@@ -12,7 +12,10 @@ from typing import Dict
 from queue import Queue
 from osgeo import ogr, osr, gdal
 import rasterio
+from rasterio.windows import from_bounds
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
+import geopandas as gpd
 from rich.progress import Progress
 
 from rapida.components.landuse.cloud import cloud_detect
@@ -193,7 +196,7 @@ class SentinelItem(object):
         :return: Dictionary of band name -> downloaded file path
         """
         self._asset_files = {
-            band_name: os.path.join(download_dir, self.id, f"{band_name}.tif")
+            band_name: os.path.join(download_dir, self.id, f"{band_name}.jp2")
             for asset_key, band_name in self.target_asset.items()
         }
 
@@ -215,9 +218,6 @@ class SentinelItem(object):
         asyncio.set_event_loop(loop)
         semaphore = asyncio.Semaphore(max_workers)
 
-        reproject_queue = Queue()
-        completed_items = []
-
         async def download_all():
             async def download_one(asset_key: str, band_name: str):
                 asset = self.item.assets[asset_key]
@@ -230,21 +230,11 @@ class SentinelItem(object):
                 for attempt in range(1, max_retries + 1):
                     async with semaphore:
                         try:
-                            jp2_file, remote_content_length = await self._download_asset(
+                            await self._download_asset(
                                 file_url=url,
                                 target=target_path,
                                 progress=progress,
                             )
-
-                            metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
-                            item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
-                            if item_datetime is not None:
-                                metadata["ITEM_DATETIME"] = item_datetime
-                            cloud_cover = self.item.properties.get("eo:cloud_cover")
-                            if cloud_cover is not None:
-                                metadata["CLOUD_COVER"] = str(cloud_cover)
-
-                            reproject_queue.put((jp2_file, self.target_srs, self.asset_nodata[band_name], metadata))
 
                             return
                         except Exception as e:
@@ -267,34 +257,8 @@ class SentinelItem(object):
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
 
-        def reprojector():
-            while True:
-                item = reproject_queue.get()
-                if item is None:
-                    reproject_queue.task_done()
-                    break
-                jp2_file, target_srs, nodata_value, metadata = item
-
-                reprojected_file = jp2_file.replace('.jp2', '.tif')
-                self._reproject_asset(jp2_file=jp2_file,
-                                      output_file=reprojected_file,
-                                      target_srs=self.target_srs,
-                                      no_data_value=nodata_value,
-                                      metadata=metadata,
-                                      progress=progress)
-
-                completed_items.append(reprojected_file)
-                reproject_queue.task_done()
-
-        reproject_thread = threading.Thread(target=reprojector)
-        reproject_thread.start()
-
         loop.run_until_complete(download_all())
         loop.close()
-
-        reproject_queue.put(None)
-        reproject_queue.join()
-        reproject_thread.join()
 
         # once all downloads are successfully done, write item.json in the folder
         with open(item_path, "w", encoding="utf-8") as f:
@@ -318,6 +282,8 @@ class SentinelItem(object):
                 img_paths=img_paths,
                 output_file_path=temp_file,
                 item=self.item,
+                mask_file=self.mask_file,
+                mask_layer=self.mask_layer,
                 # num_workers=1,
                 progress=progress,
             )
@@ -344,6 +310,8 @@ class SentinelItem(object):
                 img_paths=img_paths,
                 output_file_path=self.cloud_mask_file,
                 item=self.item,
+                mask_file=self.mask_file,
+                mask_layer=self.mask_layer,
                 # num_workers=1,
                 progress=progress,
             )
@@ -366,6 +334,9 @@ class SentinelItem(object):
             os.rename(input_file, output_file)
             return output_file
 
+        gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
+        target_crs = gdf.crs.to_string()
+
         with rasterio.open(input_file) as pred_src, \
                 rasterio.open(self.cloud_mask_file) as cloud_src:
             pred_data = pred_src.read(1)
@@ -376,9 +347,39 @@ class SentinelItem(object):
 
             # Apply mask
             masked_data = np.where(cloud_mask == 1, nodata_value, pred_data)
+
+            # Get source metadata
+            src_crs = pred_src.crs
+            gdf = gdf.to_crs(src_crs)
+            target_crs = gdf.crs.to_string()
+            mask_union = gdf.union_all()
+            mask_bounds = mask_union.bounds
+
+            # Calculate crop window from mask bounds
+            mask_window = from_bounds(*mask_bounds, transform=pred_src.transform)
+            mask_window = mask_window.round_offsets().round_lengths()
+
+            # Crop masked_data to mask window
+            cropped_data = masked_data[
+                           int(mask_window.row_off):int(mask_window.row_off + mask_window.height),
+                           int(mask_window.col_off):int(mask_window.col_off + mask_window.width)
+                           ]
+
+            # Calculate transform and size for cropped area
+            cropped_transform = rasterio.windows.transform(mask_window, pred_src.transform)
+            cropped_width = int(mask_window.width)
+            cropped_height = int(mask_window.height)
+            cropped_bounds = rasterio.windows.bounds(mask_window, pred_src.transform)
+            dst_transform, dst_width, dst_height = calculate_default_transform(
+                src_crs, target_crs, cropped_width, cropped_height, *cropped_bounds)
+
             # Copy metadata profile
             profile = pred_src.profile.copy()
             profile.update({
+                'crs': target_crs,
+                'transform': dst_transform,
+                'width': dst_width,
+                'height': dst_height,
                 'nodata': nodata_value,
                 'count': band_count,
             })
@@ -386,16 +387,25 @@ class SentinelItem(object):
 
             # Write masked output
             with rasterio.open(output_file, "w", **profile) as dst:
-                for b in range(1, band_count + 1):
-                    # copy band colormap
-                    colormap = pred_src.colormap(b)
-                    dst.write_colormap(b, colormap)
+                # Copy band colormap if exists
+                if pred_src.colormap(1):
+                    dst.write_colormap(1, pred_src.colormap(1))
+                band_tags = pred_src.tags(1)
+                if band_tags:
+                    dst.update_tags(1, **band_tags)
 
-                    # Copy band-metadata
-                    band_tags = pred_src.tags(b)
-                    if band_tags:
-                        dst.update_tags(b, **band_tags)
-                dst.write(masked_data, 1)
+                reprojected_band = np.empty((dst_height, dst_width), dtype=cropped_data.dtype)
+                reproject(
+                    source=cropped_data,
+                    destination=reprojected_band,
+                    src_transform=cropped_transform,
+                    src_crs=src_crs,
+                    dst_transform=dst_transform,
+                    dst_crs=target_crs,
+                    resampling=Resampling.nearest
+                )
+                reprojected_band = np.where(reprojected_band == nodata_value, nodata_value, reprojected_band)
+                dst.write(reprojected_band, 1)
 
         return output_file
 
@@ -421,7 +431,7 @@ class SentinelItem(object):
             file_url: str,
             target: str,
             progress=None,
-    ) -> tuple[str, int]:
+    ) -> str:
         """
         Download JP2 file from STAC server, then reproject and crop by project area, and transform to GeoTiff file.
 
@@ -451,16 +461,15 @@ class SentinelItem(object):
                     raise ValueError("No content-length in response headers")
                 remote_content_length = int(remote_content_length)
 
-            if os.path.exists(download_file):
-                with rasterio.open(download_file) as src:
-                    meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
-                    if meta_content_length and int(meta_content_length) == remote_content_length:
-                        logging.debug(f"file already exists. Skipped: {download_file}")
-                        return jp2_file, remote_content_length
-                    else:
-                        os.remove(download_file)
-                        if os.path.exists(jp2_file):
-                            os.remove(jp2_file)
+            if os.path.exists(jp2_file):
+                local_file_size = os.path.getsize(jp2_file)
+                if local_file_size == remote_content_length:
+                    logging.debug(f"File already exists and size matches. Skipped: {jp2_file}")
+                    return jp2_file
+                else:
+                    logging.debug(f"File size mismatch. Removing local file: {jp2_file}")
+                    os.remove(jp2_file)
+
             if not os.path.exists(jp2_file):
                 async with httpx.AsyncClient() as client:
                     async with client.stream("GET", file_url) as response:
@@ -476,75 +485,11 @@ class SentinelItem(object):
                                 if progress is not None and download_task is not None:
                                     progress.update(download_task, advance=len(chunk))
 
-            return jp2_file, remote_content_length
+            return jp2_file
         finally:
             if progress and download_task:
                 progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
                 progress.remove_task(download_task)
-
-
-
-    def _reproject_asset(self,
-                       jp2_file: str,
-                       output_file: str,
-                       target_srs: str,
-                       metadata: dict,
-                       no_data_value: int = 0,
-                       progress=None,
-                       ):
-        """
-        Reproject jp2 file to target SRS, and upscale resolution to 10m
-
-        :param jp2_file: jp2 file URL
-        :param target_srs: target SRS
-        :param metadata: metadata to be written to reprojected file
-        :param no_data_value: nodata value. default is 0
-        :param progress: rich progress instance
-        """
-        if os.path.exists(output_file):
-            return output_file
-        reproject_task = None
-        if progress is not None:
-            reproject_task = progress.add_task(
-                description=f'[blue] Reprojecting {jp2_file}', total=100)
-
-        tout = multiprocessing.Event()
-
-        try:
-
-            with rasterio.open(jp2_file) as src:
-                nodata = src.nodata if src.nodata is not None else no_data_value
-
-            xRes = yRes = self.min_resolution
-
-            warp_options = gdal.WarpOptions(
-                dstSRS=target_srs.ExportToWkt(),
-                format="GTiff",
-                xRes=xRes,
-                yRes=yRes,
-                creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
-                srcNodata=nodata,
-                dstNodata=nodata,
-                resampleAlg="bilinear",
-                targetAlignedPixels=True,
-                cutlineDSName=self.mask_file,
-                cutlineLayer=self.mask_layer,
-                cropToCutline=True,
-                callback=gdal_callback,
-                callback_data=(progress, reproject_task, tout)
-            )
-
-            with gdal.Warp(destNameOrDestDS=output_file,
-                            srcDSOrSrcDSTab=jp2_file,
-                            options=warp_options) as rds:
-                rds.SetMetadata(metadata)
-            return output_file
-        except Exception as e:
-            raise e
-        finally:
-            if progress and reproject_task:
-                progress.remove_task(reproject_task)
-
 
 
 if __name__ == '__main__':
@@ -569,7 +514,7 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        sentinel_item.detect_cloud(progress=progress)
+        # sentinel_item.detect_cloud(progress=progress)
 
         t3 = time.time()
         logger.info(f"cloud detection time: {t3 - t2}")

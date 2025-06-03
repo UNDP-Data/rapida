@@ -1,14 +1,13 @@
-import asyncio
 import tempfile
 import httpx
 import logging
 import os
+import geopandas as gpd
 
 import pycountry
-from osgeo import gdal, ogr
+from osgeo import gdal
 from rich.progress import Progress
-from shapely.geometry import shape, box
-import geojson
+from shapely.geometry import box
 
 from rapida.util.http_get_json import http_get_json
 
@@ -16,6 +15,8 @@ gdal.UseExceptions()
 CGAZ_GEOBOUNDARIES_ROOT = "https://www.geoboundaries.org/api/current/gbHumanitarian"
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+
 
 def countries_for_bbox(bounding_box=None):
     str_bbox = map(str, bounding_box)
@@ -29,148 +30,74 @@ def countries_for_bbox(bounding_box=None):
         logger.error(f'Failed to fetch countries that intersect bbox {bounding_box}. {e}')
         raise
 
-async def download_geojson(directory, client, url, country, level, progress, task_id):
-    try:
-        progress.console.log(f"[yellow]Fetching metadata for {country} ADM{level} from {url}")
-        response = await client.get(url)
-        response.raise_for_status()
-        progress.update(task_id, advance=10)
 
-        data = response.json()
-        geojson_url = data.get('gjDownloadURL')
-        if not geojson_url:
-            progress.console.log(f"[red]No GeoJSON URL found for {country} ADM{level}")
+def fetch_admin(bbox=None, admin_level=None, clip=False, h3id_precision=7):
+    """
+    Parameters
+    ----------
+    bbox: The bounding box to fetch administrative units for.
+    admin_level: The administrative level to fetch. Should be an integer.
+    clip: bool, False, if True the admin boundaries are clipped to the bounding box.
+    h3id_precision: int, default=7, the tolerance in meters (~11) use to compute the unique id as a h3 hexagon id. Not in use yet.
+
+    Returns
+    -------
+
+    """
+    with Progress() as progress:
+        task = progress.add_task("[cyan]Fetching admin boundaries...", total=5)
+
+        progress.update(task, advance=1, description="[green]Checking intersecting countries")
+        intersecting_countries = countries_for_bbox(bounding_box=bbox)
+        if not intersecting_countries:
+            logger.info(f'The supplied bounding box {bbox} contains no countries')
+            progress.update(task, completed=5, description="[red]No countries found in bbox")
             return None
-        progress.console.log(f"[yellow]Downloading GeoJSON from {geojson_url}")
-        progress.update(task_id, advance=10)
 
-        geojson_path = os.path.join(directory, f"{country}_ADM{level}.geojson")
-        async with client.stream("GET", geojson_url, follow_redirects=True) as stream_resp:
-            stream_resp.raise_for_status()
-            with open(geojson_path, 'wb') as f:
-                async for chunk in stream_resp.aiter_bytes():
-                    f.write(chunk)
-        progress.update(task_id, completed=100)
-        progress.console.log(f"[green]Saved {country} ADM{level} to {geojson_path}")
-        return geojson_path
-    except Exception as exc:
-        progress.console.log(f"[red]Error fetching {country} ADM{level}: {exc}")
-        return None
+        progress.update(task, advance=1, description="[green]Setting GDAL options")
+        options = gdal.VectorTranslateOptions(
+            format='FlatGeobuf',
+            layerName=f'admin{admin_level}',
+            makeValid=True,
+            spatFilter=bbox,
+        )
 
-def merge_geojson_files(input_paths, output_path, admin_level=1, progress=None):
-    drv = ogr.GetDriverByName("GeoJSON")
-    if os.path.exists(output_path):
-        drv.DeleteDataSource(output_path)
+        url = f"/vsicurl/https://undpngddlsgeohubdev01.blob.core.windows.net/admin/cgaz/geoBoundariesCGAZ_ADM{admin_level}.fgb"
 
-    base_ds = drv.Open(input_paths[0])
-    if not base_ds:
-        raise RuntimeError(f"Could not open base dataset: {input_paths[0]}")
-    base_layer = base_ds.GetLayer()
+        configs = {
+            'GDAL_DISABLE_READDIR_ON_OPEN': 'TRUE',
+            'CPL_VSIL_CURL_ALLOWED_EXTENSIONS': '.fgb',
+            'OGR2OGR_USE_ARROW_API': 'YES'
+        }
 
-    out_ds = drv.CreateDataSource(output_path)
-    out_layer = out_ds.CreateLayer(f"admin{admin_level}", srs=base_layer.GetSpatialRef(), geom_type=base_layer.GetGeomType())
-
-    layer_defn = base_layer.GetLayerDefn()
-    for i in range(layer_defn.GetFieldCount()):
-        out_layer.CreateField(layer_defn.GetFieldDefn(i))
-
-    out_defn = out_layer.GetLayerDefn()
-
-    if progress:
-        task_id = progress.add_task("Merging GeoJSON files", total=len(input_paths))
-
-    for path in input_paths:
-        ds = drv.Open(path)
-        if not ds:
-            if progress:
-                progress.console.log(f"[red]Could not open {path}, skipping")
-            continue
-        layer = ds.GetLayer()
-        for feature in layer:
-            out_feat = ogr.Feature(out_defn)
-            out_feat.SetGeometry(feature.GetGeometryRef().Clone())
-            for i in range(out_defn.GetFieldCount()):
-                out_feat.SetField(out_defn.GetFieldDefn(i).GetNameRef(), feature.GetField(i))
-            out_layer.CreateFeature(out_feat)
-        ds = None
-        if progress:
-            progress.update(task_id, advance=1)
-
-    out_ds = None
-    return geojson.load(open(output_path))
-
-async def fetch_admin(bbox=None, admin_level=None, clip=False):
-    intersecting_countries = countries_for_bbox(bounding_box=bbox)
-    if not intersecting_countries:
-        logger.info(f'The supplied bounding box {bbox} contains no countries')
-        return None
-
-    admin_levels = dict(zip(intersecting_countries, [admin_level] * len(intersecting_countries)))
-    logger.info(f'Fetching admin boundaries for: {admin_levels}')
-    geojson_paths = []
-
-    with tempfile.TemporaryDirectory(delete=False) as tmpdirname:
-        logger.info(f'Created temporary directory {tmpdirname}')
-        async with httpx.AsyncClient() as client:
-            with Progress() as progress:
-                tasks = []
-                for country, level in admin_levels.items():
-                    url = f"{CGAZ_GEOBOUNDARIES_ROOT}/{country}/ADM{level}/"
-                    task_id = progress.add_task(f"[cyan]Downloading {country} ADM{level}", total=100)
-                    task = download_geojson(tmpdirname, client, url, country, level, progress, task_id)
-                    tasks.append(task)
-
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-
-                for result in results:
-                    if isinstance(result, str) and os.path.exists(result):
-                        geojson_paths.append(result)
-                    elif isinstance(result, Exception):
-                        progress.console.log(f"[red]Error during GeoJSON fetch: {result}")
-
-                if not geojson_paths:
-                    progress.console.log("[red]No GeoJSON files were downloaded.")
+        progress.update(task, advance=1, description="[green]Downloading and translating with GDAL")
+        with gdal.config_options(options=configs):
+            with tempfile.TemporaryDirectory(delete=False) as tmpdirname:
+                local_path = os.path.join(tmpdirname, f'cgaz_admin{admin_level}.fgb')
+                ds = gdal.VectorTranslate(local_path, url, options=options)
+                if ds is None:
+                    logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
+                    progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
                     return None
+                ds.FlushCache()
+                del ds
 
-                merged = merge_geojson_files(
-                    geojson_paths,
-                    admin_level=admin_level,
-                    output_path=f'/tmp/admin{admin_level}.geojson',
-                    progress=progress
-                )
+                progress.update(task, advance=1, description="[green]Reading file with GeoPandas")
+                gdf = gpd.read_file(local_path)
 
-                if clip:
-                    west, south, east, north = bbox
-                    bbox_polygon = box(west, south, east, north)
-                    for feature in merged['features']:
-                        geom = shape(feature['geometry'])
-                        geom = geom.intersection(bbox_polygon)
-                        feature['geometry'] = geom.__geo_interface__
+                if clip and bbox:
+                    progress.update(task, advance=1, description="[green]Clipping to bounding box")
+                    bbox_geom = box(*bbox)
+                    gdf = gdf.clip(bbox_geom)
+                else:
+                    progress.update(task, advance=1)
+        progress.update(task, completed=5, description="[bold green]Download complete")
+        return gdf.to_geo_dict()
 
-                for feature in merged['features']:
-                    props = feature.get('properties', {})
-                    feature['properties'] = {
-                        'undp_admin_level': admin_level,
-                        'h3id': props.get('shapeID', None),
-                        'iso3': props.get('shapeGroup', None),
-                        'admin1_name': props.get('shapeName', None),
-                    }
-
-                # cleanup
-                for path in geojson_paths:
-                    if os.path.exists(path):
-                        os.remove(path)
-
-                output_path = f'/tmp/admin{admin_level}.geojson'
-                if os.path.exists(output_path):
-                    os.remove(output_path)
-
-                progress.console.log(f"[green]Fetched admin boundaries for {len(admin_levels)} countries.")
-                return merged
 
 
 if __name__ == "__main__":
     bbox = [22.126465, 2.306506, 32.277832, 8.863362]
     admin_level = 2
-    result = asyncio.run(fetch_admin(bbox=bbox, admin_level=admin_level, clip=False))
-    print(result)
+    gdf = fetch_admin(bbox=bbox, admin_level=admin_level, clip=True)
+    gdf.to_file(f'gpd_admin{admin_level}.fgb', driver='FlatGeobuf')

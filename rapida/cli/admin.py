@@ -218,7 +218,7 @@ def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=F
     if not is_rapida_initialized():
         return
 
-    geojson = asyncio.run(fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip))
+    geojson = fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip)
     if not geojson:
         logger.error('Could not extract admin boundaries from CGAZ for the provided bbox')
         return

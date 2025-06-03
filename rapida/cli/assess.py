@@ -186,7 +186,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, month=No
             target_components = components
             if len(components) == 0:
                 if all:
-                    target_components = all_components
+                    target_components = set(filter(lambda x: x != "landuse", all_components))
                 else:
                     logger.warning(f"At least one component is required. If you want to assess all components, use --all option")
                     return

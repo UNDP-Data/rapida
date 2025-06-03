@@ -137,7 +137,10 @@ async def download_stac(
             item.detect_cloud(progress=progress)
 
             progress.update(predict_task, description=f"[cyan]Predicting landuse {item.item.id}")
-            item.predict(progress=progress)
+            temp_predict_file = item.predict(progress=progress)
+
+            progress.update(predict_task, description=f"[cyan]Removing cloud from landuse {item.item.id}")
+            item.mask_cloud_pixels(temp_predict_file, item.predicted_file)
 
             completed_items.append(item)
             progress.update(predict_task, advance=1)

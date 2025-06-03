@@ -1,15 +1,11 @@
 import json
 import logging
-import multiprocessing
 import os
 import asyncio
-import threading
 import time
-import re
 import httpx
 import pystac
 from typing import Dict
-from queue import Queue
 from osgeo import ogr, osr, gdal
 import rasterio
 from rasterio.windows import from_bounds
@@ -18,8 +14,8 @@ import numpy as np
 import geopandas as gpd
 from rich.progress import Progress
 
-from rapida.components.landuse.cloud import cloud_detect
-from rapida.components.landuse.prediction import predict
+from rapida.components.landuse.prediction.cloud import CloudDetection
+from rapida.components.landuse.prediction.landuse import LandusePrediction
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
@@ -273,22 +269,21 @@ class SentinelItem(object):
 
         :return: output file path
         """
-        land_use_target_bands = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12']
+
+        landuse_prediction = LandusePrediction(item=self.item)
+
+        # land_use_target_bands = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12']
         temp_file = f"{self.predicted_file}.tmp"
         try:
 
-            img_paths = [self.asset_files[band] for band in land_use_target_bands]
-            predict(
-                img_paths=img_paths,
-                output_file_path=temp_file,
-                item=self.item,
-                mask_file=self.mask_file,
-                mask_layer=self.mask_layer,
-                # num_workers=1,
-                progress=progress,
-            )
-            self._mask_cloud_pixels(temp_file, self.predicted_file)
-            return self.predicted_file
+            img_paths = [self.asset_files[band] for band in landuse_prediction.target_bands]
+            landuse_prediction.predict(img_paths=img_paths,
+                                       output_file_path=temp_file,
+                                       mask_file=self.mask_file,
+                                       mask_layer=self.mask_layer,
+                                       progress=progress,)
+
+            return temp_file
         except Exception as e:
             # delete incomplete predicted file if error occurs
             if os.path.exists(temp_file):
@@ -303,18 +298,18 @@ class SentinelItem(object):
 
         :return: output file path
         """
-        cloud_target_bands = ["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"]
+        # cloud_target_bands = ["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"]
+
+        cloud_detection = CloudDetection(item=self.item)
+
         try:
-            img_paths = [self.asset_files[band] for band in cloud_target_bands]
-            cloud_detect(
-                img_paths=img_paths,
-                output_file_path=self.cloud_mask_file,
-                item=self.item,
-                mask_file=self.mask_file,
-                mask_layer=self.mask_layer,
-                # num_workers=1,
-                progress=progress,
-            )
+            img_paths = [self.asset_files[band] for band in cloud_detection.target_bands]
+
+            cloud_detection.predict(img_paths=img_paths,
+                                    output_file_path=self.cloud_mask_file,
+                                    mask_file=self.mask_file,
+                                    mask_layer=self.mask_layer,
+                                    progress=progress,)
             return self.cloud_mask_file
         except Exception as e:
             # delete incomplete predicted file if error occurs
@@ -322,7 +317,7 @@ class SentinelItem(object):
                 os.remove(self.cloud_mask_file)
             raise e
 
-    def _mask_cloud_pixels(self, input_file: str, output_file: str)-> str:
+    def mask_cloud_pixels(self, input_file: str, output_file: str)-> str:
         """
         Mask cloud pixels from land use prediction image
 
@@ -514,13 +509,18 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        # sentinel_item.detect_cloud(progress=progress)
+        sentinel_item.detect_cloud(progress=progress)
 
         t3 = time.time()
         logger.info(f"cloud detection time: {t3 - t2}")
 
-        sentinel_item.predict(progress=progress)
+        temp_prediction_file = sentinel_item.predict(progress=progress)
 
         t4 = time.time()
-        logger.info(f"landuse prediction time: {t4 - t3}, total time: {t4 - t1}")
+        logger.info(f"landuse prediction time: {t4 - t3}")
+
+        sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file)
+
+        t5 = time.time()
+        logger.info(f"landuse prediction time: {t5 - t4}, total time: {t5 - t1}")
 

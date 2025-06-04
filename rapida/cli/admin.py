@@ -137,19 +137,15 @@ def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=F
     """
     Fetch admin boundaries from CGAZ
 
-    Parameters
-    ----------
-    bbox : tuple
-        Bounding box in the format (xmin, ymin, xmax, ymax)
-    admin_level : int
-    clip : bool
-        Whether to clip the data to the bounding box.
-    destination_path : str
-        Path to save the output GeoJSON file
-    debug : bool
+    Retrieves administrative boundaries of a specific level/levels that intersect the area covered iby bbox from CGAZ data hosted in Azure Blob Storage
+    The admin level argument should be an integer.
 
-    Returns
-    -------
+    If --clip option is supplied, it is going to clip geometries to return only the part of the admin datasets that are within
+    the bounding box, if not, it returns whole admin polygons that intersect with the bounding box supplied
+
+    The following is an example to save the result as a geopackage from bbox 33.681335,-0.131836,35.966492,1.158979
+
+    rapida admin cgaz --bbox 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip /data/admin2_cgaz.gpkg
 
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)

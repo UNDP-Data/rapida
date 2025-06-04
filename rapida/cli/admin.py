@@ -218,8 +218,8 @@ def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=F
     if not is_rapida_initialized():
         return
 
-    geojson = fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip)
-    if not geojson:
-        logger.error('Could not extract admin boundaries from CGAZ for the provided bbox')
-        return
-    save(geojson_dict=geojson, dst_path=destination_path, layer_name=f'admin{admin_level}')
+    fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip, destination_path=destination_path)
+    # if not geojson:
+    #     logger.error('Could not extract admin boundaries from CGAZ for the provided bbox')
+    #     return
+    # save(geojson_dict=geojson, dst_path=destination_path, layer_name=f'admin{admin_level}')

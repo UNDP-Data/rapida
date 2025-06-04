@@ -11,6 +11,7 @@ import rasterio
 from rasterio.windows import Window, from_bounds, transform as window_transform
 from rasterio.enums import Resampling
 from rasterio.io import DatasetWriter
+from rasterio.features import geometry_mask
 import numpy as np
 from typing import List, Tuple, Optional
 import geopandas as gpd
@@ -65,7 +66,27 @@ class PredictionBase(object):
         """
         return self._item
 
-    def __init__(self, item: pystac.Item, component_name: str, bands: List[str], output_nodata_value: float):
+    @property
+    def process_tile_size(self):
+        """
+        tile size to process a model iteratively. Default is 1024 px.
+        """
+        return self._process_tile_size
+    @process_tile_size.setter
+    def process_tile_size(self, value):
+        self._process_tile_size = value
+
+    @property
+    def process_tile_buffer(self):
+        """
+        Tile buffer size to process a model. Default is 64 px
+        """
+        return self._process_tile_buffer
+    @process_tile_buffer.setter
+    def process_tile_buffer(self, value):
+        self._process_tile_buffer = value
+
+    def __init__(self, item: pystac.Item, component_name: str, bands: List[str], output_nodata_value: float, tile_size: int = 1024, tile_buffer: int = 64):
         """
         Constructor
 
@@ -78,6 +99,8 @@ class PredictionBase(object):
         self._component_name = component_name
         self._target_bands = bands
         self._output_nodata_value = output_nodata_value
+        self.process_tile_size = tile_size
+        self.process_tile_buffer = tile_buffer
 
 
     def preinference_check(self, img_paths: List) -> Tuple[int, int, str]:
@@ -145,21 +168,21 @@ class PredictionBase(object):
     def process_tile(self, row, col,
                      img_paths,
                      min_resolution_path,
-                     buffer,
-                     tile_size=256):
+                     mask_union=None):
         logger.debug(f"Processing window at row {row}, col {col}")
 
         with rasterio.open(min_resolution_path) as ref_src:
-            ref_col_off = max(col - buffer, 0)
-            ref_row_off = max(row - buffer, 0)
-            ref_col_end = min(col + tile_size + buffer, ref_src.width)
-            ref_row_end = min(row + tile_size + buffer, ref_src.height)
+            ref_col_off = max(col - self.process_tile_buffer, 0)
+            ref_row_off = max(row - self.process_tile_buffer, 0)
+            ref_col_end = min(col + self.process_tile_size + self.process_tile_buffer, ref_src.width)
+            ref_row_end = min(row + self.process_tile_size + self.process_tile_buffer, ref_src.height)
 
             ref_window = Window(ref_col_off, ref_row_off,
                                 ref_col_end - ref_col_off, ref_row_end - ref_row_off)
             ref_height = int(ref_window.height)
             ref_width = int(ref_window.width)
             ref_bounds = rasterio.windows.bounds(ref_window, ref_src.transform)
+            ref_transform = rasterio.windows.transform(ref_window, ref_src.transform)
 
         raw_data = np.empty((ref_height, ref_width, len(img_paths)), dtype="u2")
 
@@ -186,13 +209,26 @@ class PredictionBase(object):
                 if nodata_mask is None and src.nodata is not None:
                     nodata_mask = (band_data == src.nodata)
 
+        mask_array = None
+        if mask_union:
+            mask_array = geometry_mask(
+                [mask_union],
+                out_shape=(ref_height, ref_width),
+                transform=ref_transform,
+                invert=True
+            )
+            raw_data[~mask_array] = 0
+
         predicted_data = self.run_model(raw_data)
 
+        if mask_array is not None:
+            predicted_data[~mask_array] = self.output_nodata_value
+
         # crop original tile by removing buffer
-        start_row = buffer if row >= buffer else 0
-        start_col = buffer if col >= buffer else 0
-        end_row = start_row + min(tile_size, ref_height - start_row)
-        end_col = start_col + min(tile_size, ref_width - start_col)
+        start_row = self.process_tile_buffer if row >= self.process_tile_buffer else 0
+        start_col = self.process_tile_buffer if col >= self.process_tile_buffer else 0
+        end_row = start_row + min(self.process_tile_size, ref_height - start_row)
+        end_col = start_col + min(self.process_tile_size, ref_width - start_col)
 
         original_tile = predicted_data[start_row:end_row, start_col:end_col]
 
@@ -261,8 +297,6 @@ class PredictionBase(object):
             predict_task = progress.add_task(f"[cyan]Starting {self.component_name} prediction")
 
         col_size, row_size, min_resolution_path = self.preinference_check(img_paths)
-        tile_size = 1024
-        buffer = 64
 
         if predict_task is not None:
             progress.update(predict_task, description="[cyan]Opening first image to get metadata")
@@ -276,7 +310,8 @@ class PredictionBase(object):
         if mask_file and mask_layer:
             gdf = gpd.read_file(mask_file, layer=mask_layer)
             mask_gdf = gdf.to_crs(crs)
-            mask_union = mask_gdf.union_all()
+            # add 100m buffer for mask polygon
+            mask_union = mask_gdf.buffer(100).union_all()
 
         if predict_task is not None:
             progress.update(predict_task, description=f"[cyan]Creating output file: {output_file_path}")
@@ -286,9 +321,9 @@ class PredictionBase(object):
         all_cols = []
         all_rows = []
 
-        for row in range(0, row_size, tile_size):
-            for col in range(0, col_size, tile_size):
-                window = Window(col, row, min(tile_size, col_size - col), min(tile_size, row_size - row))
+        for row in range(0, row_size, self.process_tile_size):
+            for col in range(0, col_size, self.process_tile_size):
+                window = Window(col, row, min(self.process_tile_size, col_size - col), min(self.process_tile_size, row_size - row))
                 bounds = rasterio.windows.bounds(window, dst_transform)
                 tile_geom = box(bounds[0], bounds[1], bounds[2], bounds[3])
 
@@ -299,9 +334,9 @@ class PredictionBase(object):
 
         # Determine bounding box
         min_col = min(all_cols)
-        max_col = max(all_cols) + tile_size
+        max_col = max(all_cols) + self.process_tile_size
         min_row = min(all_rows)
-        max_row = max(all_rows) + tile_size
+        max_row = max(all_rows) + self.process_tile_size
 
         out_width = max_col - min_col
         out_height = max_row - min_row
@@ -342,8 +377,7 @@ class PredictionBase(object):
                     row, col = next(job_iter)
                     task_id = progress.add_task(f"[green]Processing tile ({row}, {col})",
                                                 total=None) if progress else None
-                    fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path,
-                                          buffer, tile_size)
+                    fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path, mask_union)
                     running_futures[fut] = (row, col, task_id)
 
                 while running_futures:
@@ -373,8 +407,7 @@ class PredictionBase(object):
                             row, col = next(job_iter)
                             task_id = progress.add_task(f"[green]Processing tile ({row}, {col})",
                                                         total=None) if progress else None
-                            fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path,
-                                                  buffer, tile_size)
+                            fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path, mask_union)
                             running_futures[fut] = (row, col, task_id)
                         except KeyboardInterrupt:
                             logger.info("Prediction interrupted by user. Cancelling tasks..")

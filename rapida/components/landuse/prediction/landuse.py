@@ -25,11 +25,13 @@ except Exception as ie:
 class LandusePrediction(PredictionBase):
 
 
-    def __init__(self,item: pystac.Item):
+    def __init__(self,item: pystac.Item, tile_size: int = 1024, tile_buffer: int = 64):
         super().__init__(item,
                          component_name="landuse",
                          bands=['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'],
-                         output_nodata_value=255)
+                         output_nodata_value=255,
+                         tile_size=tile_size,
+                         tile_buffer=tile_buffer)
 
     def _normalize(self, image):
         """

@@ -243,7 +243,7 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                     for i,f in enumerate(geojson['features']):
                         props = f['properties']
                         tags = props.pop('tags')
-                        pbar.set_postfix_str(f'{tags["name"]} ', refresh=True)
+                        pbar.set_postfix_str(f'{tags.get("name", None)} ', refresh=True)
                         feature_geom = f['geometry']
                         geom = shape(feature_geom)
                         if clip:
@@ -251,7 +251,7 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                             f['geometry'] = geom.__geo_interface__
                         centroid = shapely.centroid(geom)
                         out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
-                        out_props['name'] = tags['name']
+                        out_props['name'] = tags.get('name', None)
                         out_props['osm_admin_level'] = level_value
                         out_props['undp_admin_level'] = admin_level
                         out_props['name_en'] = tags.get('name:en', None)
@@ -267,6 +267,7 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                     logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
                 continue
         except Exception as e:
+            raise e
             logger.error(f'Can not fetch admin data from {overpass_url} at this time. {e}')
             logger.error(overpass_query)
 

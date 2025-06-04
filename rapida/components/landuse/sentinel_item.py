@@ -8,7 +8,8 @@ import pystac
 from typing import Dict
 from osgeo import ogr, osr, gdal
 import rasterio
-from rasterio.windows import from_bounds
+from rasterio.io import MemoryFile
+from rasterio.mask import mask
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
 import geopandas as gpd
@@ -330,77 +331,61 @@ class SentinelItem(object):
             return output_file
 
         gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
-        target_crs = gdf.crs.to_string()
 
-        with rasterio.open(input_file) as pred_src, \
-                rasterio.open(self.cloud_mask_file) as cloud_src:
-            pred_data = pred_src.read(1)
-            cloud_mask = cloud_src.read(1)
-
-            nodata_value = pred_src.nodata if pred_src.nodata is not None else 255
-            band_count = pred_src.count
-
-            # Apply mask
-            masked_data = np.where(cloud_mask == 1, nodata_value, pred_data)
-
-            # Get source metadata
+        with rasterio.open(input_file) as pred_src:
             src_crs = pred_src.crs
             gdf = gdf.to_crs(src_crs)
             target_crs = gdf.crs.to_string()
-            mask_union = gdf.union_all()
-            mask_bounds = mask_union.bounds
+            nodata_value = pred_src.nodata if pred_src.nodata is not None else 255
+            band_count = pred_src.count
+            colormap = pred_src.colormap(1)
+            band_tags = pred_src.tags(1)
 
-            # Calculate crop window from mask bounds
-            mask_window = from_bounds(*mask_bounds, transform=pred_src.transform)
-            mask_window = mask_window.round_offsets().round_lengths()
+            pred_crop, pred_transform = mask(pred_src, gdf.geometry, crop=True, filled=True, nodata=nodata_value)
 
-            # Crop masked_data to mask window
-            cropped_data = masked_data[
-                           int(mask_window.row_off):int(mask_window.row_off + mask_window.height),
-                           int(mask_window.col_off):int(mask_window.col_off + mask_window.width)
-                           ]
-
-            # Calculate transform and size for cropped area
-            cropped_transform = rasterio.windows.transform(mask_window, pred_src.transform)
-            cropped_width = int(mask_window.width)
-            cropped_height = int(mask_window.height)
-            cropped_bounds = rasterio.windows.bounds(mask_window, pred_src.transform)
-            dst_transform, dst_width, dst_height = calculate_default_transform(
-                src_crs, target_crs, cropped_width, cropped_height, *cropped_bounds)
-
-            # Copy metadata profile
             profile = pred_src.profile.copy()
-            profile.update({
-                'crs': target_crs,
-                'transform': dst_transform,
-                'width': dst_width,
-                'height': dst_height,
-                'nodata': nodata_value,
-                'count': band_count,
-            })
-            profile.pop('photometric', None)
 
-            # Write masked output
-            with rasterio.open(output_file, "w", **profile) as dst:
-                # Copy band colormap if exists
-                if pred_src.colormap(1):
-                    dst.write_colormap(1, pred_src.colormap(1))
-                band_tags = pred_src.tags(1)
-                if band_tags:
-                    dst.update_tags(1, **band_tags)
+        with rasterio.open(self.cloud_mask_file) as cloud_src:
+            cloud_crop, _ = mask(cloud_src, gdf.geometry, crop=True, filled=True, nodata=1)
 
-                reprojected_band = np.empty((dst_height, dst_width), dtype=cropped_data.dtype)
-                reproject(
-                    source=cropped_data,
-                    destination=reprojected_band,
-                    src_transform=cropped_transform,
-                    src_crs=src_crs,
-                    dst_transform=dst_transform,
-                    dst_crs=target_crs,
-                    resampling=Resampling.nearest
-                )
-                reprojected_band = np.where(reprojected_band == nodata_value, nodata_value, reprojected_band)
-                dst.write(reprojected_band, 1)
+            # Apply cloud mask
+            masked_data = np.full_like(pred_crop[0], fill_value=nodata_value)
+            valid_mask = (cloud_crop[0] == 0)
+            masked_data[valid_mask] = pred_crop[0][valid_mask]
+
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            src_crs, target_crs, masked_data.shape[1], masked_data.shape[0],
+            *rasterio.transform.array_bounds(*masked_data.shape, pred_transform)
+        )
+
+        profile.update({
+            'crs': target_crs,
+            'transform': dst_transform,
+            'width': dst_width,
+            'height': dst_height,
+            'nodata': nodata_value,
+            'count': band_count,
+        })
+        profile.pop('photometric', None)
+
+        with rasterio.open(output_file, "w", **profile) as dst:
+            if colormap:
+                dst.write_colormap(1, colormap)
+            if band_tags:
+                dst.update_tags(1, **band_tags)
+
+            reprojected_band = np.empty((dst_height, dst_width), dtype=masked_data.dtype)
+            reproject(
+                source=masked_data,
+                destination=reprojected_band,
+                src_transform=pred_transform,
+                src_crs=src_crs,
+                dst_transform=dst_transform,
+                dst_crs=target_crs,
+                resampling=Resampling.nearest
+            )
+            reprojected_band = np.where(reprojected_band == nodata_value, nodata_value, reprojected_band)
+            dst.write(reprojected_band, 1)
 
         return output_file
 
@@ -490,9 +475,10 @@ class SentinelItem(object):
 if __name__ == '__main__':
     setup_logger()
 
-    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
+    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRU_20250421_0_L1C"
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
     # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
-    mask_file = "/data/kigali_small/data/kigali_small.gpkg"
+    mask_file = "/data/kigali/data/kigali.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
 

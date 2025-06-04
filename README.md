@@ -427,6 +427,63 @@ There are several key parameters in the launcher that ensure this process is suc
 
 
 ## Installation on Windows
+Similar to Linux the installation of rapida on Windows is complicated by native
+binaries like GDAL or exactextract. Fortunately there are also solutions like 
+OSGEO4W and other that can foster deployment of open source GIS solutions
+on Windows operating systems
+
+1. download OSGEO4W installer from https://download.osgeo.org/osgeo4w/v2/osgeo4w-setup.exe
+
+2. install GDAL and python
+   1. select advanced install 
+   2. aaa
+3. install rapida
+   1. install pip if not available
+    ```commandline
+    C:\OSGeo4W>python -m ensurepip
+    Looking in links: c:\Users\user1\AppData\Local\Temp\tmpsvevkr8x
+    Processing c:\users\user1\appdata\local\temp\tmpsvevkr8x\pip-25.0.1-py3-none-any.whl
+    Installing collected packages: pip
+    Successfully installed pip-25.0.1
+   
+    C:\OSGeo4W>python -m pip install --upgrade pip setuptools wheel
+    Requirement already satisfied: pip in c:\osgeo4w\apps\python312\lib\site-packages (25.0.1)
+    Collecting pip
+      Downloading pip-25.1.1-py3-none-any.whl.metadata (3.6 kB)
+    Collecting setuptools
+      Downloading setuptools-80.9.0-py3-none-any.whl.metadata (6.6 kB)
+    Collecting wheel
+      Downloading wheel-0.45.1-py3-none-any.whl.metadata (2.3 kB)
+    Downloading pip-25.1.1-py3-none-any.whl (1.8 MB)
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.8/1.8 MB 50.4 MB/s eta 0:00:00
+    Downloading setuptools-80.9.0-py3-none-any.whl (1.2 MB)
+       ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.2/1.2 MB 58.7 MB/s eta 0:00:00
+    Downloading wheel-0.45.1-py3-none-any.whl (72 kB)
+    Installing collected packages: wheel, setuptools, pip
+      Attempting uninstall: pip
+        Found existing installation: pip 25.0.1
+        Uninstalling pip-25.0.1:
+          Successfully uninstalled pip-25.0.1
+    Successfully installed pip-25.1.1 setuptools-80.9.0 wheel-0.45.1
+   
+    ```
+   2. check GDAL python bindings
+    ```commandline
+    C:\OSGeo4W>python -c "from osgeo import gdal; print(gdal.VersionInfo())"
+    Traceback (most recent call last):
+      File "<string>", line 1, in <module>
+    ModuleNotFoundError: No module named 'osgeo'
+   
+    ```
+   3. check exact GDAL version 
+    ```commandline
+    C:\OSGeo4W>gdalinfo --version
+    GDAL 3.10.3, released 2025/04/01
+    ```
+   4. install GDAL python bindings
+    ```commandline
+    
+    ```
 
 ## Installation using Docker on Windows
 

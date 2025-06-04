@@ -13,7 +13,7 @@ logger = setup_logger('rapida')
 class CloudDetection(PredictionBase):
 
 
-    def __init__(self,item: pystac.Item, tile_size: int = 1024, tile_buffer: int = 64):
+    def __init__(self,item: pystac.Item, tile_size: int = 512, tile_buffer: int = 64):
         super().__init__(item,
                          component_name="cloud_mask",
                          bands=["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"],

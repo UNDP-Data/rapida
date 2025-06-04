@@ -69,7 +69,7 @@ class PredictionBase(object):
     @property
     def process_tile_size(self):
         """
-        tile size to process a model iteratively. Default is 1024 px.
+        tile size to process a model iteratively. Default is 512 px.
         """
         return self._process_tile_size
     @process_tile_size.setter
@@ -86,7 +86,7 @@ class PredictionBase(object):
     def process_tile_buffer(self, value):
         self._process_tile_buffer = value
 
-    def __init__(self, item: pystac.Item, component_name: str, bands: List[str], output_nodata_value: float, tile_size: int = 1024, tile_buffer: int = 64):
+    def __init__(self, item: pystac.Item, component_name: str, bands: List[str], output_nodata_value: float, tile_size: int = 512, tile_buffer: int = 64):
         """
         Constructor
 
@@ -316,7 +316,7 @@ class PredictionBase(object):
         if predict_task is not None:
             progress.update(predict_task, description=f"[cyan]Creating output file: {output_file_path}")
 
-        # Collect masked tiles only
+        # Collect masked tiles only for input files
         tile_jobs = []
         all_cols = []
         all_rows = []
@@ -348,8 +348,8 @@ class PredictionBase(object):
                            mode='w',
                            driver="GTiff",
                            dtype='uint8',
-                           width=col_size,
-                           height=row_size,
+                           width=out_width,
+                           height=out_height,
                            crs=crs,
                            transform=cropped_transform,
                            nodata=self.output_nodata_value,

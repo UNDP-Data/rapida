@@ -71,8 +71,6 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                 layer.DeleteField(i)
                 h3id_field = ogr.FieldDefn("h3id", ogr.OFTInteger64)
                 layer.CreateField(h3id_field)
-                ds.FlushCache()
-                ds.SyncToDisk()
                 for feature in layer:
                     geom = feature.GetGeometryRef()
                     centroid = geom.Centroid()
@@ -82,7 +80,10 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                     iso3_country_code = feature.GetField("iso_3")
                     feature.SetField("iso3", iso3_country_code)
                     layer.SetFeature(feature)
+                iso3_field_index = layer.GetLayerDefn().GetFieldIndex("iso_3")
                 layer.DeleteField(iso3_field_index)
+            ds.FlushCache()
+            ds.SyncToDisk()
         progress.update(task, completed=5, description="[green]Download Completed")
         return None
 

@@ -3,6 +3,7 @@ import logging
 import os
 import asyncio
 import shutil
+import tempfile
 import time
 import httpx
 import pystac
@@ -331,68 +332,67 @@ class SentinelItem(object):
         :return: output file path of mask prediction image
         """
         if not os.path.exists(self.cloud_mask_file):
-            # reproject to project CRS
             return self._reproject_data(input_file, output_file)
 
-        # apply cloud mask and reproject
+        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
+            temp_masked_file = tmp.name
+
+        try:
+            self._apply_cloud_mask(input_file, temp_masked_file)
+            self._reproject_data(temp_masked_file, output_file)
+        except Exception as e:
+            raise e
+        finally:
+            if os.path.exists(temp_masked_file):
+                os.unlink(temp_masked_file)
+        return output_file
+
+    def _apply_cloud_mask(self, input_file: str, output_file: str) -> None:
+        """
+        Apply cloud mask to input raster without reprojection
+
+        :param input_file: input file path
+        :param output_file: output file path for masked data
+        """
+        # Get mask geometry for both files
         gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
 
         with rasterio.open(input_file) as pred_src:
-            src_crs = pred_src.crs
-            gdf = gdf.to_crs(src_crs)
-            target_crs = gdf.crs.to_string()
+            # Project gdf to match prediction CRS
+            gdf = gdf.to_crs(pred_src.crs)
             nodata_value = pred_src.nodata if pred_src.nodata is not None else 255
-            band_count = pred_src.count
             colormap = pred_src.colormap(1)
             band_tags = pred_src.tags(1)
 
+            # Crop prediction data to mask geometry
             pred_crop, pred_transform = mask(pred_src, gdf.geometry, crop=True, filled=True, nodata=nodata_value)
 
             profile = pred_src.profile.copy()
 
         with rasterio.open(self.cloud_mask_file) as cloud_src:
+            # Crop cloud mask to same geometry
             cloud_crop, _ = mask(cloud_src, gdf.geometry, crop=True, filled=True, nodata=1)
 
-            # Apply cloud mask
-            masked_data = np.full_like(pred_crop[0], fill_value=nodata_value)
-            valid_mask = (cloud_crop[0] == 0)
-            masked_data[valid_mask] = pred_crop[0][valid_mask]
+        # Apply cloud mask
+        masked_data = np.full_like(pred_crop[0], fill_value=nodata_value)
+        valid_mask = (cloud_crop[0] == 0)
+        masked_data[valid_mask] = pred_crop[0][valid_mask]
 
-        dst_transform, dst_width, dst_height = calculate_default_transform(
-            src_crs, target_crs, masked_data.shape[1], masked_data.shape[0],
-            *rasterio.transform.array_bounds(*masked_data.shape, pred_transform)
-        )
-
+        # Update profile for cropped data
         profile.update({
-            'crs': target_crs,
-            'transform': dst_transform,
-            'width': dst_width,
-            'height': dst_height,
+            'transform': pred_transform,
+            'width': masked_data.shape[1],
+            'height': masked_data.shape[0],
             'nodata': nodata_value,
-            'count': band_count,
         })
-        profile.pop('photometric', None)
 
-        with rasterio.open(output_file, "w", **profile) as dst:
+        # Write masked data
+        with rasterio.open(output_file, 'w', **profile) as dst:
             if colormap:
                 dst.write_colormap(1, colormap)
             if band_tags:
                 dst.update_tags(1, **band_tags)
-
-            reprojected_band = np.empty((dst_height, dst_width), dtype=masked_data.dtype)
-            reproject(
-                source=masked_data,
-                destination=reprojected_band,
-                src_transform=pred_transform,
-                src_crs=src_crs,
-                dst_transform=dst_transform,
-                dst_crs=target_crs,
-                resampling=Resampling.nearest
-            )
-            reprojected_band = np.where(reprojected_band == nodata_value, nodata_value, reprojected_band)
-            dst.write(reprojected_band, 1)
-
-        return output_file
+            dst.write(masked_data, 1)
 
     def _reproject_data(self, input_file: str, output_file: str) -> str:
         """
@@ -566,16 +566,16 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        # sentinel_item.detect_cloud(progress=progress)
+        sentinel_item.detect_cloud(progress=progress)
 
         t3 = time.time()
         logger.info(f"cloud detection time: {t3 - t2}")
 
-        # temp_prediction_file = sentinel_item.predict(progress=progress)
+        temp_prediction_file = sentinel_item.predict(progress=progress)
 
         t4 = time.time()
         logger.info(f"landuse prediction time: {t4 - t3}")
-        temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
+
         sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file)
 
         t5 = time.time()

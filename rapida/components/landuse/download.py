@@ -142,6 +142,9 @@ async def download_stac(
             progress.update(predict_task, description=f"[cyan]Removing cloud from landuse {item.item.id}")
             item.mask_cloud_pixels(temp_predict_file, item.predicted_file)
 
+            if os.path.exists(temp_predict_file):
+                os.remove(temp_predict_file)
+
             completed_items.append(item)
             progress.update(predict_task, advance=1)
             predict_queue.task_done()

@@ -2,13 +2,13 @@ import json
 import logging
 import os
 import asyncio
+import shutil
 import time
 import httpx
 import pystac
 from typing import Dict
 from osgeo import ogr, osr, gdal
 import rasterio
-from rasterio.io import MemoryFile
 from rasterio.mask import mask
 from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
@@ -273,7 +273,6 @@ class SentinelItem(object):
 
         landuse_prediction = LandusePrediction(item=self.item)
 
-        # land_use_target_bands = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12']
         temp_file = f"{self.predicted_file}.tmp"
         try:
 
@@ -299,7 +298,12 @@ class SentinelItem(object):
 
         :return: output file path
         """
-        # cloud_target_bands = ["B01", "B02", "B04", "B05", "B08", "B8A", "B09", "B10", "B11", "B12"]
+        # Check cloud cover percentage from item properties
+        cloud_cover = self.item.properties.get('eo:cloud_cover', None)
+
+        if cloud_cover is not None and cloud_cover < 1.0:
+            logger.warning(f"{self.id}: Cloud cover is {cloud_cover}% (< 1%). Skipping cloud detection.")
+            return self.cloud_mask_file
 
         cloud_detection = CloudDetection(item=self.item)
 
@@ -327,9 +331,10 @@ class SentinelItem(object):
         :return: output file path of mask prediction image
         """
         if not os.path.exists(self.cloud_mask_file):
-            os.rename(input_file, output_file)
-            return output_file
+            # reproject to project CRS
+            return self._reproject_data(input_file, output_file)
 
+        # apply cloud mask and reproject
         gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
 
         with rasterio.open(input_file) as pred_src:
@@ -386,6 +391,72 @@ class SentinelItem(object):
             )
             reprojected_band = np.where(reprojected_band == nodata_value, nodata_value, reprojected_band)
             dst.write(reprojected_band, 1)
+
+        return output_file
+
+    def _reproject_data(self, input_file: str, output_file: str) -> str:
+        """
+        Reproject raster data to project mask layer CRS
+
+        :param input_file: input file path
+        :param output_file: output file path
+        :return: output file path
+        """
+        # Read mask file and get target CRS
+        gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
+        target_crs = gdf.crs.to_string()
+
+        with rasterio.open(input_file) as src:
+            src_crs = src.crs
+            nodata_value = src.nodata if src.nodata is not None else 255
+            band_tags = src.tags(1)
+
+            src_transform = src.transform
+            left, bottom, right, top = src.bounds
+
+
+        # Check if CRS are the same
+        if src_crs.to_string() == target_crs:
+            logger.debug("Source and target CRS are identical - no reprojection needed")
+            # Just copy the file if CRS are the same
+            shutil.copy2(input_file, output_file)
+            return output_file
+
+        # Reproject to target CRS (mask layer CRS)
+        src_pixel_size = abs(src_transform.a)
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            src_crs, target_crs, src.width, src.height, left, bottom, right, top, resolution=src_pixel_size,
+        )
+
+        # Calculate destination bounds for comparison
+        dst_left = dst_transform.c
+        dst_top = dst_transform.f
+        dst_right = dst_left + dst_width * dst_transform.a
+        dst_bottom = dst_top + dst_height * dst_transform.e
+
+        warp_options = gdal.WarpOptions(
+            dstSRS=target_crs,
+            srcSRS=src_crs.to_string(),
+            srcNodata=nodata_value,
+            dstNodata=nodata_value,
+            resampleAlg='near',
+            format='GTiff',
+            creationOptions=['COMPRESS=ZSTD', 'TILED=YES'],
+            outputBounds=[dst_left, dst_bottom, dst_right, dst_top],  # Exact bounds
+            xRes=src_pixel_size,
+            yRes=src_pixel_size,
+            targetAlignedPixels=True,
+            cutlineDSName=self.mask_file,
+            cutlineLayer=self.mask_layer,
+            cropToCutline=True,
+        )
+
+        res = gdal.Warp(output_file, input_file, options=warp_options)
+        res = None
+
+        with rasterio.open(output_file, "r+") as dst:
+            if band_tags:
+                dst.update_tags(1, **band_tags)
 
         return output_file
 
@@ -495,16 +566,16 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        sentinel_item.detect_cloud(progress=progress)
+        # sentinel_item.detect_cloud(progress=progress)
 
         t3 = time.time()
         logger.info(f"cloud detection time: {t3 - t2}")
 
-        temp_prediction_file = sentinel_item.predict(progress=progress)
+        # temp_prediction_file = sentinel_item.predict(progress=progress)
 
         t4 = time.time()
         logger.info(f"landuse prediction time: {t4 - t3}")
-
+        temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
         sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file)
 
         t5 = time.time()

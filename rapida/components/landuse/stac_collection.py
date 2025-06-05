@@ -2,7 +2,7 @@ import json
 import logging
 import concurrent.futures
 import threading
-from typing import Optional, Any, Dict
+from typing import Optional, Any, Dict, List
 from calendar import monthrange
 from datetime import date
 from rich.progress import Progress
@@ -13,6 +13,7 @@ import numpy as np
 import shapely
 from shapely.geometry import Point, MultiPoint, Polygon, shape, mapping
 from shapely.ops import unary_union
+from collections import defaultdict
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
@@ -61,14 +62,14 @@ class StacCollection(object):
         if progress:
             search_task = progress.add_task(f"[green]Searching STAC Items for {datetime_range}", total=len(df_polygon))
 
-        latest_per_tile = {}
+        all_items = {}
         lock = threading.Lock()
 
         merged_geom = unary_union(df_polygon['geometry'])
         intersects_geometry = mapping(merged_geom)
 
         def search_single_polygon(single_geom):
-            nonlocal latest_per_tile
+            nonlocal all_items
 
             fc_geojson_str = gpd.GeoDataFrame(geometry=[single_geom], crs=df_polygon.crs).to_json()
             fc_geojson = json.loads(fc_geojson_str)
@@ -81,50 +82,30 @@ class StacCollection(object):
                 datetime=datetime_range,
             )
 
-            intersect_percentages = {}
+            local_items = []
             for item in search.items():
                 percentage = self._intersection_percent(item, intersects_geometry)
                 cloud_cover = item.properties.get("eo:cloud_cover")
-                logger.debug(f"{item.id}: intersects) {percentage}:.2f %; cloud cover) {cloud_cover}:.2f %")
-                intersect_percentages[item.id] = percentage
+                logger.debug(f"{item.id}: intersects) {percentage:.2f}%; cloud cover) {cloud_cover:.2f}%")
 
-            # only use items which covers more than 10% of the entire project area
-            items_gt_10_percent = (
-                item for item in search.items() if intersect_percentages[item.id] > 10
-            )
-            items = list(items_gt_10_percent)
+                # only use items which covers more than 10% of the entire project area
+                if percentage > 10:
+                    # if item does not have all required assets, skip it.
+                    if all(asset in item.assets for asset in target_assets):
+                        local_items.append({
+                            'item': item,
+                            'percentage': percentage,
+                            'cloud_cover': cloud_cover
+                        })
 
             with lock:
-                for item in items:
-                    tile_id = item.id
-
-                    cloud_cover = item.properties.get("eo:cloud_cover")
-                    if cloud_cover is None:
-                        continue
-
-                    # if item does not have all required assets, skip it.
-                    if not all(asset in item.assets for asset in target_assets):
-                        continue
-                    existing = latest_per_tile.get(tile_id)
-                    if existing is None:
-                        latest_per_tile[tile_id] = item
-                    else:
-                        existing_cloud = existing.properties.get("eo:cloud_cover")
-                        if existing_cloud is None:
-                            latest_per_tile[tile_id] = item
-                        elif cloud_cover < existing_cloud:
-                            # Update item if cloud cover is lower even it is older item
-                            latest_per_tile[tile_id] = item
-                        elif item.datetime > existing.datetime:
-                            # Otherwise, newer image is used
-                            latest_per_tile[tile_id] = item
+                for item_data in local_items:
+                    all_items[item_data['item'].id] = item_data
 
             if progress and search_task:
                 progress.update(search_task, advance=1)
 
         work_geoms = self._merge_or_voronoi(df_polygon)
-        # gdf_out = gpd.GeoDataFrame(geometry=work_geoms, crs=df_polygon.crs)
-        # gdf_out.to_file("voronoi_regions.geojson", driver="GeoJSON")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(search_single_polygon, geom) for geom in work_geoms]
@@ -133,8 +114,115 @@ class StacCollection(object):
         if progress and search_task:
             progress.remove_task(search_task)
 
-        return latest_per_tile
+        # Apply grid:code optimization
+        optimized_items = self._optimize_by_grid_code(all_items, intersects_geometry)
 
+        return optimized_items
+
+    def _optimize_by_grid_code(self, all_items: Dict[str, Dict], intersects_geometry: Dict[str, Any]) -> Dict[
+        str, pystac.Item]:
+        """
+        Optimize item selection by grid:code grouping and coverage analysis.
+
+        :param all_items: Dictionary of all found items with their metadata
+        :param intersects_geometry: Target geometry for coverage calculation
+        :return: Optimized dictionary of selected items
+        """
+        # Group items by grid:code
+        grid_groups = defaultdict(list)
+
+        for item_id, item_data in all_items.items():
+            item = item_data['item']
+            grid_code = item.properties.get('grid:code')
+
+            if grid_code is None:
+                # If no grid:code, use item_id as fallback
+                grid_code = item_id
+                logger.warning(f"Item {item_id} has no grid:code property, using item_id as fallback")
+
+            grid_groups[grid_code].append({
+                'item': item,
+                'percentage': item_data['percentage'],
+                'cloud_cover': item_data['cloud_cover'],
+                'datetime': item.datetime
+            })
+
+        selected_items = {}
+        aoi_geom = shape(intersects_geometry)
+
+        for grid_code, items in grid_groups.items():
+            logger.debug(f"Processing grid:code {grid_code} with {len(items)} items")
+
+            # Sort items by cloud cover (lowest first), then by datetime (newest first)
+            items.sort(key=lambda x: (x['cloud_cover'], -x['datetime'].timestamp()))
+
+            # Check for 100% coverage items first
+            perfect_coverage_items = [item for item in items if item['percentage'] >= 100.0]
+
+            if perfect_coverage_items:
+                # Select the newest item with 100% coverage
+                selected_item = perfect_coverage_items[0]['item']
+                selected_items[selected_item.id] = selected_item
+                logger.debug(f"Grid {grid_code}: Selected item {selected_item.id} with 100% coverage")
+            else:
+                # No 100% coverage items, need to combine multiple items
+                selected_for_grid = self._select_optimal_coverage(items, aoi_geom)
+                for item in selected_for_grid:
+                    selected_items[item.id] = item
+                logger.debug(f"Grid {grid_code}: Selected {len(selected_for_grid)} items for optimal coverage")
+
+        return selected_items
+
+    def _select_optimal_coverage(self, items: List[Dict], aoi_geom: Polygon, max_item_limit=10) -> List[pystac.Item]:
+        """
+        Select the minimum set of items to achieve maximum coverage of the AOI.
+        Items are already sorted by cloud_cover (lowest first), then datetime (newest first).
+
+        :param items: List of item dictionaries sorted by preference (cloud_cover asc, datetime desc)
+        :param aoi_geom: Area of Interest geometry
+        :return: List of selected items
+        """
+        selected_items = []
+        remaining_geom = aoi_geom
+
+        logger.debug(f"Starting optimal coverage selection with {len(items)} items")
+
+        for item_data in items:
+            item = item_data['item']
+            item_geom = shape(item.geometry)
+
+            # Check if this item adds any new coverage
+            intersection = remaining_geom.intersection(item_geom)
+
+            if not intersection.is_empty and intersection.area > 0:
+                # This item provides additional coverage
+                selected_items.append(item)
+                logger.debug(
+                    f"Selected {item.id} (cloud_cover: {item_data['cloud_cover']:.2f}%, datetime: {item.datetime})")
+
+                # Remove the covered area from remaining geometry
+                try:
+                    remaining_geom = remaining_geom.difference(item_geom)
+
+                    # If remaining geometry becomes empty or very small, we're done
+                    if remaining_geom.is_empty or remaining_geom.area < (
+                            aoi_geom.area * 0.001):  # Less than 0.1% remaining
+                        logger.debug(f"Achieved near-complete coverage with {len(selected_items)} items")
+                        break
+
+                except Exception as e:
+                    logger.warning(f"Error in geometry difference calculation: {e}")
+                    # Continue with the current selection if geometry operations fail
+                    break
+            else:
+                logger.debug(f"Skipped {item.id} - no additional coverage provided")
+
+            # Safety check to prevent infinite loops
+            if len(selected_items) >= max_item_limit:
+                logger.warning(f"Reached maximum item limit ({max_item_limit}) for grid coverage optimization")
+                break
+
+        return selected_items
 
     def _create_date_range(self, target_year: int, target_month: Optional[int] = None, duration: int = 6) -> str:
         """
@@ -275,10 +363,10 @@ class StacCollection(object):
 
 
 if __name__ == '__main__':
-    setup_logger()
+    setup_logger(level=logging.DEBUG)
 
     stac_url = "https://earth-search.aws.element84.com/v1"
-    mask_file = "/data/kigali_small/data/kigali_small.gpkg"
+    mask_file = "/data/kigali/data/kigali.gpkg"
     mask_layer = "polygons"
     collection_id = "sentinel-2-l1c"
 

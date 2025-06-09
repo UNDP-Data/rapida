@@ -8,7 +8,7 @@ RUN apt-get update && \
     make -j$(nproc)
 
 # Stage 2: Final image based on GDAL
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.10.0
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.10.0 AS base
 
 
 # Set environment vars
@@ -42,7 +42,16 @@ RUN pipenv --python 3 --site-packages
 
 COPY . .
 
+# Docker image for development
+FROM base AS dev
+
+RUN pipenv run pip install -e .
+
+# Docker image for production
+FROM base AS prod
+
 RUN pipenv run pip install .
+
 
 
 

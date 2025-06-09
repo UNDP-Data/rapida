@@ -3,5 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
+      target: prod
     image: rapida:latest
-
+    env_file:
+      - .env

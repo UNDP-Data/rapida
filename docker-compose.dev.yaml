@@ -5,13 +5,14 @@ services:
       dockerfile: ./Dockerfile
       target: dev
     image: rapida-dev:latest
+    # platform: linux/amd64
     volumes:
       - ./Makefile:/rapida/Makefile
-      - ./rapida:/rapida/rapida # mount app folder to container
+      - ./rapida:/rapida/rapida # mount rapida folder to container
       - ./tests:/rapida/tests
       # uncomment to mount token info from local
-#      - ~/.rapida:/root/.rapida
+      # - ~/.rapida:/root/.rapida
       # uncomment to mount data folder from local
-#      - ./data:/data
+      # - ./data:/data
     env_file:
       - .env

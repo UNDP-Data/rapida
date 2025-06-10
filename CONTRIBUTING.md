@@ -49,15 +49,6 @@ Note. You may need to edit [docker-compose.dev.yaml](./docker-compose.dev.yaml) 
 make down
 ```
 
-- Develop in arm64 environment such as Apple Silcon
-
-Uncomment `platform` in `docker-compose.dev.yaml`
-
-```diff
--    # platform: linux/amd64
-+    platform: linux/amd64
-```
-
 ## Building for production Docker image
 
 - Using Makefile command

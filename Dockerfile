@@ -18,7 +18,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install app dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3-pip python3-gdal pipenv gcc git cmake libgeos-dev && \
+    apt-get install -y --no-install-recommends \
+      python3-pip \
+      python3-gdal \
+      python3-dev \
+      pipenv \
+      gcc \
+      g++ \
+      git \
+      cmake \
+      libgeos-dev && \
     apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install playwright --break-system-packages && \

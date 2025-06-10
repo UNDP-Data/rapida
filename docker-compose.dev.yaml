@@ -5,7 +5,6 @@ services:
       dockerfile: ./Dockerfile
       target: dev
     image: rapida-dev:latest
-    # platform: linux/amd64
     volumes:
       - ./Makefile:/rapida/Makefile
       - ./rapida:/rapida/rapida # mount rapida folder to container

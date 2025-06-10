@@ -37,6 +37,7 @@ class StacCollection(object):
                      target_month: int,
                      target_assets: dict[str, str] = SENTINEL2_ASSET_MAP,
                      duration: int = 12,
+                     cloud_cover: int = 5,
                      max_workers: int = 5,
                      progress: Progress = None,
                      ):
@@ -47,6 +48,7 @@ class StacCollection(object):
         :param target_year: target year
         :param target_month: target month
         :param duration: how many months to search for
+        :param cloud_cover: how much minimum cloud cover rate to search for. Default is 5.
         :param target_assets: target assets
         :param max_workers: maximum number of workers
         :param progress: rich progress object
@@ -68,6 +70,12 @@ class StacCollection(object):
         merged_geom = unary_union(df_polygon['geometry'])
         intersects_geometry = mapping(merged_geom)
 
+        query = {}
+        if cloud_cover == 0:
+            query["eq"] = cloud_cover
+        else:
+            query["lt"] = cloud_cover
+
         def search_single_polygon(single_geom):
             nonlocal all_items
 
@@ -75,10 +83,12 @@ class StacCollection(object):
             fc_geojson = json.loads(fc_geojson_str)
             first_feature = fc_geojson["features"][0]
 
+            search_query = {"eo:cloud_cover": query}
+            logger.debug(f"search query: {search_query}")
             search = self.client.search(
                 collections=[collection_id],
                 intersects=first_feature,
-                query={"eo:cloud_cover": {"lt": 5}},
+                query=search_query,
                 datetime=datetime_range,
             )
 

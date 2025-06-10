@@ -47,6 +47,10 @@ class PredictionBase(object):
         return self._output_nodata_value
 
     @property
+    def input_nodata_value(self)->float:
+        return self._input_nodata_value
+
+    @property
     def cutoff_date_for_harmonize(self)->datetime.datetime:
         """
         Baseline changed date of Sentinel 2. Sentinel 2 had a breaking change since 25 January 2022.
@@ -86,19 +90,28 @@ class PredictionBase(object):
     def process_tile_buffer(self, value):
         self._process_tile_buffer = value
 
-    def __init__(self, item: pystac.Item, component_name: str, bands: List[str], output_nodata_value: float, tile_size: int = 512, tile_buffer: int = 64):
+    def __init__(self,
+                 item: pystac.Item,
+                 component_name: str,
+                 bands: List[str],
+                 output_nodata_value: float,
+                 input_nodata_value: float,
+                 tile_size: int = 512,
+                 tile_buffer: int = 64):
         """
         Constructor
 
         :param item: pystac.Item instance
         :param component_name: name of the prediction component
         :param bands: list of band names
-        :param output_nodata_value: nodata value
+        :param output_nodata_value: nodata value for outputs
+        :param input_nodata_value: nodata value for inputs
         """
         self._item = item
         self._component_name = component_name
         self._target_bands = bands
         self._output_nodata_value = output_nodata_value
+        self._input_nodata_value = input_nodata_value
         self.process_tile_size = tile_size
         self.process_tile_buffer = tile_buffer
 
@@ -206,8 +219,9 @@ class PredictionBase(object):
                 raw_data[:, :, i] = harmonized_data
 
                 # create mask for nodata pixels
-                if nodata_mask is None and src.nodata is not None:
-                    nodata_mask = (band_data == src.nodata)
+                if nodata_mask is None:
+                    nodata_value = src.nodata if src.nodata is not None else self.input_nodata_value
+                    nodata_mask = (band_data == nodata_value)
 
         mask_array = None
         if mask_union:
@@ -217,7 +231,7 @@ class PredictionBase(object):
                 transform=ref_transform,
                 invert=True
             )
-            raw_data[~mask_array] = 0
+            raw_data[~mask_array] = self.input_nodata_value
 
         predicted_data = self.run_model(raw_data)
 

@@ -140,7 +140,7 @@ async def download_stac(
             temp_predict_file = item.predict(progress=progress)
 
             progress.update(predict_task, description=f"[cyan]Removing cloud from landuse {item.item.id}")
-            item.mask_cloud_pixels(temp_predict_file, item.predicted_file)
+            item.mask_cloud_pixels(temp_predict_file, item.predicted_file, progress=progress)
 
             if os.path.exists(temp_predict_file):
                 os.remove(temp_predict_file)

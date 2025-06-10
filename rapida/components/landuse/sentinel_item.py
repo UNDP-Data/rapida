@@ -293,16 +293,17 @@ class SentinelItem(object):
                 os.remove(self.predicted_file)
             raise e
 
-    def detect_cloud(self, progress=None)->str:
+    def detect_cloud(self, force=False, progress=None)->str:
         """
         Detect cloud from downloaded assets
 
+        :param force: force to do cloud detection even if cloud cover is less than 1 percent
         :return: output file path
         """
         # Check cloud cover percentage from item properties
         cloud_cover = self.item.properties.get('eo:cloud_cover', None)
 
-        if cloud_cover is not None and cloud_cover < 1.0:
+        if force == False and cloud_cover is not None and cloud_cover < 1.0:
             logger.warning(f"{self.id}: Cloud cover is {cloud_cover}% (< 1%). Skipping cloud detection.")
             return self.cloud_mask_file
 
@@ -323,7 +324,7 @@ class SentinelItem(object):
                 os.remove(self.cloud_mask_file)
             raise e
 
-    def mask_cloud_pixels(self, input_file: str, output_file: str)-> str:
+    def mask_cloud_pixels(self, input_file: str, output_file: str, progress=None)-> str:
         """
         Mask cloud pixels from land use prediction image
 
@@ -334,17 +335,27 @@ class SentinelItem(object):
         if not os.path.exists(self.cloud_mask_file):
             return self._reproject_data(input_file, output_file)
 
+        mask_task = None
+        if progress:
+            mask_task = progress.add_task(f"[cyan]Starting masking cloud from land use prediction image...", total=None)
+
         with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
             temp_masked_file = tmp.name
 
         try:
+            if mask_task is not None:
+                progress.update(mask_task, description="[cyan]Applying cloud mask...")
             self._apply_cloud_mask(input_file, temp_masked_file)
+            if mask_task is not None:
+                progress.update(mask_task, description="[cyan]Reprojecting land use...")
             self._reproject_data(temp_masked_file, output_file)
         except Exception as e:
             raise e
         finally:
             if os.path.exists(temp_masked_file):
                 os.unlink(temp_masked_file)
+            if mask_task is not None:
+                progress.remove_task(mask_task)
         return output_file
 
     def _apply_cloud_mask(self, input_file: str, output_file: str) -> None:
@@ -446,9 +457,6 @@ class SentinelItem(object):
             xRes=src_pixel_size,
             yRes=src_pixel_size,
             targetAlignedPixels=True,
-            cutlineDSName=self.mask_file,
-            cutlineLayer=self.mask_layer,
-            cropToCutline=True,
         )
 
         res = gdal.Warp(output_file, input_file, options=warp_options)
@@ -546,10 +554,11 @@ class SentinelItem(object):
 if __name__ == '__main__':
     setup_logger()
 
-    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRU_20250421_0_L1C"
+    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_36MTC_20240819_0_L1C"
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRU_20250421_0_L1C"
     # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
     # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
-    mask_file = "/data/kigali/data/kigali.gpkg"
+    mask_file = "/data/rwanda_tests/data/rwanda_tests.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
 
@@ -566,7 +575,7 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        sentinel_item.detect_cloud(progress=progress)
+        sentinel_item.detect_cloud(progress=progress, force=True)
 
         t3 = time.time()
         logger.info(f"cloud detection time: {t3 - t2}")
@@ -576,8 +585,9 @@ if __name__ == '__main__':
         t4 = time.time()
         logger.info(f"landuse prediction time: {t4 - t3}")
 
-        sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file)
+        # temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
+        sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file, progress=progress)
 
         t5 = time.time()
-        logger.info(f"landuse prediction time: {t5 - t4}, total time: {t5 - t1}")
+        logger.info(f"cloud masking time: {t5 - t4}, total time: {t5 - t1}")
 

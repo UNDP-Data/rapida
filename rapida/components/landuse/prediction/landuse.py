@@ -30,6 +30,7 @@ class LandusePrediction(PredictionBase):
                          component_name="landuse",
                          bands=['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'],
                          output_nodata_value=255,
+                         input_nodata_value=0,
                          tile_size=tile_size,
                          tile_buffer=tile_buffer)
 

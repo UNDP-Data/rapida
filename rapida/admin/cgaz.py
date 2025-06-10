@@ -1,3 +1,5 @@
+import os.path
+
 import h3.api.basic_int as h3
 import logging
 from osgeo import gdal, ogr
@@ -49,12 +51,12 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
 
         progress.update(task, advance=1, description="[green]Downloading and translating with GDAL")
         with gdal.config_options(options=configs):
-                ds = gdal.VectorTranslate(destination_path, url, options=options)
-                if ds is None:
-                    logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
-                    progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
-                    return None
-
+            ds = gdal.VectorTranslate(destination_path, url, options=options)
+            if ds is None:
+                logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
+                progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
+                return None
+            ds = None
         with gdal.OpenEx(destination_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as ds:
 
             layer = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')

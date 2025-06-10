@@ -54,6 +54,7 @@ async def download_stac(
     target_year: int,
     target_month:int,
     target_srs,
+    cloud_cover: int = 5,
     progress: Progress = None,
     max_workers: int = 1,
 ):
@@ -67,6 +68,7 @@ async def download_stac(
     :param output_file: output file path
     :param target_year: target year
     :param target_srs: target projection CRS
+    :param cloud_cover: how much minimum cloud cover rate to search for. Default is 5.
     :param progress: rich progress object
     :param max_workers: maximum number of workers to download JP2 file concurrently
     :return the list of output files
@@ -89,6 +91,7 @@ async def download_stac(
                       target_year=target_year,
                       target_month=target_month,
                       duration=12,
+                      cloud_cover=cloud_cover,
                       progress=progress,)
 
     tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)

@@ -120,6 +120,8 @@ def build_variable_help():
               show_default=True,help=f'The year for which to compute population and landuse' )
 @click.option('--month', '-m', required=False, type=int, multiple=False,default=None,
               show_default=True,help=f"Optional. The end month for which to compute landuse. \nIf this is used together with --year, it searches data until target year and month for the last 6 months. \nIf this is used without --year, and it is future month, current month is used as end month.")
+@click.option('--cloud-cover', '-cc', required=False, type=int, multiple=False, default=5,
+              show_default=True,help=f"Optional. Minimum cloud cover rate to search items for landuse component.")
 @click.option('-p', '--project',
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
@@ -132,7 +134,7 @@ def build_variable_help():
               help="Set log level to debug"
               )
 @click.pass_context
-def assess(ctx, all=False, components=None,  variables=None, year=None, month=None, project: str = None, force=False, debug=False):
+def assess(ctx, all=False, components=None,  variables=None, year=None, month=None, cloud_cover=None, project: str = None, force=False, debug=False):
     """
     Assess/evaluate a specific geospatial exposure components/variables
 
@@ -210,7 +212,12 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, month=No
                 cls = import_class(fqcn=fqcn)
                 component = cls()
 
-                component(progress=progress, variables=variables, target_year=year, target_month=month, force=force)
+                component(progress=progress,
+                          variables=variables,
+                          target_year=year,
+                          target_month=month,
+                          cloud_cover=cloud_cover,
+                          force=force)
 
 
 

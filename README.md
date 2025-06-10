@@ -680,3 +680,6 @@ and as a result we recommend Windows users to use [WSL](https://learn.microsoft.
 > [IMPORTANT]
 > Make sure to set the core resources available to the container(CPU, RAM) according to your own system capabilities
    
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for more information about developing rapida in local computer.

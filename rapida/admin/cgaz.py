@@ -1,7 +1,11 @@
+import os
+
 import h3.api.basic_int as h3
 import logging
 from osgeo import gdal, ogr
 from rich.progress import Progress
+from rapida.util.geo import gdal_callback
+from shapely.geometry import box
 
 
 gdal.UseExceptions()
@@ -26,11 +30,10 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
 
     """
     with Progress() as progress:
-        task = progress.add_task("[cyan]Fetching admin boundaries...", total=5)
+        task = progress.add_task("[cyan]Fetching admin boundaries...", total=2)
 
-        progress.update(task, advance=1, description="[green]Checking intersecting countries")
+        translate_task = progress.add_task(description="Downloading ADMIN data", total=None)
 
-        progress.update(task, advance=1, description="[green]Setting GDAL options")
         options = gdal.VectorTranslateOptions(
             layerName=dst_layer_name or f'admin{admin_level}',
             makeValid=True,
@@ -47,14 +50,35 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
             'OGR2OGR_USE_ARROW_API': 'YES'
         }
 
-        progress.update(task, advance=1, description="[green]Downloading and translating with GDAL")
-        with gdal.config_options(options=configs):
-                ds = gdal.VectorTranslate(destination_path, url, options=options)
-                if ds is None:
-                    logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
-                    progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
-                    return None
 
+        with gdal.config_options(options=configs):
+            ds = gdal.VectorTranslate(destination_path, url, options=options)
+            if ds is None:
+                logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
+                progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
+                return None
+            ds = None
+            if not clip:
+                l = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
+                layer_extent = l.GetExtent()
+
+                layer_bbox_geom = box(minx=layer_extent[0], miny=layer_extent[2], maxx=layer_extent[1], maxy=layer_extent[3])
+                bbox_geometry = box(*bbox)
+
+
+                ratio = layer_bbox_geom.area / bbox_geometry.area
+                if ratio < 0.9 or ratio > 1.1:
+                    destination_path1 = f"{destination_path}.fgb"
+                    ds = None
+                    ds1 = gdal.VectorTranslate(destNameOrDestDS=destination_path1, srcDS=destination_path, clipSrc=bbox, geometryType="MultiPolygon",)
+                    ds1 = None
+                    os.remove(destination_path)
+                    os.rename(destination_path1, destination_path)
+
+            ds = None
+        progress.remove_task(translate_task)
+
+        progress.update(task, advance=1, description="[green]Downloaded admin data", refresh=True)
         with gdal.OpenEx(destination_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as ds:
 
             layer = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
@@ -84,6 +108,6 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                 layer.DeleteField(iso3_field_index)
             ds.FlushCache()
             ds.SyncToDisk()
-        progress.update(task, completed=5, description="[green]Download Completed")
+        progress.update(task, advance=1, description="[green]Download Completed", refresh=True)
         return None
 

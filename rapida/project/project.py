@@ -153,8 +153,6 @@ class Project:
                                  promote_to_multi=True, index=False)
                     gdf = joined
 
-                else:
-                    self.countries = tuple(sorted(set(gdf['iso3'])))
 
                 if 'h3id' in cols:
                     gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name)
@@ -178,8 +176,14 @@ class Project:
                     )
                     gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True, index=False)
+
+                gdf.dropna(subset=['iso3', 'h3id'], inplace=True, axis=0)
+                self.countries = tuple(sorted(set(gdf['iso3'].tolist())))
                 self._cfg_['countries'] = self.countries
                 self.save()
+                gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w',
+                            layer=self.polygons_layer_name,
+                            promote_to_multi=True, index=False)
 
             if mask is not None:
                 logger.debug(f'Got mask {mask}')

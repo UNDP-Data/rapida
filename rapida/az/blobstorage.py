@@ -23,6 +23,8 @@ async def download(blob_client:BlobClient = None, dst_path:str=None, progress=No
         logger.debug(f"Going to download {blob_client.blob_name} to {dst_path}")
         blob_props = await blob_client.get_blob_properties()
         blob_size = blob_props.size  # Total bytes to download
+        if os.path.exists(dst_path) and os.path.getsize(dst_path) == blob_size:
+            return dst_path
         blob = await blob_client.download_blob()
         task = None
         name = os.path.split(blob_props.name)[-1]

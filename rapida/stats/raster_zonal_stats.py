@@ -218,18 +218,27 @@ def zonal_stats(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer
         return combined_results
 
 def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
-                vars_ops:Iterable[tuple[str, str]]=None):
+                vars_ops:Iterable[tuple[str, str]]=None, progress=None):
+
+
     with gdal.OpenEx(polygon_ds, gdal.OF_READONLY|gdal.OF_VECTOR) as polyds:
         poly_lyr = polyds.GetLayerByName(polygon_layer)
         poly_srs = poly_lyr.GetSpatialRef()
         extracted_data = {}
 
         for n, src_raster in enumerate(src_rasters):
+
+
             with gdal.OpenEx(src_raster, gdal.OF_RASTER|gdal.OF_READONLY) as srcds:
                 src_srs = srcds.GetSpatialRef()
                 assert proj_are_equal(src_srs=src_srs, dst_srs=poly_srs), f'{src_raster}  features wrong projection'
                 var_name, operation = vars_ops[n]
-                df = exact_extract(src_raster, poly_lyr, ops=[operation], include_geom=not n, output='pandas')
+                if progress is not None:
+                    task = progress.add_task(description=f"Running zonalstats/{operation} for {var_name}")
+                    def progress_callback(completed, message, progress=progress, task=task):
+                        if progress is not None and task is not None:
+                            progress.update(task, completed=int(completed * 100))
+                df = exact_extract(src_raster, poly_lyr, ops=[operation], include_geom=not n, output='pandas', progress=progress_callback or False)
                 df.rename(columns={operation: var_name}, inplace=True)
                 if n == 0:
                     df['tempid'] = range(1, len(df) + 1)
@@ -237,6 +246,8 @@ def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
                     extracted_data['geometry'] = df['geometry']
 
                 extracted_data[var_name] = df[var_name]
+            if progress is not None:
+                progress.remove_task(task)
         combined = pd.concat(extracted_data, axis=1)
         combined.drop(columns='tempid', inplace=True)
         egdf = geopandas.read_file(polygon_ds, layer=polygon_layer)
@@ -245,5 +256,4 @@ def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
             if vname in egdf.columns.tolist():
                 egdf.drop(columns=[vname], inplace=True)
         combined = egdf.merge(combined, on='geometry', how='inner')
-
         return combined

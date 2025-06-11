@@ -117,6 +117,7 @@ def import_raster(source=None, dst=None, target_srs=None,
                 # reproject raster mask to target projection
                 logger.debug(f'Reprojecting {source} to {target_srs.GetAuthorityName(None)}:{target_srs.GetAuthorityCode(None)}')
                 warp_options.update(dict(dstSRS=target_srs))
+
                 rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)
             else:
                 rds = gdal.Warp(destNameOrDestDS=dst, srcDSOrSrcDSTab=src_ds, **warp_options)

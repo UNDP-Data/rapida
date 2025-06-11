@@ -175,6 +175,9 @@ class SentinelItem(object):
             # if item does not have all required assets, raise error.
             raise RuntimeError(f"This STAC item does not contain required assets.")
 
+    def __del__(self):
+        self.__target_srs = None
+
     def is_valid_item(self):
         """
         Validate whether this STAC item contains all required assets

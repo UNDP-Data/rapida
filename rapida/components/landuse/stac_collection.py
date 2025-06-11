@@ -2,8 +2,7 @@ import json
 import logging
 import concurrent.futures
 import threading
-from typing import Optional, Any, Dict, List
-from calendar import monthrange
+from typing import Any, Dict, List
 from datetime import date
 from rich.progress import Progress
 import pystac
@@ -33,10 +32,8 @@ class StacCollection(object):
 
     def search_items(self,
                      collection_id: str,
-                     target_year: int,
-                     target_month: int,
                      target_assets: dict[str, str] = SENTINEL2_ASSET_MAP,
-                     duration: int = 12,
+                     datetime_range: str=None,
                      cloud_cover: int = 5,
                      max_workers: int = 5,
                      progress: Progress = None,
@@ -45,9 +42,7 @@ class StacCollection(object):
         Search stac items for covering project geodataframe area
 
         :param collection_id: collection id
-        :param target_year: target year
-        :param target_month: target month
-        :param duration: how many months to search for
+        :param datetime_range: datetime range for searching. Format is yyyy-mm-dd/yyyy-mm-dd. Default is 12 months ending today's date
         :param cloud_cover: how much minimum cloud cover rate to search for. Default is 5.
         :param target_assets: target assets
         :param max_workers: maximum number of workers
@@ -57,7 +52,11 @@ class StacCollection(object):
         df_polygon = gpd.read_file(self.mask_file, layer=self.mask_layer)
         df_polygon.to_crs(epsg=4326, inplace=True)
 
-        datetime_range = self._create_date_range(target_year, target_month, duration=duration)
+        if datetime_range is None:
+            end_date = date.today()
+            start_date = end_date.replace(year=end_date.year - 1)
+            datetime_range = f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
+
         logger.debug(f"datetime range for searching: {datetime_range}")
 
         search_task = None
@@ -234,71 +233,6 @@ class StacCollection(object):
 
         return selected_items
 
-    def _create_date_range(self, target_year: int, target_month: Optional[int] = None, duration: int = 6) -> str:
-        """
-        Generate a date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.
-
-        The end date is determined based on the provided target year and optional target month:
-        - If target_year is None or in the future → use current year.
-        - If target_month is None:
-            - If target_year is current year → use today as end_date.
-            - If target_year is past → use December as default month.
-        - If target_month is in the future (within current year) → clamp to current month.
-        - end_date = today (if current year and current/future month), else last day of target_month.
-        - start_date = end_date - `duration` months (manual calculation, no external lib).
-
-        The start date is computed by subtracting `duration` months from the end date,
-        accounting for varying month lengths and year boundaries.
-
-        :param target_year: The year of interest.
-        :param target_month: The month of interest (1–12), optional.
-        :param duration: Number of months to go back from the end date (default is 6).
-        :return: A date range string in the format 'YYYY-MM-DD/YYYY-MM-DD'.
-        """
-        today = date.today()
-        current_year = today.year
-        current_month = today.month
-
-        def subtract_months(from_date: date, months: int) -> date:
-            year = from_date.year
-            month = from_date.month - months
-
-            while month <= 0:
-                month += 12
-                year -= 1
-
-            day = min(from_date.day, monthrange(year, month)[1])
-            return date(year, month, day)
-
-        # normalize year
-        if target_year is None or target_year > current_year:
-            target_year = current_year
-
-        # normalize month
-        if target_month is None:
-            if target_year < current_year:
-                target_month = 12  # Use December for past years
-        else:
-            if target_year == current_year and target_month > current_month:
-                target_month = current_month
-
-                # Determine end_date
-        if target_year == current_year:
-            if target_month is None or target_month >= current_month:
-                end_date = today
-            else:
-                last_day = monthrange(target_year, target_month)[1]
-                end_date = date(target_year, target_month, last_day)
-        else:
-            if target_month is None:
-                end_date = date(target_year, 12, 31)
-            else:
-                last_day = monthrange(target_year, target_month)[1]
-                end_date = date(target_year, target_month, last_day)
-
-        start_date = subtract_months(end_date, duration)
-
-        return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
 
     def _merge_or_voronoi(self, df: gpd.GeoDataFrame, scene_size=110000) -> list[Polygon]:
         """
@@ -387,9 +321,7 @@ if __name__ == '__main__':
     with Progress() as progress:
         latest_per_tile = stac_collection.search_items(
             collection_id=collection_id,
-            target_year=2025,
-            target_month=4,
-            duration=12,
+            datetime_range="2025-04-01/2025-04-30",
             progress=progress, )
 
         logger.info(latest_per_tile)

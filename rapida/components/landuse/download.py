@@ -51,9 +51,8 @@ async def download_stac(
     geopackage_file_path: str,
     polygons_layer_name: str,
     output_file: str,
-    target_year: int,
-    target_month:int,
     target_srs,
+    datetime_range:str,
     cloud_cover: int = 5,
     progress: Progress = None,
     max_workers: int = 1,
@@ -66,8 +65,8 @@ async def download_stac(
     :param geopackage_file_path: path to geopackage file
     :param polygons_layer_name: name of layer polygon layer in geopackage to mask
     :param output_file: output file path
-    :param target_year: target year
     :param target_srs: target projection CRS
+    :param datetime_range: datetime range for searching. Format is yyyy-mm-dd/yyyy-mm-dd. Default is 12 months ending today's date
     :param cloud_cover: how much minimum cloud cover rate to search for. Default is 5.
     :param progress: rich progress object
     :param max_workers: maximum number of workers to download JP2 file concurrently
@@ -88,11 +87,15 @@ async def download_stac(
 
     latest_per_tile = stac_collection.search_items(
                       collection_id=collection_id,
-                      target_year=target_year,
-                      target_month=target_month,
-                      duration=12,
+                      datetime_range=datetime_range,
                       cloud_cover=cloud_cover,
                       progress=progress,)
+
+    if len(latest_per_tile.values()) == 0:
+        if progress and stac_task:
+            progress.remove_task(stac_task)
+        raise RuntimeError(
+            f"No items found from Sentinel 2. Try to set wider date range or increase cloud cover rate.")
 
     tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)
 

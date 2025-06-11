@@ -23,7 +23,7 @@ logger = logging.getLogger('rapida')
 
 
 class LanduseComponent(Component):
-    def __call__(self, variables: List[str], target_year: int=None, target_month: int=None, cloud_cover:int = None, **kwargs):
+    def __call__(self, variables: List[str], datetime_range: str=None, cloud_cover:int = None, **kwargs):
         if not variables:
             variables = self.variables
         else:
@@ -41,8 +41,7 @@ class LanduseComponent(Component):
                 v = LanduseVariable(
                     name=var_name,
                     component=self.component_name,
-                    target_year=target_year,
-                    target_month=target_month,
+                    datetime_range=datetime_range,
                     cloud_cover=cloud_cover,
                     **var_data
                 )
@@ -111,16 +110,22 @@ class LanduseVariable(Variable):
             variable_task = progress.add_task(
                 description=f'[blue] Assessing {self.component}->{self.name}', total=None)
 
-        self.download(**kwargs)
-        self.compute(**kwargs)
+        try:
+            self.download(**kwargs)
+            self.compute(**kwargs)
 
-        if progress is not None and variable_task is not None:
-            progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
+            if progress is not None and variable_task is not None:
+                progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
 
-        self.evaluate(**kwargs)
+            self.evaluate(**kwargs)
 
-        if progress is not None and variable_task is not None:
-            progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
+            if progress is not None and variable_task is not None:
+                progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
+        except Exception as e:
+            raise e
+        finally:
+            if variable_task is not None:
+                progress.remove_task(variable_task)
 
 
     def download(self, force=False, **kwargs):
@@ -133,9 +138,8 @@ class LanduseVariable(Variable):
                           geopackage_file_path=project.geopackage_file_path,
                           polygons_layer_name=project.polygons_layer_name,
                           output_file=self.prediction_output_image,
-                          target_year=self.target_year,
-                          target_month=self.target_month,
                           target_srs=project.target_srs,
+                          datetime_range=self.datetime_range,
                           cloud_cover=self.cloud_cover,
                           progress=progress))
 

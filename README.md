@@ -169,8 +169,10 @@ As a result, **rapida** employes a different approach. Cloud accessible Sentinel
 is was fed into the [Google dynamic world model](https://github.com/google/dynamicworld) to predict land use in close to real time
 for every image selected in a specific time interval with less than 5% cloud coverage. 
 
-The last step that is not yet implemented is to generate the cloud prediction  and use the layer to mask/out filter
-cloudy/snowy pixels.
+The last step that is to generate the cloud prediction  and use the layer to mask/out filter
+cloudy/snowy pixels. There are various algorithms can detect clouds from Sentinel 2 images as described in [Skakun et al., 2022](https://doi.org/10.1016/j.rse.2022.112990), 
+Rapida tool uses [s2cloudless](https://github.com/sentinel-hub/sentinel2-cloud-detector) as a cloud detection algorithm incorporating with landuse component.
+If image contains more than or equal to one percent of cloud, cloud detection and masking are applied to the land use image.
 
 > **Note**
 > Predicting land use in close to real time is a computationally demanding task and should be treated with care

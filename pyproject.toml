@@ -36,7 +36,7 @@ dependencies = [
     "rich",
     "morecantile",
     "mapbox_vector_tile",
-    "aiopmtiles @ git+https://github.com/developmentseed/aiopmtiles",
+    "aiopmtiles @ https://github.com/developmentseed/aiopmtiles/archive/refs/heads/main.zip",
     "sympy",
     "pydantic",
     "pmtiles",
@@ -46,8 +46,9 @@ dependencies = [
     "requests-oauthlib",
     "fiona",
     "nest_asyncio",
-    "tensorflow==2.16.1",
-    "psutil"
+    "tensorflow==2.16.2",
+    "psutil",
+    "s2cloudless"
 ]
 
 [project.optional-dependencies]

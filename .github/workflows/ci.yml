@@ -39,8 +39,7 @@ jobs:
           file: Dockerfile
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            PRODUCTION=true
+          target: prod
           outputs: type=docker,dest=${{ runner.temp }}/myimage.tar
       - name: Upload artifact
         uses: actions/upload-artifact@v4

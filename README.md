@@ -169,13 +169,63 @@ As a result, **rapida** employes a different approach. Cloud accessible Sentinel
 is fed into the [Google dynamic world model](https://github.com/google/dynamicworld) to predict land use in close to real time
 for every image selected in a specific time interval with less than 5% cloud coverage. 
 
-The last step that is not yet implemented is to generate the cloud prediction  and use the layer to mask/out filter
-cloudy/snowy pixels.
+The last step that is to generate the cloud prediction  and use the layer to mask/out filter
+cloudy/snowy pixels. There are various algorithms can detect clouds from Sentinel 2 images as described in [Skakun et al., 2022](https://doi.org/10.1016/j.rse.2022.112990), 
+Rapida tool uses [s2cloudless](https://github.com/sentinel-hub/sentinel2-cloud-detector) as a cloud detection algorithm incorporating with landuse component.
+If image contains more than or equal to one percent of cloud, cloud detection and masking are applied to the land use image.
 
 > **Note**
 > Predicting land use in close to real time is a computationally demanding task and should be treated with care
 
+Land use component data processing flow is illustrated in the below diagram.
 
+```mermaid
+flowchart TD
+    Input-1@{ shape: lean-r, label: "Project area" }
+    Input-2@{ shape: lean-r, label: "Dates" }
+    Input-3@{ shape: lean-r, label: "Cloud cover threshold" }
+
+    A[Search Sentinel 2 L1C]
+    B[/Loop items\]
+
+    subgraph Process ["Process a STAC item"]
+        B-1[Download assets]
+        B-2@{ shape: diamond, label: "Cloud cover >= 1%" }
+        B-3[Detect cloud]
+        B-4[Landuse prediction]
+        B-5@{ shape: diamond, label: "Is there cloud data" }
+        B-6[Masking clouds]
+        B-7@{ shape: lean-l, label: "Landuse file" }
+
+        B-3A@{ shape: lean-r, label: "Required assets: <br>B01,B02,B04,B05,B08,<br/>B8A,B09,B10,B11,B12" }
+        B-4A@{ shape: lean-r, label: "Required assets: <br>B02,B03,B04,B05,B06,<br/>B07,B08,B11,B12" }
+
+        B-1-->B-2
+        B-2-->|Yes|B-3
+        B-3A-->B-3
+        B-2-->|No|B-4
+        B-3-->B-4
+        B-4A-->B-4
+        B-4-->B-5
+        B-5-->|Yes|B-6
+        B-5-->|No|B-7
+        B-6-->B-7
+    end
+
+    C[\Loop end/]
+    D[Mosaic landuse files]
+    E@{ shape: lean-l, label: "Mosaic landuse file (VRT)" }
+
+    Input-1-->A
+    Input-2-->A
+    Input-3-->A
+
+    A-->B
+    B-->Process
+    Process-->C
+    C-->D
+    D-->E
+```
 
 </details>
 
@@ -707,3 +757,6 @@ and as a result we recommend Windows users to use [WSL](https://learn.microsoft.
 > [IMPORTANT]
 > Make sure to set the core resources available to the container(CPU, RAM) according to your own system capabilities
    
+## Contributing
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for more information about developing rapida in local computer.

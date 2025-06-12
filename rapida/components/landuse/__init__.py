@@ -9,7 +9,7 @@ from rich.progress import Progress
 import geopandas as gpd
 
 from rapida.components.landuse.download import download_stac
-from rapida.components.landuse.constants import STAC_MAP, SENTINEL2_ASSET_MAP
+from rapida.components.landuse.constants import STAC_MAP
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
 from rapida.core.variable import Variable
@@ -23,7 +23,7 @@ logger = logging.getLogger('rapida')
 
 
 class LanduseComponent(Component):
-    def __call__(self, variables: List[str], target_year: int=None, target_month: int=None, **kwargs):
+    def __call__(self, variables: List[str], datetime_range: str=None, cloud_cover:int = None, **kwargs):
         if not variables:
             variables = self.variables
         else:
@@ -41,8 +41,8 @@ class LanduseComponent(Component):
                 v = LanduseVariable(
                     name=var_name,
                     component=self.component_name,
-                    target_year=target_year,
-                    target_month=target_month,
+                    datetime_range=datetime_range,
+                    cloud_cover=cloud_cover,
                     **var_data
                 )
                 v(**kwargs)
@@ -84,13 +84,6 @@ class LanduseVariable(Variable):
         value = self._interpolate_stac_source(self.source)['value']
         return int(value)
 
-    @property
-    def target_asset(self) -> dict[str, str]:
-        """
-        Dictionary of Earth search asset name and band name
-        """
-        return SENTINEL2_ASSET_MAP
-
 
     @property
     def prediction_output_image(self) -> str:
@@ -117,16 +110,22 @@ class LanduseVariable(Variable):
             variable_task = progress.add_task(
                 description=f'[blue] Assessing {self.component}->{self.name}', total=None)
 
-        self.download(**kwargs)
-        self.compute(**kwargs)
+        try:
+            self.download(**kwargs)
+            self.compute(**kwargs)
 
-        if progress is not None and variable_task is not None:
-            progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
+            if progress is not None and variable_task is not None:
+                progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
 
-        self.evaluate(**kwargs)
+            self.evaluate(**kwargs)
 
-        if progress is not None and variable_task is not None:
-            progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
+            if progress is not None and variable_task is not None:
+                progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
+        except Exception as e:
+            raise e
+        finally:
+            if variable_task is not None:
+                progress.remove_task(variable_task)
 
 
     def download(self, force=False, **kwargs):
@@ -139,10 +138,9 @@ class LanduseVariable(Variable):
                           geopackage_file_path=project.geopackage_file_path,
                           polygons_layer_name=project.polygons_layer_name,
                           output_file=self.prediction_output_image,
-                          target_year=self.target_year,
-                          target_month=self.target_month,
-                          target_assets=self.target_asset,
                           target_srs=project.target_srs,
+                          datetime_range=self.datetime_range,
+                          cloud_cover=self.cloud_cover,
                           progress=progress))
 
 

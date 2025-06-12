@@ -91,6 +91,53 @@ def validate_variables(ctx, param, value):
     return value
 
 
+def validate_datetime_range(ctx, param, value):
+    """
+    click callback function to validate --datetime value
+    """
+    if not value:
+        return value
+
+    selected_components = ctx.params.get('components')
+
+    if not 'landuse' in selected_components:
+        return None
+
+    try:
+        if '/' in value:
+            # user pass the date range
+            start_str, end_str = value.split('/', 1)
+            start_date = datetime.datetime.strptime(start_str, '%Y-%m-%d').date()
+            end_date = datetime.datetime.strptime(end_str, '%Y-%m-%d').date()
+        else:
+            # user pass a single date
+            end_date = datetime.datetime.strptime(value, '%Y-%m-%d').date()
+            start_date = end_date.replace(year=end_date.year - 1)
+
+        today = datetime.date.today()
+
+        # ensure the end date is before today's date
+        if not (end_date <= today):
+            raise click.BadParameter(f"End date ({end_date}) must be before today ({today})")
+
+        # ensure having at least one day between start date and end date
+        if (end_date - start_date).days < 1:
+            raise click.BadParameter(f"Date range must be at least 1 day apart. Start: {start_date}, End: {end_date}")
+
+        # ensure starting date is after sentinel 2 available date
+        SENTINEL2_START_DATE = datetime.date(2015, 6, 27)
+        if start_date <= SENTINEL2_START_DATE:
+            raise click.BadParameter(
+                f"Start date ({start_date}) must be after Sentinel-2 operational start date ({SENTINEL2_START_DATE})")
+
+        return f"{start_date.strftime('%Y-%m-%d')}/{end_date.strftime('%Y-%m-%d')}"
+
+    except ValueError as e:
+        if "time data" in str(e):
+            raise click.BadParameter(f"Invalid date format. Use YYYY-MM-DD or YYYY-MM-DD/YYYY-MM-DD format")
+        raise click.BadParameter(str(e))
+
+
 def build_variable_help():
     """
     build help message for variable option
@@ -117,9 +164,11 @@ def build_variable_help():
               type=str, callback=validate_variables,
               help=f"{build_variable_help()}")
 @click.option('--year', '-y', required=False, type=int, multiple=False,default=datetime.datetime.now().year,
-              show_default=True,help=f'The year for which to compute population and landuse' )
-@click.option('--month', '-m', required=False, type=int, multiple=False,default=None,
-              show_default=True,help=f"Optional. The end month for which to compute landuse. \nIf this is used together with --year, it searches data until target year and month for the last 6 months. \nIf this is used without --year, and it is future month, current month is used as end month.")
+              show_default=True,help=f'The year for which to compute population' )
+@click.option('--datetime-range', '-dt', required=False, type=str, callback=validate_datetime_range, default=datetime.date.today().strftime('%Y-%m-%d'),
+              help=f"Optional. Date range for landuse component in YYYY-MM-DD/YYYY-MM-DD format or single date YYYY-MM-DD (12 months range). Only valid when 'landuse' component is selected. Start date must be after end date, end date must be before today, and at least 1 day apart.")
+@click.option('--cloud-cover', '-cc', required=False, type=int, multiple=False, default=5,
+              show_default=True,help=f"Optional. Minimum cloud cover rate to search items for landuse component.")
 @click.option('-p', '--project',
               default=None,
               type=click.Path(file_okay=False, dir_okay=True, resolve_path=True),
@@ -132,7 +181,7 @@ def build_variable_help():
               help="Set log level to debug"
               )
 @click.pass_context
-def assess(ctx, all=False, components=None,  variables=None, year=None, month=None, project: str = None, force=False, debug=False):
+def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, cloud_cover=None, project: str = None, force=False, debug=False):
     """
     Assess/evaluate a specific geospatial exposure components/variables
 
@@ -157,6 +206,8 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, month=No
     rapida assess -c population -v male_total -v female_total: assess only male and female total population.
 
     rapida assess -c rwi -p ./data/sample_project: assess RWI component for RAPIDA project stored at sample_project folder.
+
+    rapida assess -c landuse -dt 2025-02-01/2025-05-31 -cc 10: Search Sentinel 2 item which is less than 10% of cloud cover from February to May 2025.
 
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
@@ -210,7 +261,12 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, month=No
                 cls = import_class(fqcn=fqcn)
                 component = cls()
 
-                component(progress=progress, variables=variables, target_year=year, target_month=month, force=force)
+                component(progress=progress,
+                          variables=variables,
+                          target_year=year,
+                          datetime_range=datetime_range,
+                          cloud_cover=cloud_cover,
+                          force=force)
 
 
 

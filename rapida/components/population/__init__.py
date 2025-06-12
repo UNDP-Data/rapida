@@ -4,7 +4,11 @@ import os
 from typing import List
 import logging
 import pycountry
+import rasterio
 from pyogrio import write_dataframe
+from pyproj import Transformer
+from rasterio.windows import from_bounds
+
 from rapida.constants import POLYGONS_LAYER_NAME,GTIFF_CREATION_OPTIONS
 from rapida.util import geo
 from rapida.core.component import Component
@@ -21,6 +25,8 @@ from rapida.components.population.pop_coefficient import get_pop_coeff
 from rapida.az import blobstorage
 from urllib.parse import urlencode
 import re
+
+from rapida.util.geo import gdal_callback
 
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger('rapida')
@@ -313,7 +319,7 @@ class PopulationVariable(Variable):
     def evaluate(self, **kwargs):
 
         dst_layer = f'stats.{self.component}'
-        #progress = kwargs.get('progress', None)
+        progress = kwargs.get('progress', None)
         with Session() as s:
             project = Project(path=os.getcwd())
             layers = geopandas.list_layers(project.geopackage_file_path)
@@ -339,7 +345,7 @@ class PopulationVariable(Variable):
 
                 gdf = zst(src_rasters=src_rasters,
                                   polygon_ds=project.geopackage_file_path,
-                                  polygon_layer=polygons_layer, vars_ops=var_ops
+                                  polygon_layer=polygons_layer, vars_ops=var_ops, progress=progress
                                   )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
@@ -388,47 +394,66 @@ class PopulationVariable(Variable):
                 gdal.Unlink(fpath)
 
     def download(self, **kwargs):
-
-        """Download variable"""
-        logger.debug(f'Downloading {self.name} ')
-        project=Project(os.getcwd())
+        logger.debug(f'Downloading {self.name}')
+        project = Project(os.getcwd())
         progress = kwargs.get('progress', None)
         self.local_path = os.path.join(self._source_folder_, f'{self.name}.tif')
+
         if os.path.exists(self.local_path):
             if project.raster_mask is not None:
                 assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
             return self.local_path
-        sources = list()
 
+        sources = []
         for country in project.countries:
             src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
             _, file_name = os.path.split(src_path)
             local_path = os.path.join(self._source_folder_, file_name)
-            if not os.path.exists(self._source_folder_):
-                os.makedirs(self._source_folder_)
+            os.makedirs(self._source_folder_, exist_ok=True)
             logger.debug(f'Going to download {src_path} to {local_path}')
-            downloaded_file = asyncio.run(
-                blobstorage.download_blob(
-                    src_path=src_path,
-                    dst_path=local_path,
-                    progress=progress)
-            )
-            sources.append(downloaded_file)
+            sources.append(src_path)
 
+        downloaded_files = asyncio.run(blobstorage.download_blobs(
+            src_blobs=sources,
+            dst_folder=self._source_folder_,
+            progress=progress
+        ))
+
+        vrt_path = self.local_path.replace('.tif', '.vrt')
         vrt_options = gdal.BuildVRTOptions(
             resolution='highest',
             resampleAlg='nearest',
             allowProjectionDifference=False,
         )
+        vrtds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=downloaded_files, options=vrt_options)
+        vrtds.FlushCache()
+        vrtds.SyncToDisk()
+        polygons_ds = gdal.OpenEx(project.geopackage_file_path, gdal.OF_VECTOR)
+        polygons_layer = polygons_ds.GetLayerByName(project.polygons_layer_name)
+        bounds = polygons_layer.GetExtent()  # (minx, maxx, miny, maxy)
+        minx, maxx, miny, maxy = bounds
 
-        vrt_path = self.local_path.replace('.tif', '.vrt')
-        vrtds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options)
-        ds = gdal.Translate(destName=self.local_path,srcDS=vrtds )
+        with rasterio.open(vrt_path) as ras:
+            raster_crs = ras.crs
+            raster_transform = ras.transform
+            transformer = Transformer.from_crs(project.target_srs.ExportToWkt(), raster_crs.to_wkt(), always_xy=True)
+            left, bottom, right, top = transformer.transform_bounds(left=minx, bottom=miny, right=maxx, top=maxy)
+
+            window = from_bounds(left, bottom, right, top, transform=raster_transform)
+            xoff, yoff = int(window.col_off), int(window.row_off)
+            xsize, ysize = int(window.width), int(window.height)
+
+        ds = gdal.Translate(
+            destName=self.local_path,
+            srcDS=vrtds,
+            srcWin=[xoff, yoff, xsize, ysize]
+        )
         vrtds = None
+        polygons_ds = None
         ds = None
-        imported_file_path = self.import_raster(source=self.local_path, progress=progress )
+        imported_file_path = self.import_raster(source=self.local_path, progress=progress)
         assert imported_file_path == self.local_path, f'The local_path differs from {imported_file_path}'
-        self._compute_affected_()
+        self._compute_affected_(progress=progress)
 
 
     def import_raster(self, source=None, **kwargs):
@@ -437,7 +462,6 @@ class PopulationVariable(Variable):
         path, file_name = os.path.split(source)
         fname, ext = os.path.splitext(file_name)
         imported_local_path = os.path.join(path, f'{fname}_imported{ext}')
-
         geo.import_raster(
             source=source,
             dst=imported_local_path,
@@ -451,16 +475,26 @@ class PopulationVariable(Variable):
         os.rename(imported_local_path, source)
         return source
 
-    def _compute_affected_(self):
+    def _compute_affected_(self, progress=None):
+
+
+
         project = Project(os.getcwd())
-        if geo.is_raster(self.local_path) and project.raster_mask is not None :
+        if geo.is_raster(self.local_path) and project.raster_mask is not None:
+            task = progress.add_task(description="Computing affected version using GDAL calc")
+
+            def progress_callback(complete, message, data, progress=progress, task=task):
+                if progress is not None and task is not None:
+                    progress.update(task, completed=int(complete * 100))
 
             affected_local_path = self.affected_path
+
             ds = Calc(calc='local_path*mask', outfile=affected_local_path, projectionCheck=True, format='GTiff',
                       creation_options=GTIFF_CREATION_OPTIONS, quiet=False, overwrite=True,
                       NoDataValue=None,
-                      local_path=self.local_path, mask=project.raster_mask)
+                      local_path=self.local_path, mask=project.raster_mask, progress_callback=progress_callback)
             ds = None
+            progress.remove_task(task)
             return affected_local_path
 
     def interpolate_template(self, template=None, **kwargs):

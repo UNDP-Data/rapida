@@ -117,7 +117,7 @@ def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url=OVERP
                     if adm_level > admin_level: continue
                     undp_adm_level = osmadml2undpadml(osm_level=adm_level)
                     if not result:
-                        result['iso3'] = tags['ISO3166-1:alpha3']
+                        result['iso3'] = tags.get('ISO3166-1:alpha3', None)
                     if undp_adm_level in undp_admid_levels: continue
                     result[f'admin{undp_adm_level}_name'] = tags['name']
         return result
@@ -282,18 +282,19 @@ if __name__ == '__main__':
     logging.basicConfig()
     logger.setLevel(logging.INFO)
 
-    bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
+    # bbox = 33.681335,-0.131836,35.966492,1.158979 #KEN/UGA
     #bbox = 31.442871,18.062312,42.714844,24.196869 # EGY/SDN
     #bbox = 15.034157,49.282809,16.02842,49.66207 # CZE
+    bbox = 65.742188,5.441022,90.351563,35.029996
 
-    c = fetch_admin(bbox=bbox, admin_level=2, osm_level=4, clip=False)
-    if c is not None:
-        with open('/tmp/abb.geojson', 'wt') as out:
-            out.write(json.dumps(c, indent=4))
-        polygon = bbox_to_geojson_polygon(*bbox)
-        l = {"type":"FeatureCollection", "features":[polygon]}
-        with open('/tmp/bb.geojson', 'w') as out:
-            out.write(json.dumps(l,indent=4))
+    # c = fetch_admin(bbox=bbox, admin_level=2, osm_level=4, clip=False)
+    # if c is not None:
+    #     with open('/tmp/abb.geojson', 'wt') as out:
+    #         out.write(json.dumps(c, indent=4))
+    polygon = bbox_to_geojson_polygon(*bbox)
+    l = {"type":"FeatureCollection", "features":[polygon]}
+    with open('/tmp/bb.geojson', 'w') as out:
+        out.write(json.dumps(l,indent=4))
 
 
 

@@ -2,23 +2,37 @@ import json
 import logging
 import os
 import asyncio
+import shutil
+import tempfile
 import time
-import re
 import httpx
 import pystac
 from typing import Dict
-from datetime import datetime
 from osgeo import ogr, osr, gdal
 import rasterio
+from rasterio.mask import mask
+from rasterio.warp import calculate_default_transform, reproject, Resampling
 import numpy as np
+import geopandas as gpd
 from rich.progress import Progress
 
-from rapida.components.landuse.prediction import predict
+from rapida.components.landuse.prediction.cloud import CloudDetection
+from rapida.components.landuse.prediction.landuse import LandusePrediction
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
 
 logger = logging.getLogger(__name__)
+
+
+def gdal_callback(complete, message, data):
+    if data:
+        progressbar, task, timeout_event = data
+        if progressbar is not None and task is not None:
+            progressbar.update(task, completed=int(complete * 100))
+        if timeout_event and timeout_event.is_set():
+            logger.info(f'GDAL was signalled to stop...')
+            return 0
 
 
 class SentinelItem(object):
@@ -45,19 +59,16 @@ class SentinelItem(object):
     @property
     def id(self)->str:
         """
-        ID for the class instance. It uses grid:code for unique ID.
+        ID for the class instance. It uses item ID of STAC
         """
-        tile_id = self._item.properties.get("grid:code")
-        if tile_id is None:
-            tile_id = self._item.id
-        return tile_id
+        return self._item.id
 
     @property
     def target_asset(self) -> dict[str, str]:
         """
         Dictionary of Earth search asset name and band name
         """
-        return SENTINEL2_ASSET_MAP
+        return self._target_asset
 
     @property
     def target_srs(self) -> osr.SpatialReference:
@@ -65,16 +76,16 @@ class SentinelItem(object):
         Get target spatial reference used in the mask layer
         """
         if self._target_srs is None:
-            ds = ogr.Open(self.mask_file)
-            if ds is None:
-                raise RuntimeError(f"Could not open GeoPackage: {self.mask_file}")
-            layer = ds.GetLayerByName(self.mask_layer)
-            if layer is None:
-                raise RuntimeError(f"Layer '{self.mask_layer}' not found in GeoPackage")
-            srs = layer.GetSpatialRef()
-            if srs is None:
-                raise RuntimeError(f"No CRS found in layer '{self.mask_layer}'")
-            self._target_srs = srs
+            with ogr.Open(self.mask_file) as ds:
+                if ds is None:
+                    raise RuntimeError(f"Could not open GeoPackage: {self.mask_file}")
+                layer = ds.GetLayerByName(self.mask_layer)
+                if layer is None:
+                    raise RuntimeError(f"Layer '{self.mask_layer}' not found in GeoPackage")
+                srs = layer.GetSpatialRef()
+                if srs is None:
+                    raise RuntimeError(f"No CRS found in layer '{self.mask_layer}'")
+                self._target_srs = srs
         return self._target_srs
 
     @property
@@ -121,8 +132,8 @@ class SentinelItem(object):
         """
         if len(self._asset_files) == 0:
             return {}
-        sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
-        return sorted_dict
+        # sorted_dict = dict(sorted(self._asset_files.items(), key=lambda x: int(x[0][1:])))
+        return self._asset_files
 
 
     @property
@@ -135,6 +146,16 @@ class SentinelItem(object):
         predict_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "landuse_prediction.tif")
         return predict_file
 
+    @property
+    def cloud_mask_file(self) -> str:
+        """
+        Get the file path of the cloud mask file. If download_assets function is not called, it returns empty string.
+        """
+        if len(self.asset_files) == 0:
+            return ""
+        cloud_mask_file = os.path.join(os.path.dirname(list(self.asset_files.values())[0]), "cloud_mask.tif")
+        return cloud_mask_file
+
 
     def __init__(self, item: pystac.Item, mask_file: str, mask_layer: str):
         """
@@ -145,6 +166,7 @@ class SentinelItem(object):
         :param mask_layer: layer name to clip by
         """
         self.item = item
+        self._target_asset = SENTINEL2_ASSET_MAP
         self._target_srs = None
         self._asset_files = {}
         self.mask_file = mask_file
@@ -152,6 +174,9 @@ class SentinelItem(object):
         if not self.is_valid_item():
             # if item does not have all required assets, raise error.
             raise RuntimeError(f"This STAC item does not contain required assets.")
+
+    def __del__(self):
+        self.__target_srs = None
 
     def is_valid_item(self):
         """
@@ -162,7 +187,7 @@ class SentinelItem(object):
     def download_assets(self,
                         download_dir: str,
                         progress=None,
-                        max_workers: int = 9) -> Dict[str, str]:
+                        max_workers: int = 12) -> Dict[str, str]:
         """
         Download all required bands for this STAC item in parallel.
 
@@ -172,7 +197,7 @@ class SentinelItem(object):
         :return: Dictionary of band name -> downloaded file path
         """
         self._asset_files = {
-            band_name: os.path.join(download_dir, self.id, f"{band_name}.tif")
+            band_name: os.path.join(download_dir, self.id, f"{band_name}.jp2")
             for asset_key, band_name in self.target_asset.items()
         }
 
@@ -187,6 +212,8 @@ class SentinelItem(object):
                     # if different item id, delete old prediction file if exists
                     if os.path.exists(self.predicted_file):
                         os.remove(self.predicted_file)
+                    if os.path.exists(self.cloud_mask_file):
+                        os.remove(self.cloud_mask_file)
 
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -204,14 +231,12 @@ class SentinelItem(object):
                 for attempt in range(1, max_retries + 1):
                     async with semaphore:
                         try:
-                            result = await self._download_asset(
+                            await self._download_asset(
                                 file_url=url,
                                 target=target_path,
-                                target_srs=self.target_srs,
-                                no_data_value=self.asset_nodata[band_name],
                                 progress=progress,
                             )
-                            # self._asset_files[band_name] = result
+
                             return
                         except Exception as e:
                             logger.warning(f"[{band_name}] Attempt {attempt}/{max_retries} failed: {e}")
@@ -249,20 +274,202 @@ class SentinelItem(object):
 
         :return: output file path
         """
+
+        landuse_prediction = LandusePrediction(item=self.item)
+
+        temp_file = f"{self.predicted_file}.tmp"
         try:
-            img_paths = list(self.asset_files.values())
-            predict(
-                img_paths=img_paths,
-                output_file_path=self.predicted_file,
-                # num_workers=1,
-                progress=progress,
-            )
-            return self.predicted_file
+
+            img_paths = [self.asset_files[band] for band in landuse_prediction.target_bands]
+            landuse_prediction.predict(img_paths=img_paths,
+                                       output_file_path=temp_file,
+                                       mask_file=self.mask_file,
+                                       mask_layer=self.mask_layer,
+                                       progress=progress,)
+
+            return temp_file
         except Exception as e:
             # delete incomplete predicted file if error occurs
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
             if os.path.exists(self.predicted_file):
                 os.remove(self.predicted_file)
             raise e
+
+    def detect_cloud(self, force=False, progress=None)->str:
+        """
+        Detect cloud from downloaded assets
+
+        :param force: force to do cloud detection even if cloud cover is less than 1 percent
+        :return: output file path
+        """
+        # Check cloud cover percentage from item properties
+        cloud_cover = self.item.properties.get('eo:cloud_cover', None)
+
+        if force == False and cloud_cover is not None and cloud_cover < 1.0:
+            logger.warning(f"{self.id}: Cloud cover is {cloud_cover}% (< 1%). Skipping cloud detection.")
+            return self.cloud_mask_file
+
+        cloud_detection = CloudDetection(item=self.item)
+
+        try:
+            img_paths = [self.asset_files[band] for band in cloud_detection.target_bands]
+
+            cloud_detection.predict(img_paths=img_paths,
+                                    output_file_path=self.cloud_mask_file,
+                                    mask_file=self.mask_file,
+                                    mask_layer=self.mask_layer,
+                                    progress=progress,)
+            return self.cloud_mask_file
+        except Exception as e:
+            # delete incomplete predicted file if error occurs
+            if os.path.exists(self.cloud_mask_file):
+                os.remove(self.cloud_mask_file)
+            raise e
+
+    def mask_cloud_pixels(self, input_file: str, output_file: str, progress=None)-> str:
+        """
+        Mask cloud pixels from land use prediction image
+
+        :param input_file: input file path of land use prediction image
+        :param output_file: output file path of mask prediction image
+        :return: output file path of mask prediction image
+        """
+        if not os.path.exists(self.cloud_mask_file):
+            return self._reproject_data(input_file, output_file)
+
+        mask_task = None
+        if progress:
+            mask_task = progress.add_task(f"[cyan]Starting masking cloud from land use prediction image...", total=None)
+
+        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
+            temp_masked_file = tmp.name
+
+        try:
+            if mask_task is not None:
+                progress.update(mask_task, description="[cyan]Applying cloud mask...")
+            self._apply_cloud_mask(input_file, temp_masked_file)
+            if mask_task is not None:
+                progress.update(mask_task, description="[cyan]Reprojecting land use...")
+            self._reproject_data(temp_masked_file, output_file)
+        except Exception as e:
+            raise e
+        finally:
+            if os.path.exists(temp_masked_file):
+                os.unlink(temp_masked_file)
+            if mask_task is not None:
+                progress.remove_task(mask_task)
+        return output_file
+
+    def _apply_cloud_mask(self, input_file: str, output_file: str) -> None:
+        """
+        Apply cloud mask to input raster without reprojection
+
+        :param input_file: input file path
+        :param output_file: output file path for masked data
+        """
+        # Get mask geometry for both files
+        gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
+
+        with rasterio.open(input_file) as pred_src:
+            # Project gdf to match prediction CRS
+            gdf = gdf.to_crs(pred_src.crs)
+            nodata_value = pred_src.nodata if pred_src.nodata is not None else 255
+            colormap = pred_src.colormap(1)
+            band_tags = pred_src.tags(1)
+
+            # Crop prediction data to mask geometry
+            pred_crop, pred_transform = mask(pred_src, gdf.geometry, crop=True, filled=True, nodata=nodata_value)
+
+            profile = pred_src.profile.copy()
+
+        with rasterio.open(self.cloud_mask_file) as cloud_src:
+            # Crop cloud mask to same geometry
+            cloud_crop, _ = mask(cloud_src, gdf.geometry, crop=True, filled=True, nodata=1)
+
+        # Apply cloud mask
+        masked_data = np.full_like(pred_crop[0], fill_value=nodata_value)
+        valid_mask = (cloud_crop[0] == 0)
+        masked_data[valid_mask] = pred_crop[0][valid_mask]
+
+        # Update profile for cropped data
+        profile.update({
+            'transform': pred_transform,
+            'width': masked_data.shape[1],
+            'height': masked_data.shape[0],
+            'nodata': nodata_value,
+        })
+
+        # Write masked data
+        with rasterio.open(output_file, 'w', **profile) as dst:
+            if colormap:
+                dst.write_colormap(1, colormap)
+            if band_tags:
+                dst.update_tags(1, **band_tags)
+            dst.write(masked_data, 1)
+
+    def _reproject_data(self, input_file: str, output_file: str) -> str:
+        """
+        Reproject raster data to project mask layer CRS
+
+        :param input_file: input file path
+        :param output_file: output file path
+        :return: output file path
+        """
+        # Read mask file and get target CRS
+        gdf = gpd.read_file(self.mask_file, layer=self.mask_layer)
+        target_crs = gdf.crs.to_string()
+
+        with rasterio.open(input_file) as src:
+            src_crs = src.crs
+            nodata_value = src.nodata if src.nodata is not None else 255
+            band_tags = src.tags(1)
+
+            src_transform = src.transform
+            left, bottom, right, top = src.bounds
+
+
+        # Check if CRS are the same
+        if src_crs.to_string() == target_crs:
+            logger.debug("Source and target CRS are identical - no reprojection needed")
+            # Just copy the file if CRS are the same
+            shutil.copy2(input_file, output_file)
+            return output_file
+
+        # Reproject to target CRS (mask layer CRS)
+        src_pixel_size = abs(src_transform.a)
+        dst_transform, dst_width, dst_height = calculate_default_transform(
+            src_crs, target_crs, src.width, src.height, left, bottom, right, top, resolution=src_pixel_size,
+        )
+
+        # Calculate destination bounds for comparison
+        dst_left = dst_transform.c
+        dst_top = dst_transform.f
+        dst_right = dst_left + dst_width * dst_transform.a
+        dst_bottom = dst_top + dst_height * dst_transform.e
+
+        warp_options = gdal.WarpOptions(
+            dstSRS=target_crs,
+            srcSRS=src_crs.to_string(),
+            srcNodata=nodata_value,
+            dstNodata=nodata_value,
+            resampleAlg='near',
+            format='GTiff',
+            creationOptions=['COMPRESS=ZSTD', 'TILED=YES'],
+            outputBounds=[dst_left, dst_bottom, dst_right, dst_top],  # Exact bounds
+            xRes=src_pixel_size,
+            yRes=src_pixel_size,
+            targetAlignedPixels=True,
+        )
+
+        res = gdal.Warp(output_file, input_file, options=warp_options)
+        res = None
+
+        with rasterio.open(output_file, "r+") as dst:
+            if band_tags:
+                dst.update_tags(1, **band_tags)
+
+        return output_file
 
 
     def _s3_to_http(self, url):
@@ -281,26 +488,10 @@ class SentinelItem(object):
             return url
 
 
-    def _harmonize_to_old(self, data, nodata_value):
-        """
-        Harmonize new Sentinel-2 data to the old baseline by subtracting a fixed offset.
-        described at https://planetarycomputer.microsoft.com/dataset/sentinel-2-l2a#Baseline-Change
-
-        :param data: Sentinel-2 data to harmonize
-        :param nodata_value: nodata value to exclude from harmonization
-        :return: harmonized data. The input data with an offset of 1000 subtracted.
-        """
-        offset = 1000
-        harmonized = np.where(data != nodata_value, data - offset, data)
-        return harmonized
-
-
     async def _download_asset(
             self,
             file_url: str,
             target: str,
-            target_srs: str,
-            no_data_value: int = 0,
             progress=None,
     ) -> str:
         """
@@ -332,103 +523,45 @@ class SentinelItem(object):
                     raise ValueError("No content-length in response headers")
                 remote_content_length = int(remote_content_length)
 
-            if os.path.exists(download_file):
-                with rasterio.open(download_file) as src:
-                    meta_content_length = src.tags().get("JP2_CONTENT_LENGTH")
-                    if meta_content_length and int(meta_content_length) == remote_content_length:
-                        logging.debug(f"file already exists. Skipped: {download_file}")
-                        return download_file
-
-            pattern = r"/(\d{4})/(\d{1,2})/(\d{1,2})/"
-            match = re.search(pattern, file_url)
-            if match:
-                year, month, day = map(int, match.groups())
-                acquisition_date = datetime(year, month, day)
-                logging.debug("Extracted acquisition date: %s", acquisition_date)
-            else:
-                logging.error("Failed to extract date from file_url: %s", file_url)
-                raise ValueError(f"Could not extract date from URL: {file_url}")
-
-            cutoff = datetime(2022, 1, 25)
-
-            async with httpx.AsyncClient() as client:
-                async with client.stream("GET", file_url) as response:
-                    response.raise_for_status()
-                    total = int(response.headers.get("content-length", 0))
-
-                    if progress is not None and download_task is not None:
-                        progress.update(download_task, total=total)
-
-                    with open(jp2_file, "wb") as f:
-                        async for chunk in response.aiter_bytes():
-                            f.write(chunk)
-                            if progress is not None and download_task is not None:
-                                progress.update(download_task, advance=len(chunk))
-
-            if progress and download_task:
-                progress.update(download_task, description=f"[blue] Reprojecting {jp2_file}...")
-
-            with rasterio.open(jp2_file) as src:
-                data = src.read()
-
-                nodata = src.nodata if src.nodata is not None else no_data_value
-
-                if acquisition_date >= cutoff:
-                    data = self._harmonize_to_old(data, nodata)  # Ensure harmonize_to_old is defined
-
-                profile = src.profile
-                profile.update(driver="GTiff", dtype=data.dtype, count=src.count)
-
-                vsimem_path = "/vsimem/in.tif"
-                with rasterio.MemoryFile() as memfile:
-                    with memfile.open(**profile) as dataset:
-                        dataset.write(data)
-                    gdal.FileFromMemBuffer(vsimem_path, memfile.read())
-
-                xRes = yRes = self.min_resolution
-
-                warp_options = gdal.WarpOptions(
-                    dstSRS=target_srs.ExportToWkt(),
-                    format="GTiff",
-                    xRes=xRes,
-                    yRes=yRes,
-                    creationOptions=["COMPRESS=ZSTD", "TILED=YES"],
-                    srcNodata=nodata,
-                    dstNodata=nodata,
-                    resampleAlg="near",
-                    cutlineDSName=self.mask_file,
-                    cutlineLayer=self.mask_layer,
-                    cropToCutline=True,
-                )
-
-                rds = gdal.Warp(destNameOrDestDS=download_file,
-                                srcDSOrSrcDSTab=vsimem_path,
-                                options=warp_options)
-                metadata = {"JP2_CONTENT_LENGTH": str(remote_content_length)}
-                item_datetime = self.item.datetime.isoformat() if self.item.datetime else None
-                if item_datetime is not None:
-                    metadata["ITEM_DATETIME"] = item_datetime
-                cloud_cover = self.item.properties.get("eo:cloud_cover")
-                if cloud_cover is not None:
-                    metadata["CLOUD_COVER"] = str(cloud_cover)
-                rds.SetMetadata(metadata)
-                gdal.Unlink(vsimem_path)
-                rds = None
-        finally:
             if os.path.exists(jp2_file):
-                os.remove(jp2_file)
+                local_file_size = os.path.getsize(jp2_file)
+                if local_file_size == remote_content_length:
+                    logging.debug(f"File already exists and size matches. Skipped: {jp2_file}")
+                    return jp2_file
+                else:
+                    logging.debug(f"File size mismatch. Removing local file: {jp2_file}")
+                    os.remove(jp2_file)
+
+            if not os.path.exists(jp2_file):
+                async with httpx.AsyncClient() as client:
+                    async with client.stream("GET", file_url) as response:
+                        response.raise_for_status()
+                        total = int(response.headers.get("content-length", 0))
+
+                        if progress is not None and download_task is not None:
+                            progress.update(download_task, total=total)
+
+                        with open(jp2_file, "wb") as f:
+                            async for chunk in response.aiter_bytes():
+                                f.write(chunk)
+                                if progress is not None and download_task is not None:
+                                    progress.update(download_task, advance=len(chunk))
+
+            return jp2_file
+        finally:
             if progress and download_task:
                 progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
                 progress.remove_task(download_task)
-
-        return download_file
 
 
 if __name__ == '__main__':
     setup_logger()
 
-    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
-    mask_file = "/data/kigali_small/data/kigali_small.gpkg"
+    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_36MTC_20240819_0_L1C"
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRU_20250421_0_L1C"
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
+    mask_file = "/data/rwanda_tests/data/rwanda_tests.gpkg"
     mask_layer = "polygons"
     download_dir = "/data/sentinel_tests"
 
@@ -445,7 +578,19 @@ if __name__ == '__main__':
         downloaded_files = list(sentinel_item.asset_files.values())
         logger.info(f"downloaded files: {downloaded_files}")
 
-        sentinel_item.predict(progress=progress)
+        sentinel_item.detect_cloud(progress=progress, force=True)
 
         t3 = time.time()
-        logger.info(f"prediction time: {t3 - t2}, total time: {t3 - t1}")
+        logger.info(f"cloud detection time: {t3 - t2}")
+
+        temp_prediction_file = sentinel_item.predict(progress=progress)
+
+        t4 = time.time()
+        logger.info(f"landuse prediction time: {t4 - t3}")
+
+        # temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
+        sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file, progress=progress)
+
+        t5 = time.time()
+        logger.info(f"cloud masking time: {t5 - t4}, total time: {t5 - t1}")
+

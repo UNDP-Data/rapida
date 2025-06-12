@@ -8,7 +8,7 @@ RUN apt-get update && \
     make -j$(nproc)
 
 # Stage 2: Final image based on GDAL
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.10.0
+FROM ghcr.io/osgeo/gdal:ubuntu-small-3.10.0 AS base
 
 
 # Set environment vars
@@ -18,7 +18,16 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Install app dependencies
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3-pip python3-gdal pipenv gcc git cmake libgeos-dev && \
+    apt-get install -y --no-install-recommends \
+      python3-pip \
+      python3-gdal \
+      python3-dev \
+      pipenv \
+      gcc \
+      g++ \
+      git \
+      cmake \
+      libgeos-dev && \
     apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m pip install playwright --break-system-packages && \
@@ -42,7 +51,16 @@ RUN pipenv --python 3 --site-packages
 
 COPY . .
 
+# Docker image for development
+FROM base AS dev
+
+RUN pipenv run pip install -e .
+
+# Docker image for production
+FROM base AS prod
+
 RUN pipenv run pip install .
+
 
 
 

@@ -82,7 +82,7 @@ environment (land use/cover, livestock), socio-economical environment (GDP, rela
 
 Sourced from [WorldPop](https://www.worldpop.org/) project, the components provides country based population data in 
 raster format. The constrained (conditioned by buildings), UN adjusted version was selected as it was considered the best
-match. As the most recent population dataset was generated for 2020 rapida is forecasting the 2020 population using 
+match. As the most recent population dataset was generated for 2020 rapida is forecasting the 2025 population using 
 national data from World Bank that is available for several year in the past in respect to 2020. 
 From there a coefficient is computed by dividing the target or requested year (ex 2025) to 2020 and the population
 statistics computed for 2020 or base year are multiplied with this coefficient.

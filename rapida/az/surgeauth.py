@@ -92,7 +92,7 @@ def is_called_from_click():
 
 class SurgeTokenCredential(TokenCredential):
 
-    KEY = derive_key_from_username(os.environ.get('USER', None))
+    KEY = derive_key_from_username(os.getlogin())
     TOKEN_FILE_NAME = f'{base64.urlsafe_b64encode(KEY).decode('utf-8')[:25]}.bin'
     STORAGE_SCOPE = "https://storage.azure.com/.default"
 

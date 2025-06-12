@@ -233,6 +233,7 @@ def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
                 src_srs = srcds.GetSpatialRef()
                 assert proj_are_equal(src_srs=src_srs, dst_srs=poly_srs), f'{src_raster}  features wrong projection'
                 var_name, operation = vars_ops[n]
+                progress_callback = None
                 if progress is not None:
                     task = progress.add_task(description=f"Running zonalstats/{operation} for {var_name}")
                     def progress_callback(completed, message, progress=progress, task=task):

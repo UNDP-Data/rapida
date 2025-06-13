@@ -16,6 +16,8 @@ from requests_oauthlib import OAuth2Session
 import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import json
+import getpass
+
 
 logger = logging.getLogger(__name__)
 
@@ -91,11 +93,8 @@ def is_called_from_click():
 
 
 class SurgeTokenCredential(TokenCredential):
-    import getpass
-
     username = getpass.getuser()
     KEY = derive_key_from_username(username)
-    # KEY = derive_key_from_username(os.getlogin())
     TOKEN_FILE_NAME = f'{base64.urlsafe_b64encode(KEY).decode('utf-8')[:25]}.bin'
     STORAGE_SCOPE = "https://storage.azure.com/.default"
 

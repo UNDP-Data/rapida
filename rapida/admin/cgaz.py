@@ -80,19 +80,18 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
 
         progress.update(task, advance=1, description="[green]Downloaded admin data", refresh=True)
         with gdal.OpenEx(destination_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as ds:
-
             layer = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
-            countries = set([f.GetField("iso_3") for f in layer])
-            if len(countries) == 0:
-                raise Exception(f"No countries were found in {bbox}")
+            iso3_field_index = layer.GetLayerDefn().GetFieldIndex("iso3")
 
-            iso3_field_index = layer.GetLayerDefn().GetFieldIndex("iso_3")
-            if iso3_field_index >= 0:
-                new_fdefn = ogr.FieldDefn("iso3", ogr.OFTString)
-                layer.CreateField(new_fdefn)
-            i = layer.GetLayerDefn().GetFieldIndex("shapeID")
-            if i >= 0:
-                layer.DeleteField(i)
+            if iso3_field_index >=0:
+                countries = set([f.GetField("iso3") for f in layer])
+                if len(countries) == 0:
+                    raise Exception(f"No countries were found in {bbox}")
+            else:
+                raise Exception(f'{url} does not contain iso3 field!')
+
+            h3id_field_index = layer.GetLayerDefn().GetFieldIndex("h3id")
+            if h3id_field_index < 0:
                 h3id_field = ogr.FieldDefn("h3id", ogr.OFTInteger64)
                 layer.CreateField(h3id_field)
                 for feature in layer:
@@ -101,13 +100,8 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                     h3id = h3.latlng_to_cell(lat=centroid.GetY(), lng=centroid.GetX(),
                                       res=7)
                     feature.SetField("h3id", h3id)
-                    iso3_country_code = feature.GetField("iso_3")
-                    feature.SetField("iso3", iso3_country_code)
                     layer.SetFeature(feature)
-                iso3_field_index = layer.GetLayerDefn().GetFieldIndex("iso_3")
-                layer.DeleteField(iso3_field_index)
-            ds.FlushCache()
-            ds.SyncToDisk()
+                ds.FlushCache()
         progress.update(task, advance=1, description="[green]Download Completed", refresh=True)
         return None
 

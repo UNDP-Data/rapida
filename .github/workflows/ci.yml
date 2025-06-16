@@ -62,7 +62,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=false
 
       - name: Export digest
         run: |

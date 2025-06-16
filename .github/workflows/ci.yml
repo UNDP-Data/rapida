@@ -17,6 +17,16 @@ jobs:
       labels: ${{ steps.meta.outputs.labels }}
     env:
       IMAGE_NAME: ${{ github.repository }}
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+        include:
+          - platform: linux/amd64
+            arch: amd64
+          - platform: linux/arm64
+            arch: arm64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -35,44 +45,52 @@ jobs:
         with:
           images: ${{ env.IMAGE_NAME }}
 
-      - name: Build Docker image
+      - name: Build Docker image for ${{ matrix.arch }}
         uses: docker/build-push-action@v5
         with:
           context: .
           file: Dockerfile
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=docker,dest=${{ runner.temp }}/myimage.tar
-      - name: Upload artifact
+          outputs: type=docker,dest=${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
+      - name: Upload ${{ matrix.arch }} artifact
         uses: actions/upload-artifact@v4
         with:
-          name: myimage
-          path: ${{ runner.temp }}/myimage.tar
+          name: myimage-${{ matrix.arch }}
+          path: ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
 
   test:
     name: Test CLI
     needs: build-image
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        if: matrix.arch == 'arm64'
+        uses: docker/setup-qemu-action@v3
+
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: myimage
+          name: myimage-${{ matrix.arch }}
           path: ${{ runner.temp }}
 
       - name: Load image
         run: |
-          docker load --input ${{ runner.temp }}/myimage.tar
+          docker load --input ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
           docker image ls -a
 
       - name: Run tests in container
         run: |
           docker run --rm \
+            --platform linux/${{ matrix.arch }} \
             -e USER=docker \
             --entrypoint /bin/bash \
             ${{ needs.build-image.outputs.tags }} \
@@ -90,9 +108,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        arch: [ amd64, arm64 ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -100,12 +116,12 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: myimage
+          name: myimage-${{ matrix.arch }}
           path: ${{ runner.temp }}
 
       - name: Load image
         run: |
-          docker load --input ${{ runner.temp }}/myimage.tar
+          docker load --input ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
           docker image ls -a
 
       - name: Log into ACR
@@ -114,10 +130,10 @@ jobs:
           registry: ${{ secrets.ACR_ENDPOINT }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Load Docker image and push to ACR ${{ matrix.platform }}
+      - name: Load Docker image and push to ACR
         run: |
           docker tag ${{ needs.build-image.outputs.tags }} ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }}
-          docker push ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.platform }}
+          docker push ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.arch }}
 
   deploy-github:
     name: Build and deploy to GitHub container registry
@@ -133,9 +149,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
+        arch: [ amd64, arm64 ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -143,12 +157,12 @@ jobs:
       - name: Download artifact
         uses: actions/download-artifact@v4
         with:
-          name: myimage
+          name: myimage-${{ matrix.arch }}
           path: ${{ runner.temp }}
 
       - name: Load image
         run: |
-          docker load --input ${{ runner.temp }}/myimage.tar
+          docker load --input ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
           docker image ls -a
 
       - name: Log in to the Container registry
@@ -158,7 +172,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Load Docker image and push to ACR ${{ matrix.platform }}
+      - name: Load Docker image and push to Container Registry
         run: |
           docker tag ${{ needs.build-image.outputs.tags }} ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }}
-          docker push ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.platform }}
+          docker push ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.arch }}

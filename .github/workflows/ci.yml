@@ -21,6 +21,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
@@ -37,6 +40,7 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          platforms: linux/amd64,linux/arm64
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
@@ -84,6 +88,11 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -105,10 +114,10 @@ jobs:
           registry: ${{ secrets.ACR_ENDPOINT }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Load Docker image and push to ACR
+      - name: Load Docker image and push to ACR ${{ matrix.platform }}
         run: |
           docker tag ${{ needs.build-image.outputs.tags }} ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }}
-          docker push ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }}
+          docker push ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.platform }}
 
   deploy-github:
     name: Build and deploy to GitHub container registry
@@ -122,6 +131,11 @@ jobs:
     permissions:
       contents: write
       packages: write
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -144,7 +158,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Load Docker image and push to ACR
+      - name: Load Docker image and push to ACR ${{ matrix.platform }}
         run: |
           docker tag ${{ needs.build-image.outputs.tags }} ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }}
-          docker push ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }}
+          docker push ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.platform }}

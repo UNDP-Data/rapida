@@ -8,6 +8,9 @@ on:
       - "v*"
   pull_request:
 
+env:
+  REGISTRY_IMAGE: ${{ github.repository }}
+
 jobs:
   build-image:
     name: Build Docker Image
@@ -15,8 +18,6 @@ jobs:
     outputs:
       tags: ${{ steps.meta.outputs.tags }}
       labels: ${{ steps.meta.outputs.labels }}
-    env:
-      IMAGE_NAME: ${{ github.repository }}
     strategy:
       matrix:
         platform:
@@ -31,6 +32,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -39,13 +51,8 @@ jobs:
         with:
           driver: docker-container
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.IMAGE_NAME }}
-
-      - name: Build Docker image for ${{ matrix.arch }}
+      - name: Build and push by digest
+        id: build
         uses: docker/build-push-action@v5
         with:
           context: .
@@ -54,75 +61,100 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=docker,dest=${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
-      - name: Upload ${{ matrix.arch }} artifact
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: myimage-${{ matrix.arch }}
-          path: ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
   test:
     name: Test CLI
     needs: build-image
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [ amd64, arm64 ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up QEMU
-        if: matrix.arch == 'arm64'
-        uses: docker/setup-qemu-action@v3
-
-      - name: Download artifact
+      - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          name: myimage-${{ matrix.arch }}
-          path: ${{ runner.temp }}
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
-      - name: Load image
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create manifest list (local only)
+        working-directory: ${{ runner.temp }}/digests
         run: |
-          docker load --input ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
-          docker image ls -a
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
 
-      - name: Run tests in container
+      - name: Test amd64 image
         run: |
           docker run --rm \
-            --platform linux/${{ matrix.arch }} \
+            --platform linux/amd64 \
             -e USER=docker \
             --entrypoint /bin/bash \
-            ${{ needs.build-image.outputs.tags }} \
+            ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} \
+            -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
+
+      - name: Test arm64 image
+        run: |
+          docker run --rm \
+            --platform linux/arm64 \
+            -e USER=docker \
+            --entrypoint /bin/bash \
+            ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} \
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 
   deploy-acr:
     name: Build and deploy to Azure Container Registry
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
+    # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
     needs: build-image
     runs-on: ubuntu-latest
     environment:
       name: azure container registry
+    env:
+      REGISTRY_IMAGE: ${{ secrets.ACR_ENDPOINT }}/${{ github.repository }}
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        arch: [ amd64, arm64 ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download artifact
+      - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          name: myimage-${{ matrix.arch }}
-          path: ${{ runner.temp }}
-
-      - name: Load image
-        run: |
-          docker load --input ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
-          docker image ls -a
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Log into ACR
         uses: docker/login-action@v3
@@ -130,10 +162,30 @@ jobs:
           registry: ${{ secrets.ACR_ENDPOINT }}
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
-      - name: Load Docker image and push to ACR
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
         run: |
-          docker tag ${{ needs.build-image.outputs.tags }} ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }}
-          docker push ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.arch }}
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
   deploy-github:
     name: Build and deploy to GitHub container registry
@@ -144,26 +196,20 @@ jobs:
       name: github container registry
     env:
       REGISTRY: ghcr.io
+      REGISTRY_IMAGE: ghcr.io/${{ github.repository }}
     permissions:
       contents: write
       packages: write
-    strategy:
-      matrix:
-        arch: [ amd64, arm64 ]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download artifact
+      - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          name: myimage-${{ matrix.arch }}
-          path: ${{ runner.temp }}
-
-      - name: Load image
-        run: |
-          docker load --input ${{ runner.temp }}/myimage-${{ matrix.arch }}.tar
-          docker image ls -a
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -172,7 +218,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Load Docker image and push to Container Registry
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
         run: |
-          docker tag ${{ needs.build-image.outputs.tags }} ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }}
-          docker push ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }} --platform ${{ matrix.arch }}
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}

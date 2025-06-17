@@ -38,7 +38,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          push: false
+          load: true
 
       - name: Run tests in container
         run: |

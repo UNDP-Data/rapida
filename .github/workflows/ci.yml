@@ -101,7 +101,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,push-by-digest=true,name-canonical=true,name=${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }},push=true
 
       - name: Export digest
         run: |
@@ -225,7 +225,7 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,push-by-digest=true,name-canonical=true,name=${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }},push=true
 
       - name: Export digest
         run: |

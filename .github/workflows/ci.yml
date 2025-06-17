@@ -153,13 +153,14 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           TARGET_IMAGE_NAME=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | cut -d':' -f1)
+          echo "$TARGET_IMAGE_NAME"
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${TARGET_IMAGE_NAME}@sha256:%s ' *)
+            $(printf '$TARGET_IMAGE_NAME@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           TARGET_IMAGE_NAME=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | cut -d':' -f1)
-          docker buildx imagetools inspect ${TARGET_IMAGE_NAME}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect $TARGET_IMAGE_NAME:${{ steps.meta.outputs.version }}
 
   deploy-github:
     name: Merge and deploy to GitHub container registry
@@ -206,10 +207,11 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           TARGET_IMAGE_NAME=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | cut -d':' -f1)
+          echo "$TARGET_IMAGE_NAME"
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${TARGET_IMAGE_NAME}@sha256:%s ' *)
+            $(printf '$TARGET_IMAGE_NAME@sha256:%s ' *)
 
       - name: Inspect image
         run: |
           TARGET_IMAGE_NAME=$(echo "${{ steps.meta.outputs.tags }}" | head -n1 | cut -d':' -f1)
-          docker buildx imagetools inspect ${TARGET_IMAGE_NAME}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect $TARGET_IMAGE_NAME:${{ steps.meta.outputs.version }}

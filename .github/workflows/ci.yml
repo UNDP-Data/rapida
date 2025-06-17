@@ -49,8 +49,10 @@ jobs:
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 
   build-acr:
-    name: Build Docker Image
+    name: [ACR] Build Docker Image
     runs-on: ${{ matrix.runner }}
+    environment:
+      name: azure container registry
     strategy:
       matrix:
         platform:
@@ -117,7 +119,7 @@ jobs:
           retention-days: 1
 
   deploy-acr:
-    name: Merge and deploy to Azure Container Registry
+    name: [ACR] Merge and deploy to Azure Container Registry
     # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
     needs: [build-acr, test]
     runs-on: ubuntu-latest
@@ -165,8 +167,12 @@ jobs:
           docker buildx imagetools inspect ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}:${{ steps.meta.outputs.version }}
 
   build-github:
-    name: Build Docker Image
+    name: [GHCR] Build Docker Image
     runs-on: ${{ matrix.runner }}
+    environment:
+      name: github container registry
+    env:
+      REGISTRY: ghcr.io
     strategy:
       matrix:
         platform:
@@ -233,7 +239,7 @@ jobs:
           retention-days: 1
 
   deploy-github:
-    name: Merge and deploy to GitHub container registry
+    name: [GHCR] Merge and deploy to GitHub container registry
     # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
     needs: [build-github, test]
     runs-on: ubuntu-latest

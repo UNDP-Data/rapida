@@ -103,7 +103,6 @@ jobs:
           target: prod
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           provenance: false
-          sbom: false
 
       - name: Export digest
         run: |
@@ -229,7 +228,6 @@ jobs:
           target: prod
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
           provenance: false
-          sbom: false
 
       - name: Export digest
         run: |

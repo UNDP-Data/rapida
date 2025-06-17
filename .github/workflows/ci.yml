@@ -38,7 +38,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          load: true
+          push: false
 
       - name: Run tests in container
         run: |
@@ -121,7 +121,7 @@ jobs:
 
   deploy-acr:
     name: (ACR) Merge and deploy to Azure Container Registry
-    # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
     needs: [build-acr, test]
     runs-on: ubuntu-latest
     environment:
@@ -247,7 +247,7 @@ jobs:
 
   deploy-github:
     name: (GHCR) Merge and deploy to GitHub container registry
-    # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
+    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
     needs: [build-github, test]
     runs-on: ubuntu-latest
     environment:

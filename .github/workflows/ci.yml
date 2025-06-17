@@ -38,14 +38,14 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=docker,dest=${{ runner.temp }}/myimage.tar
+          load: true
 
       - name: Run tests in container
         run: |
           docker run --rm \
             -e USER=docker \
             --entrypoint /bin/bash \
-            ${{ needs.build-image.outputs.tags }} \
+            ${{ steps.meta.outputs.tags }} \
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 
   build:
@@ -138,7 +138,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_IMAGE }}
+          images: ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Log into ACR
         uses: docker/login-action@v3
@@ -155,7 +160,7 @@ jobs:
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
   deploy-github:
     name: Merge and deploy to GitHub container registry
@@ -184,7 +189,12 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_IMAGE }}
+          images: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -201,4 +211,4 @@ jobs:
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}

@@ -99,22 +99,21 @@ jobs:
           file: Dockerfile
           push: true
           platforms: ${{ matrix.platform }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,push-by-digest=true,name-canonical=true,name=${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }},push=true
 
       - name: Export digest
         run: |
-          mkdir -p ${{ runner.temp }}/digests
+          mkdir -p ${{ runner.temp }}/digests-acr
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
-          path: ${{ runner.temp }}/digests/*
+          name: digests-acr-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests-acr/*
           if-no-files-found: error
           retention-days: 1
 
@@ -132,8 +131,8 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-*
+          path: ${{ runner.temp }}/digests-acr
+          pattern: digests-acr-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -162,7 +161,7 @@ jobs:
           password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests
+        working-directory: ${{ runner.temp }}/digests-acr
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}@sha256:%s ' *)
@@ -224,22 +223,21 @@ jobs:
           file: Dockerfile
           push: true
           platforms: ${{ matrix.platform }}
-          tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          outputs: type=image,push-by-digest=true,name-canonical=true,name=${{ secrets.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }},push=true
 
       - name: Export digest
         run: |
-          mkdir -p ${{ runner.temp }}/digests
+          mkdir -p ${{ runner.temp }}/digests-ghcr
           digest="${{ steps.build.outputs.digest }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
-          path: ${{ runner.temp }}/digests/*
+          name: digests-ghcr-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests-ghcr/*
           if-no-files-found: error
           retention-days: 1
 
@@ -259,8 +257,8 @@ jobs:
       - name: Download digests
         uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-*
+          path: ${{ runner.temp }}/digests-ghcr
+          pattern: digests-ghcr-*
           merge-multiple: true
 
       - name: Set up Docker Buildx
@@ -289,7 +287,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests
+        working-directory: ${{ runner.temp }}/digests-ghcr
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}@sha256:%s ' *)

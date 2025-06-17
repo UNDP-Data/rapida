@@ -9,7 +9,7 @@ on:
   pull_request:
 
 env:
-  REGISTRY_IMAGE: ${{ github.repository }}
+  REGISTRY_IMAGE: $(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')"
 
 jobs:
   test:
@@ -153,12 +153,12 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "$(echo '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')@sha256:%s " *)
+            $(printf "$(echo '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE }}')@sha256:%s " *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            "$(echo '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]'):${{ steps.meta.outputs.version }}"
+            "$(echo '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE }}'):${{ steps.meta.outputs.version }}"
 
   deploy-github:
     name: Merge and deploy to GitHub container registry
@@ -205,9 +205,9 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "$(echo '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')@sha256:%s " *)
+            $(printf "$(echo '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}')@sha256:%s " *)
 
       - name: Inspect image
         run: |
           docker buildx imagetools inspect \
-            "$(echo '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]'):${{ steps.meta.outputs.version }}"
+            "$(echo '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE }}'):${{ steps.meta.outputs.version }}"

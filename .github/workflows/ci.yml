@@ -13,7 +13,7 @@ env:
 
 jobs:
   test:
-    name: Test CLI
+    name: Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -48,7 +48,7 @@ jobs:
             ${{ steps.meta.outputs.tags }} \
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 
-  build:
+  build-acr:
     name: Build Docker Image
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -58,10 +58,8 @@ jobs:
           - linux/arm64
         include:
           - platform: linux/amd64
-            arch: amd64
             runner: ubuntu-latest
           - platform: linux/arm64
-            arch: arm64
             runner: ubuntu-22.04-arm
     steps:
       - name: Checkout repository
@@ -77,12 +75,19 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY_IMAGE_LOWER }}
+          images: ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker-container
+
+      - name: Log into ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_ENDPOINT }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Build and push by digest
         id: build
@@ -90,12 +95,12 @@ jobs:
         with:
           context: .
           file: Dockerfile
-          push: false
+          push: true
           platforms: ${{ matrix.platform }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,push=false
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -114,7 +119,7 @@ jobs:
   deploy-acr:
     name: Merge and deploy to Azure Container Registry
     # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
-    needs: build
+    needs: [build-acr, test]
     runs-on: ubuntu-latest
     environment:
       name: azure container registry
@@ -141,11 +146,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       - name: Log into ACR
         uses: docker/login-action@v3
@@ -158,17 +158,84 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "$(echo '${{ env.REGISTRY_IMAGE_LOWER }}')@sha256:%s " *)
+            $(printf '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect \
-            "$(echo '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}'):${{ steps.meta.outputs.version }}"
+          docker buildx imagetools inspect ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}:${{ steps.meta.outputs.version }}
+
+  build-github:
+    name: Build Docker Image
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          echo "REGISTRY_IMAGE_LOWER=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker-container
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          platforms: ${{ matrix.platform }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          target: prod
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
   deploy-github:
     name: Merge and deploy to GitHub container registry
     # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
-    needs: build
+    needs: [build-github, test]
     runs-on: ubuntu-latest
     environment:
       name: github container registry
@@ -197,11 +264,6 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -214,9 +276,8 @@ jobs:
         working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "$(echo '${{ env.REGISTRY_IMAGE_LOWER }}')@sha256:%s " *)
+            $(printf '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}@sha256:%s ' *)
 
       - name: Inspect image
         run: |
-          docker buildx imagetools inspect \
-            "$(echo '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}'):${{ steps.meta.outputs.version }}"
+          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}:${{ steps.meta.outputs.version }}

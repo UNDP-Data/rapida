@@ -77,10 +77,13 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  test:
-    name: Test CLI
-    needs: build-image
+  merge:
+    name: Merge multi-platform images
     runs-on: ubuntu-latest
+    needs: build-image
+    outputs:
+      image-name: ${{ steps.meta.outputs.tags }}
+      image-digest: ${{ steps.merge.outputs.digest }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -91,9 +94,6 @@ jobs:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
           merge-multiple: true
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -109,11 +109,47 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
-      - name: Create manifest list (local only)
-        working-directory: ${{ runner.temp }}/digests
+      - name: Create manifest list and push to local registry
+        id: merge
+        working-directory: /tmp/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
+          
+          # Get the digest of the merged manifest
+          DIGEST=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} --format '{{.Manifest.Digest}}')
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+
+      - name: Export merged image
+        run: |
+          # Save the merged image as a tar file
+          docker save ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} -o /tmp/merged-image.tar
+
+      - name: Upload merged image
+        uses: actions/upload-artifact@v4
+        with:
+          name: merged-image-${{ steps.meta.outputs.version }}
+          path: ${{ runner.temp }}/merged-image.tar
+          if-no-files-found: error
+          retention-days: 1
+
+  test:
+    name: Test CLI
+    needs: merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download merged image
+        uses: actions/download-artifact@v4
+        with:
+          name: merged-image-${{ needs.merge.outputs.image-name }}
+          path: ${{ runner.temp }}/merged-image.tar
+
+      - name: Load Docker image
+        run: |
+          docker load -i ${{ runner.temp }}/merged-image.tar
 
       - name: Test amd64 image
         run: |
@@ -121,13 +157,13 @@ jobs:
             --platform linux/amd64 \
             -e USER=docker \
             --entrypoint /bin/bash \
-            ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} \
+            ${{ env.REGISTRY_IMAGE }}:${{ needs.merge.outputs.image-name }} \
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
 
   deploy-acr:
     name: Build and deploy to Azure Container Registry
     # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
-    needs: build-image
+    needs: merge
     runs-on: ubuntu-latest
     environment:
       name: azure container registry
@@ -138,12 +174,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download digests
+      - name: Download merged image
         uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-*
-          merge-multiple: true
+          name: merged-image-${{ needs.merge.outputs.image-name }}
+          path: ${{ runner.temp }}/merged-image.tar
+
+      - name: Load image
+        run: |
+          docker load --input ${{ runner.temp }}/myimage.tar
+          docker image ls -a
 
       - name: Log into ACR
         uses: docker/login-action@v3
@@ -152,34 +192,15 @@ jobs:
           username: ${{ secrets.ACR_USERNAME }}
           password: ${{ secrets.ACR_PASSWORD }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests
+      - name: Load Docker image and push to ACR
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker tag ${{ needs.build-image.outputs.tags }} ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }}
+          docker push ${{ secrets.ACR_ENDPOINT }}/${{ needs.build-image.outputs.tags }}
 
   deploy-github:
     name: Build and deploy to GitHub container registry
     # if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
-    needs: build-image
+    needs: merge
     runs-on: ubuntu-latest
     environment:
       name: github container registry
@@ -192,12 +213,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Download digests
+      - name: Download merged image
         uses: actions/download-artifact@v4
         with:
-          path: ${{ runner.temp }}/digests
-          pattern: digests-*
-          merge-multiple: true
+          name: merged-image-${{ needs.merge.outputs.image-name }}
+          path: ${{ runner.temp }}/merged-image.tar
+
+      - name: Load image
+        run: |
+          docker load --input ${{ runner.temp }}/myimage.tar
+          docker image ls -a
 
       - name: Log in to the Container registry
         uses: docker/login-action@v3
@@ -206,26 +231,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests
+      - name: Load Docker image and push to ACR
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY_IMAGE }}@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
+          docker tag ${{ needs.build-image.outputs.tags }} ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }}
+          docker push ${{ env.REGISTRY }}/${{ needs.build-image.outputs.tags }}

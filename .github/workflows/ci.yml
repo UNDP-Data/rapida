@@ -102,7 +102,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          provenance: false
 
       - name: Export digest
         run: |
@@ -227,7 +226,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           target: prod
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          provenance: false
 
       - name: Export digest
         run: |

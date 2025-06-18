@@ -121,12 +121,12 @@ class SurgeTokenCredential(TokenCredential):
 
     def _load_from_cache_(self):
         if os.path.exists(self._cache_file_):
-            self.token = decrypt_json(username=os.environ.get('USER', None), cache_file_path=self._cache_file_)
+            self.token = decrypt_json(username=self.username, cache_file_path=self._cache_file_)
 
     def _save_to_cache_(self):
         if not os.path.exists(self._cache_dir_):
             os.makedirs(self._cache_dir_, mode=0o700, exist_ok=True)
-        encrypt_json(json_data=self.token, username=os.environ.get('USER', None), cache_file_path=self._cache_file_)
+        encrypt_json(json_data=self.token, username=self.username, cache_file_path=self._cache_file_)
 
     async def fetch_token_async(self, *scope, username=None, password=None, mfa_confirmation_widget=None,
                                 quick_selectors_timeout=3000):

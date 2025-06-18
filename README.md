@@ -407,7 +407,6 @@ VERSION="main"
 timestamp=$(date +%s)
 docker run --rm -it \
   -u 1000:1000 \
-  -e USER=$USER \
   --name rapida$timestamp \
   -m 32GB \
   --cpus 8 \
@@ -468,7 +467,7 @@ There are several key parameters in the launcher that ensure this process is suc
 
 - rapida is installed as non-root in a virtual env created by pipenv and made available in the container as a regular script
 - the container is run with local logged in linux user using -u 1000:1000
-- the USER env variable is **REQUIRED** by rapida to store the auth file
+- the USER env variable is used in Jupyter lab server to pass user identification name to rapida to store the auth file in signed in user folder. However, it is not necessary to set this variable apart from Jupyter environment.
 - rapida is a project based tool that requires the command to be invoked from within the folder. The current user folder
  is always passed inside the container as the current working folder using -w flag
 - the /home folder is mounted to persist the config files between invoking multiple sessions
@@ -686,7 +685,7 @@ and as a result we recommend Windows users to use [WSL](https://learn.microsoft.
     
        REM Run Docker container
     
-       docker run --rm -it  -e USER=%USERNAME% --name rapida!TIMESTAMP! -m 2GB --cpus 1 -e GDAL_NUM_THREADS=2 -w "!WSL_PATH!" -v "!WSL_USERPROFILE!":/home ghcr.io/undp-data/rapida:main rapida %*
+       docker run --rm -it --name rapida!TIMESTAMP! -m 2GB --cpus 1 -e GDAL_NUM_THREADS=2 -w "!WSL_PATH!" -v "!WSL_USERPROFILE!":/home ghcr.io/undp-data/rapida:main rapida %*
     
        endlocal
        ``` 

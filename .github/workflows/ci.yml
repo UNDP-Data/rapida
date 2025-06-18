@@ -43,7 +43,6 @@ jobs:
       - name: Run tests in container
         run: |
           docker run --rm \
-            -e USER=docker \
             --entrypoint /bin/bash \
             ${{ steps.meta.outputs.tags }} \
             -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"

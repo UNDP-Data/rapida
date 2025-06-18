@@ -8,6 +8,8 @@ import os
 import shutil
 import sys
 import webbrowser
+
+import pycountry
 import requests
 import click
 import geopandas
@@ -26,7 +28,7 @@ from rapida.util.dataset2pmtiles import dataset2pmtiles
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-
+COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
 class Project:
     config_file_name = 'rapida.json'
@@ -142,7 +144,7 @@ class Project:
                         for col in unmatched_points.columns:
                             joined.loc[unmatched_points.index, col] = unmatched_points[col]
 
-                    self.countries = tuple(sorted(set(joined['iso3'])))
+                    self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, joined['iso3']))))
                     cols = joined.columns.tolist()
 
                     for col_name in ('index_right', 'index_left'):
@@ -151,6 +153,8 @@ class Project:
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True, index=False)
+
+
                     gdf = joined
 
 
@@ -178,9 +182,10 @@ class Project:
                                  promote_to_multi=True, index=False)
 
                 gdf.dropna(subset=['iso3', 'h3id'], inplace=True, axis=0)
-                self.countries = tuple(sorted(set(gdf['iso3'].tolist())))
+                self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, gdf['iso3'].tolist()))))
                 self._cfg_['countries'] = self.countries
                 self.save()
+                gdf.drop(gdf[~gdf['iso3'].isin(COUNTRY_CODES)].index, inplace=True)
                 gdf.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w',
                             layer=self.polygons_layer_name,
                             promote_to_multi=True, index=False)

@@ -57,7 +57,6 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                 logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
                 progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
                 return None
-            ds = None
             if not clip:
                 l = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
                 layer_extent = l.GetExtent()

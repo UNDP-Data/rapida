@@ -1,7 +1,5 @@
 import logging
-
 import click
-
 from rapida.util.add_h3id import add_h3id
 
 

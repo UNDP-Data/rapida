@@ -497,9 +497,7 @@ class Project:
                     })
 
             descriptions = [f'**{info["layer"]}** (Data provider: **{info["attribution"]}**, License: **{info["license"]}**)' for info in layer_info]
-            description = f"""This dataset was generated for the project {self.name} by UNDP RAPIDA tool to assess the following component layers: 
-{"\n".join(f"- {d}" for d in descriptions)}
-"""
+            description = f"This dataset was generated for the project {self.name} by UNDP RAPIDA tool to assess the following component layers:{os.linesep}{os.linesep.join(f'- {d}' for d in descriptions)}"
             attributions = [info["attribution"] for info in layer_info]
             attributions.insert(0, "United Nations Development Programme (UNDP)")
             attribution = ", ".join(attributions)

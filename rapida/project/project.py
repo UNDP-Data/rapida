@@ -496,7 +496,7 @@ class Project:
                         "attribution": first_variable["attribution"],
                     })
 
-            descriptions = [f"**{info["layer"]}** (Data provider: **{info["attribution"]}**, License: **{info["license"]}**)" for info in layer_info]
+            descriptions = [f'**{info["layer"]}** (Data provider: **{info["attribution"]}**, License: **{info["license"]}**)' for info in layer_info]
             description = f"""This dataset was generated for the project {self.name} by UNDP RAPIDA tool to assess the following component layers: 
 {"\n".join(f"- {d}" for d in descriptions)}
 """

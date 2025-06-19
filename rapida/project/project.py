@@ -8,7 +8,7 @@ import os
 import shutil
 import sys
 import webbrowser
-
+import textwrap
 import pycountry
 import requests
 import click
@@ -497,9 +497,10 @@ class Project:
                     })
 
             descriptions = [f'**{info["layer"]}** (Data provider: **{info["attribution"]}**, License: **{info["license"]}**)' for info in layer_info]
-            description = f"""This dataset was generated for the project {self.name} by UNDP RAPIDA tool to assess the following component layers: 
-{"\n".join(f"- {d}" for d in descriptions)}
-"""
+            description = textwrap.dedent(f"""\
+                This dataset was generated for the project {self.name} by UNDP RAPIDA tool to assess the following component layers:
+                {'\n'.join(f'- {d}' for d in descriptions)}
+            """)
             attributions = [info["attribution"] for info in layer_info]
             attributions.insert(0, "United Nations Development Programme (UNDP)")
             attribution = ", ".join(attributions)

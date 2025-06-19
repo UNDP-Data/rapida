@@ -9,6 +9,9 @@ from rapida.cli.list import list
 from rapida.cli.upload import upload
 from rapida.cli.download import download
 from rapida.cli.publish import publish
+from rapida.cli.h3id import addh3id
+
+
 import click
 import nest_asyncio
 nest_asyncio.apply()
@@ -41,6 +44,7 @@ cli.add_command(download)
 cli.add_command(upload)
 cli.add_command(publish)
 cli.add_command(delete)
+cli.add_command(addh3id)
 
 
 if __name__ == '__main__':

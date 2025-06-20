@@ -227,7 +227,7 @@ class RoadsVariable(Variable):
         df_polygon = gpd.read_file(self.local_path, layer=polygons_layer, engine="pyogrio")
         df_line = gpd.read_file(self.local_path, layer=self.component, engine="pyogrio")
 
-        if self.source_column and self.source_column:
+        if self.source_column and self.source_column_value:
             df_line = df_line[df_line[self.source_column] == self.source_column_value]
 
         for col in [self.name, self.affected_variable, self.affected_percentage_variable]:
@@ -272,7 +272,7 @@ class RoadsVariable(Variable):
                     progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
 
                 df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer, engine="pyogrio")
-                if self.source_column and self.source_column:
+                if self.source_column and self.source_column_value:
                     df_line_affected = df_line_affected[df_line_affected[self.source_column] == self.source_column_value]
 
                 if self.operator == 'density':

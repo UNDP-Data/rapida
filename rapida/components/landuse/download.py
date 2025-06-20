@@ -4,13 +4,14 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 from datetime import datetime
 from queue import Queue
-from osgeo import gdal
+from osgeo import gdal, gdalconst
 from rich.progress import Progress
 import geopandas as gpd
 import time
 
 from rapida.components.landuse.sentinel_item import SentinelItem
 from rapida.components.landuse.stac_collection import StacCollection
+
 
 logger = logging.getLogger('rapida')
 
@@ -43,6 +44,16 @@ def make_buffer_polygon(geopackage_file_path, polygons_layer_name, buffer=1000, 
     tmp_cutline_path = os.path.join(os.path.dirname(geopackage_file_path), gpkg_name)
     simplified_geom.to_file(tmp_cutline_path, layer=polygons_layer_name, driver="GPKG")
     return tmp_cutline_path
+
+
+def gdal_callback(complete, message, data):
+    if data:
+        progressbar, task, timeout_event = data
+        if progressbar is not None and task is not None:
+            progressbar.update(task, completed=int(complete * 100))
+        if timeout_event and timeout_event.is_set():
+            logger.info(f'GDAL was signalled to stop...')
+            return 0
 
 
 async def download_stac(
@@ -198,7 +209,8 @@ async def download_stac(
 
     prediction_files = [item.predicted_file for item in sentinel_items_sorted]
 
-    gdal.BuildVRT(output_file, prediction_files,
+    vrt_file = f"{output_file}.vrt"
+    gdal.BuildVRT(vrt_file, prediction_files,
                   resampleAlg="nearest",
                   outputSRS=target_srs,
                   VRTNodata=255,
@@ -206,10 +218,48 @@ async def download_stac(
 
     if progress and stac_task:
         progress.update(stac_task, description="[green]Created mosaic")
-        progress.remove_task(stac_task)
 
     t4 = time.time()
-    logger.debug(f"Download completed: {t4 - t1} seconds")
+    logger.debug(f"Created mosaic: {t4 - t1} seconds")
+
+    with gdal.Open(vrt_file, gdalconst.GA_ReadOnly) as vrt_ds:
+        tif_ds = gdal.Translate(
+            destName=output_file,
+            srcDS=vrt_ds,
+            format="GTiff",
+            creationOptions=[
+                "BLOCKXSIZE=256",
+                "BLOCKYSIZE=256",
+                "COMPRESS=ZSTD",
+                "BIGTIFF=YES",
+                "RESAMPLING=NEAREST",
+            ],
+            callback=gdal_callback,
+            callback_data=(progress, stac_task, None)
+        )
+
+        with gdal.Open(prediction_files[0], gdalconst.GA_ReadOnly) as prediction_ds:
+            for key, value in prediction_ds.GetMetadata_Dict().items():
+                tif_ds.SetMetadataItem(key, value)
+
+            for i, band_num in enumerate(range(1, prediction_ds.RasterCount + 1), 1):
+                src_band = prediction_ds.GetRasterBand(band_num)
+                tif_band = tif_ds.GetRasterBand(i)
+
+                for key, value in src_band.GetMetadata_Dict().items():
+                    tif_band.SetMetadataItem(key, value)
+                description = src_band.GetDescription()
+                if description:
+                    tif_band.SetDescription(src_band.GetDescription())
+
+        cog_ds = None
+
+    t5 = time.time()
+    logger.debug(f"Created mosaic tiff: {t5 - t1} seconds")
+
+    if progress and stac_task:
+        progress.update(stac_task, description="[green]Created mosaic tiff")
+        progress.remove_task(stac_task)
 
     return output_file
 

@@ -92,7 +92,7 @@ class LanduseVariable(Variable):
         """
         project = Project(os.getcwd())
         output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
-        return os.path.join(output_dir, f"{self.component}_prediction.vrt")
+        return os.path.join(output_dir, f"{self.component}_prediction.tif")
 
 
     def __init__(self, **kwargs):

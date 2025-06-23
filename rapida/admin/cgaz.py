@@ -1,14 +1,9 @@
-# import os
-
 import h3.api.basic_int as h3
 import logging
 
 import pycountry
 from osgeo import gdal, ogr
 from rich.progress import Progress
-# from rapida.util.geo import gdal_callback
-# from shapely.geometry import box
-
 
 gdal.UseExceptions()
 logger = logging.getLogger(__name__)
@@ -58,23 +53,6 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                 logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
                 progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
                 return None
-            # if not clip:
-            #     l = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
-            #     layer_extent = l.GetExtent()
-            #
-            #     layer_bbox_geom = box(minx=layer_extent[0], miny=layer_extent[2], maxx=layer_extent[1], maxy=layer_extent[3])
-            #     bbox_geometry = box(*bbox)
-
-
-                # ratio = layer_bbox_geom.area / bbox_geometry.area
-
-                # if ratio < 0.9 or ratio > 1.1:
-                #     destination_path1 = f"{destination_path}.fgb"
-                #     ds = None
-                #     ds1 = gdal.VectorTranslate(destNameOrDestDS=destination_path1, srcDS=destination_path, clipSrc=bbox, geometryType="MultiPolygon",)
-                #     ds1 = None
-                #     os.remove(destination_path)
-                #     os.rename(destination_path1, destination_path)
 
             ds = None
         progress.remove_task(translate_task)

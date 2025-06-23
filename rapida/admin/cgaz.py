@@ -1,20 +1,21 @@
-import os
+# import os
 
 import h3.api.basic_int as h3
 import logging
+
+import pycountry
 from osgeo import gdal, ogr
 from rich.progress import Progress
-from rapida.util.geo import gdal_callback
-from shapely.geometry import box
+# from rapida.util.geo import gdal_callback
+# from shapely.geometry import box
 
 
 gdal.UseExceptions()
-CGAZ_GEOBOUNDARIES_ROOT = "https://www.geoboundaries.org/api/current/gbHumanitarian"
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
-
-def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, dst_layer_name=None):
+def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, dst_layer_name=None, keep_invalid_countries=False):
     """
     Fetch ADMIN from CGAZ
     Parameters
@@ -57,22 +58,23 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                 logger.error(f"GDAL VectorTranslate failed for URL: {url} with bbox: {bbox}")
                 progress.update(task, completed=5, description="[red]GDAL VectorTranslate failed")
                 return None
-            if not clip:
-                l = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
-                layer_extent = l.GetExtent()
+            # if not clip:
+            #     l = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
+            #     layer_extent = l.GetExtent()
+            #
+            #     layer_bbox_geom = box(minx=layer_extent[0], miny=layer_extent[2], maxx=layer_extent[1], maxy=layer_extent[3])
+            #     bbox_geometry = box(*bbox)
 
-                layer_bbox_geom = box(minx=layer_extent[0], miny=layer_extent[2], maxx=layer_extent[1], maxy=layer_extent[3])
-                bbox_geometry = box(*bbox)
 
+                # ratio = layer_bbox_geom.area / bbox_geometry.area
 
-                ratio = layer_bbox_geom.area / bbox_geometry.area
-                if ratio < 0.9 or ratio > 1.1:
-                    destination_path1 = f"{destination_path}.fgb"
-                    ds = None
-                    ds1 = gdal.VectorTranslate(destNameOrDestDS=destination_path1, srcDS=destination_path, clipSrc=bbox, geometryType="MultiPolygon",)
-                    ds1 = None
-                    os.remove(destination_path)
-                    os.rename(destination_path1, destination_path)
+                # if ratio < 0.9 or ratio > 1.1:
+                #     destination_path1 = f"{destination_path}.fgb"
+                #     ds = None
+                #     ds1 = gdal.VectorTranslate(destNameOrDestDS=destination_path1, srcDS=destination_path, clipSrc=bbox, geometryType="MultiPolygon",)
+                #     ds1 = None
+                #     os.remove(destination_path)
+                #     os.rename(destination_path1, destination_path)
 
             ds = None
         progress.remove_task(translate_task)
@@ -100,7 +102,14 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                                       res=7)
                     feature.SetField("h3id", h3id)
                     layer.SetFeature(feature)
-                ds.FlushCache()
+            if not keep_invalid_countries:
+                layer.ResetReading()
+                for feature in layer:
+                    iso3_country_code = feature.GetField("iso3")
+                    if iso3_country_code not in COUNTRY_CODES:
+                        layer.DeleteFeature(feature.GetFID())
+
+            ds.FlushCache()
         progress.update(task, advance=1, description="[green]Download Completed", refresh=True)
         return None
 

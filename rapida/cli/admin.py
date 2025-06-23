@@ -127,25 +127,31 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     default=False,
     help="Whether to clip the data to the bounding box."
 )
+
+@click.option('--keep-invalid-countries',
+    is_flag=True,
+    default=False,
+    help="Keep admin polygons that have invalid country code"
+)
 @click.option('--debug',
 
     is_flag=True,
     default=False,
     help="Set log level to debug"
 )
-def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=False):
+def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=False, keep_invalid_countries=None):
     """
     Fetch admin boundaries from CGAZ
 
     Retrieves administrative boundaries of a specific level/levels that intersect the area covered iby bbox from CGAZ data hosted in Azure Blob Storage
     The admin level argument should be an integer.
 
-    If --clip option is supplied, it is going to clip geometries to return only the part of the admin datasets that are within
+    If the -- clip option is supplied, it is going to clip geometries to return only the part of the admin datasets that are within
     the bounding box, if not, it returns whole admin polygons that intersect with the bounding box supplied
 
     The following is an example to save the result as a geopackage from bbox 33.681335,-0.131836,35.966492,1.158979
 
-    rapida admin cgaz --bbox 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip /data/admin2_cgaz.gpkg
+    Rapida admin cgaz --bbox 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip /data/admin2_cgaz.gpkg
 
     """
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
@@ -153,4 +159,4 @@ def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=F
     if not is_rapida_initialized():
         return
 
-    fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip, destination_path=destination_path)
+    fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip, destination_path=destination_path, keep_invalid_countries=keep_invalid_countries)

@@ -44,8 +44,6 @@ class RoadsComponent(Component):
             for var_name in variables:
                 var_data = variables_data[var_name]
                 var_data['source'] = resolve_geohub_url(var_data['source'], link_name="flatgeobuf")
-
-                # create instance
                 v = RoadsVariable(name=var_name, component=self.component_name, **var_data)
                 # assess
                 v(**kwargs)
@@ -229,6 +227,9 @@ class RoadsVariable(Variable):
         df_polygon = gpd.read_file(self.local_path, layer=polygons_layer, engine="pyogrio")
         df_line = gpd.read_file(self.local_path, layer=self.component, engine="pyogrio")
 
+        if self.source_column and self.source_column_value:
+            df_line = df_line[df_line[self.source_column] == self.source_column_value]
+
         for col in [self.name, self.affected_variable, self.affected_percentage_variable]:
             if col in df_polygon.columns:
                 df_polygon.drop(columns=[col], inplace=True)
@@ -245,6 +246,8 @@ class RoadsVariable(Variable):
                 length_sum_df = length_sum.reset_index(name='total_length')
                 length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
 
+
+
                 # merge with area
                 df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')
 
@@ -252,6 +255,8 @@ class RoadsVariable(Variable):
                 df_polygon.drop(columns=['total_length', 'area'], inplace=True)
                 output_df = df_polygon
             else:
+
+
                 output_df = vector_line_zonal_stats(
                     df_polygon=df_polygon,
                     df_line=df_line,
@@ -267,6 +272,9 @@ class RoadsVariable(Variable):
                     progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
 
                 df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer, engine="pyogrio")
+                if self.source_column and self.source_column_value:
+                    df_line_affected = df_line_affected[df_line_affected[self.source_column] == self.source_column_value]
+
                 if self.operator == 'density':
                     df_polygon['area'] = df_polygon.geometry.area
                     length_sum = df_line_affected.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))

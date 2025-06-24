@@ -22,11 +22,9 @@ from rapida.components.population.worldpop import population_sync, process_aggre
 from rapida.stats.raster_zonal_stats import sumup, zst
 import geopandas
 from rapida.components.population.pop_coefficient import get_pop_coeff
-from rapida.az import blobstorage
 from urllib.parse import urlencode
 import re
-
-from rapida.util.geo import gdal_callback
+from rapida.util.download_remote_file import download_remote_files
 
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger('rapida')
@@ -252,13 +250,18 @@ class PopulationVariable(Variable):
                 source_blobs = list()
                 for source_template in self.sources:
                     source_file_path = self.interpolate_template(template=source_template, country=country, **kwargs)
+                    if source_file_path.startswith('az:'):
+                        # if start with az:, interpolate it to HTTP URL
+                        proto, account_name, src_blob_path = source_file_path.split(':')
+                        base_url = f"https://{account_name}.blob.core.windows.net"
+                        source_file_path = f"{base_url}/{src_blob_path}"
+
                     source_blobs.append(source_file_path)
                 if not os.path.exists(self._source_folder_):
                     os.makedirs(self._source_folder_)
-                downloaded_files = asyncio.run(
-                    blobstorage.download_blobs(src_blobs=source_blobs, dst_folder=self._source_folder_,
-                                               progress=kwargs.get('progress', None))
-                )
+
+                downloaded_files = download_remote_files(source_blobs, self._source_folder_, progress=kwargs.get('progress', None))
+
                 assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
                 src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
                 _, file_name = os.path.split(src_path)
@@ -411,13 +414,16 @@ class PopulationVariable(Variable):
             local_path = os.path.join(self._source_folder_, file_name)
             os.makedirs(self._source_folder_, exist_ok=True)
             logger.debug(f'Going to download {src_path} to {local_path}')
+
+            if src_path.startswith('az:'):
+                # if start with az:, interpolate it to HTTP URL
+                proto, account_name, src_blob_path = src_path.split(':')
+                base_url = f"https://{account_name}.blob.core.windows.net"
+                src_path = f"{base_url}/{src_blob_path}"
+
             sources.append(src_path)
 
-        downloaded_files = asyncio.run(blobstorage.download_blobs(
-            src_blobs=sources,
-            dst_folder=self._source_folder_,
-            progress=progress
-        ))
+        downloaded_files = download_remote_files(sources, self._source_folder_, progress=progress)
 
         vrt_path = self.local_path.replace('.tif', '.vrt')
         vrt_options = gdal.BuildVRTOptions(
@@ -427,7 +433,6 @@ class PopulationVariable(Variable):
         )
         vrtds = gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=downloaded_files, options=vrt_options)
         vrtds.FlushCache()
-        vrtds.SyncToDisk()
         polygons_ds = gdal.OpenEx(project.geopackage_file_path, gdal.OF_VECTOR)
         polygons_layer = polygons_ds.GetLayerByName(project.polygons_layer_name)
         bounds = polygons_layer.GetExtent()  # (minx, maxx, miny, maxy)

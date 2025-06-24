@@ -1,3 +1,4 @@
+from rapida.cli.population import population
 from rapida.util.setup_logger import setup_logger
 from rapida.cli.admin import admin
 from rapida.cli.auth import auth
@@ -45,6 +46,7 @@ cli.add_command(upload)
 cli.add_command(publish)
 cli.add_command(delete)
 cli.add_command(addh3id)
+cli.add_command(population)
 
 
 if __name__ == '__main__':

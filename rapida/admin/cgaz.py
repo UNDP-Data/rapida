@@ -10,16 +10,19 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
-def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, dst_layer_name=None, keep_invalid_countries=False):
+def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, dst_layer_name=None, keep_disputed_areas=False, h3id_precision=7,):
     """
     Fetch ADMIN from CGAZ
     Parameters
     ----------
+
     bbox: The bounding box to fetch administrative units for.
     admin_level: The administrative level to fetch. Should be an integer.
     clip: bool, False, if True, the admin boundaries are clipped to the bounding box.
     dst_layer_name: The layer name of the destination
     destination_path: The destination path of where to save the dataset
+    keep_disputed_areas: Keep disputed areas in the dataset. Default is False.
+    h3id_precision: The h3id precision to use. Default is 7.
 
     Returns
     -------
@@ -77,10 +80,10 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                     geom = feature.GetGeometryRef()
                     centroid = geom.Centroid()
                     h3id = h3.latlng_to_cell(lat=centroid.GetY(), lng=centroid.GetX(),
-                                      res=7)
+                                      res=h3id_precision)
                     feature.SetField("h3id", h3id)
                     layer.SetFeature(feature)
-            if not keep_invalid_countries:
+            if not keep_disputed_areas:
                 layer.ResetReading()
                 for feature in layer:
                     iso3_country_code = feature.GetField("iso3")

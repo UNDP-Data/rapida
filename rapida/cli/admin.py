@@ -121,6 +121,9 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
                 type=click.IntRange(min=0, max=2, clamp=False),
                 help='UNDP admin level from where to extract the admin features'
                 )
+
+@click.option('--h3id_precision', '-p', default=7, show_default=True, type=int, help='precision of h3id')
+
 @click.option('--clip',
 
     is_flag=True,
@@ -128,18 +131,17 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     help="Whether to clip the data to the bounding box."
 )
 
-@click.option('--keep-invalid-countries',
+@click.option('--keep-disputed-areas',
     is_flag=True,
     default=False,
-    help="Keep admin polygons that have invalid country code"
+    help="Keep admin polygons that are disputed areas with invalid country code"
 )
 @click.option('--debug',
-
     is_flag=True,
     default=False,
     help="Set log level to debug"
 )
-def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=False, keep_invalid_countries=None):
+def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=False, keep_disputed_areas=None, h3id_precision=None):
     """
     Fetch admin boundaries from CGAZ
 
@@ -159,4 +161,4 @@ def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=F
     if not is_rapida_initialized():
         return
 
-    fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip, destination_path=destination_path, keep_invalid_countries=keep_invalid_countries)
+    fetch_cgaz_admin(bbox=bbox, admin_level=admin_level, clip=clip, destination_path=destination_path, keep_disputed_areas=keep_disputed_areas, h3id_precision=h3id_precision)

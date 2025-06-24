@@ -19,6 +19,7 @@ from rich.progress import Progress
 from rapida.components.landuse.prediction.cloud import CloudDetection
 from rapida.components.landuse.prediction.landuse import LandusePrediction
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
+from rapida.util.download_remote_file import download_remote_files
 from rapida.util.setup_logger import setup_logger
 
 
@@ -215,51 +216,28 @@ class SentinelItem(object):
                     if os.path.exists(self.cloud_mask_file):
                         os.remove(self.cloud_mask_file)
 
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        semaphore = asyncio.Semaphore(max_workers)
+        file_urls = []
+        url_to_target_mapping = {}
+        for asset_key, band_name in self.target_asset.items():
+            asset = self.item.assets[asset_key]
+            url = self._s3_to_http(asset.href)
+            file_urls.append(url)
+            band_dir = os.path.join(download_dir, self.id)
+            file_extension = os.path.splitext(url)[1]
+            target_path = os.path.join(band_dir, f"{band_name}{file_extension}")
+            url_to_target_mapping[url] = target_path
 
-        async def download_all():
-            async def download_one(asset_key: str, band_name: str):
-                asset = self.item.assets[asset_key]
-                url = self._s3_to_http(asset.href)
-                band_dir = os.path.join(download_dir, self.id)
-                os.makedirs(band_dir, exist_ok=True)
-                target_path = os.path.join(band_dir, band_name)
+        def get_target_path_for_url(url, dst_folder):
+            target_path = url_to_target_mapping.get(url)
+            target_dir = os.path.dirname(target_path)
+            return target_path
 
-                max_retries = 5
-                for attempt in range(1, max_retries + 1):
-                    async with semaphore:
-                        try:
-                            await self._download_asset(
-                                file_url=url,
-                                target=target_path,
-                                progress=progress,
-                            )
-
-                            return
-                        except Exception as e:
-                            logger.warning(f"[{band_name}] Attempt {attempt}/{max_retries} failed: {e}")
-                            if attempt == max_retries:
-                                logger.error(f"Failed to download {band_name} after {max_retries} attempts.")
-                            else:
-                                await asyncio.sleep(3)
-
-            tasks = [
-                asyncio.create_task(download_one(asset_key, band_name))
-                for asset_key, band_name in self.target_asset.items()
-            ]
-            try:
-                await asyncio.gather(*tasks)
-            except KeyboardInterrupt:
-                logger.warning("Download interrupted by user. Cancelling tasks...")
-                for task in tasks:
-                    task.cancel()
-                await asyncio.gather(*tasks, return_exceptions=True)
-                raise
-
-        loop.run_until_complete(download_all())
-        loop.close()
+        download_remote_files(file_urls=file_urls,
+                              dst_folder=download_dir,
+                              max_workers=max_workers,
+                              max_retries=5,
+                              target_path_func=get_target_path_for_url,
+                              progress=progress)
 
         # once all downloads are successfully done, write item.json in the folder
         with open(item_path, "w", encoding="utf-8") as f:
@@ -486,72 +464,6 @@ class SentinelItem(object):
             return 'https://{0}.s3.amazonaws.com/{1}'.format(bucket, object_name)
         else:
             return url
-
-
-    async def _download_asset(
-            self,
-            file_url: str,
-            target: str,
-            progress=None,
-    ) -> str:
-        """
-        Download JP2 file from STAC server, then reproject and crop by project area, and transform to GeoTiff file.
-
-        :param file_url: file URL to download
-        :param target: target file name without extension
-        :param no_data_value: nodata value. default is 0
-        :param progress: rich progress instance
-        :return: output file URL
-        """
-        download_task = None
-        if progress is not None:
-            download_task = progress.add_task(
-                description=f'[blue] Downloading {file_url}', total=None)
-
-        extension = os.path.splitext(file_url)[1]
-        download_file = f"{target}.tif"
-
-        jp2_file = f"{target}{extension}"
-
-        try:
-            # fetch content-length from remote file header
-            async with httpx.AsyncClient() as client:
-                head_resp = await client.head(file_url)
-                head_resp.raise_for_status()
-                remote_content_length = head_resp.headers.get("content-length")
-                if remote_content_length is None:
-                    raise ValueError("No content-length in response headers")
-                remote_content_length = int(remote_content_length)
-
-            if os.path.exists(jp2_file):
-                local_file_size = os.path.getsize(jp2_file)
-                if local_file_size == remote_content_length:
-                    logging.debug(f"File already exists and size matches. Skipped: {jp2_file}")
-                    return jp2_file
-                else:
-                    logging.debug(f"File size mismatch. Removing local file: {jp2_file}")
-                    os.remove(jp2_file)
-
-            if not os.path.exists(jp2_file):
-                async with httpx.AsyncClient() as client:
-                    async with client.stream("GET", file_url) as response:
-                        response.raise_for_status()
-                        total = int(response.headers.get("content-length", 0))
-
-                        if progress is not None and download_task is not None:
-                            progress.update(download_task, total=total)
-
-                        with open(jp2_file, "wb") as f:
-                            async for chunk in response.aiter_bytes():
-                                f.write(chunk)
-                                if progress is not None and download_task is not None:
-                                    progress.update(download_task, advance=len(chunk))
-
-            return jp2_file
-        finally:
-            if progress and download_task:
-                progress.update(download_task, description=f"[blue] Downloaded file saved to {download_file}")
-                progress.remove_task(download_task)
 
 
 if __name__ == '__main__':

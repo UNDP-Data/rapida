@@ -15,9 +15,10 @@ import click
 import geopandas
 import h3
 import pyogrio
+from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
 from pyproj import CRS as pCRS
-from azure.storage.fileshare import ShareClient, ShareDirectoryClient
+from azure.storage.fileshare import ShareClient
 
 from rapida import constants
 from rapida.admin.osm import fetch_admin
@@ -29,6 +30,31 @@ from rapida.util.dataset2pmtiles import dataset2pmtiles
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
+
+
+def find_probable_iso3_col(gdf: GeoDataFrame):
+    """
+    Find the column name that is most likely to contain ISO3 country codes by checking the values.
+    If the majority of unique values in a column match known ISO3 codes, return the column name.
+
+    Parameters:
+        gdf (GeoDataFrame): Input GeoDataFrame.
+
+    Returns:
+        str, integer: The name of the column that most likely contains ISO3 codes, or None if not found.
+    """
+    df = gdf.convert_dtypes()
+    df = df.select_dtypes(include="string")
+    potential_cols = dict()
+    for column in df.columns:
+        # if df[column].dtype == "":
+        unique_values = gdf[column].dropna().unique()
+        match_count = sum(str(val).upper() in COUNTRY_CODES for val in unique_values)
+        if match_count > 0:
+            potential_cols[match_count/len(unique_values) * 100] = column
+    max_value = max(potential_cols)
+    return potential_cols[max_value], max_value
+
 
 class Project:
     config_file_name = 'rapida.json'
@@ -99,7 +125,14 @@ class Project:
                 gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name )
                 gdf['geometry'] = gdf['geometry'].apply(lambda geom: geom.buffer(0) if not geom.is_valid else geom)
                 proj_bounds = tuple(map(float,gdf.total_bounds))
+
+                existing_iso3_column, percentage_match = find_probable_iso3_col(gdf=gdf)
+
+                if existing_iso3_column is not None and existing_iso3_column != 'iso3':
+                    gdf.rename(columns={existing_iso3_column: 'iso3'}, inplace=True)
+
                 cols = gdf.columns.tolist()
+
 
                 if not 'iso3' in cols:
                     logger.info(f'going to add country code into "iso3" column')
@@ -153,7 +186,6 @@ class Project:
 
                     joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
                                  promote_to_multi=True, index=False)
-
 
                     gdf = joined
 

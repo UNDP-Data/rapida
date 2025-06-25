@@ -129,11 +129,9 @@ class Project:
                 existing_iso3_column, percentage_match = find_probable_iso3_col(gdf=gdf)
 
                 if existing_iso3_column is not None and existing_iso3_column != 'iso3':
-                    gdf.rename(columns={existing_iso3_column: 'iso3'}, inplace=True)
+                    gdf = gdf.rename(columns={existing_iso3_column: 'iso3'})
 
                 cols = gdf.columns.tolist()
-
-
                 if not 'iso3' in cols:
                     logger.info(f'going to add country code into "iso3" column')
                     geo_srs = osr.SpatialReference()
@@ -191,7 +189,6 @@ class Project:
 
 
                 if 'h3id' in cols:
-                    gdf = geopandas.read_file(self.geopackage_file_path, layer=self.polygons_layer_name)
                     h3ids = gdf['h3id'].tolist()
                     # check duplicated
                     if len(h3ids) != len(set(h3ids)):

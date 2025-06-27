@@ -12,7 +12,7 @@ import country_converter as coco
 import requests
 import click
 import geopandas
-import h3
+import h3.api.basic_int as h3
 import pyogrio
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
@@ -148,12 +148,13 @@ class Project:
                     geo_srs.ImportFromEPSG(4326)
                     geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                     coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
-                    geo_bounds = coord_trans.TransformBounds(*proj_bounds,21)
+                    geo_bounds = coord_trans.TransformBounds(*proj_bounds, 21)
 
-                    admin0_polygons = fetch_admin(bbox=geo_bounds,admin_level=0, h3id_precision=h3id_precision) # using osm admin to populate the iso3 codes
+                    admin0_polygons = fetch_admin(bbox=geo_bounds, admin_level=0,
+                                                  h3id_precision=h3id_precision)  # using osm admin to populate the iso3 codes
 
                     target_crs = pCRS.from_user_input(self.projection)
-                    with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
+                    with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8')) as a0l_bio:
                         a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
                     centroids = gdf.copy()
                     centroids["geometry"] = gdf.centroid
@@ -164,39 +165,23 @@ class Project:
                     joined = joined[left_cols]
                     joined['geometry'] = gdf['geometry']
 
-                    if joined['iso3'].isna().any():
-                        # Step 2: Separate matched and unmatched points
-                        unmatched_points = joined[joined['index_right'].isna()].copy()
-                        matched_points = joined.dropna(subset=['index_right']).copy()
-                        # Step 3: Define the function to compute the average of the three closest neighbors
-                        def get_nearest_avg(point_geom):
-                            # Compute distances from this point to all matched points
-                            matched_points["distance"] = matched_points.geometry.distance(point_geom)
-                            # Select the three nearest neighbors
-                            nearest_neighbors = matched_points.nsmallest(3, "distance")
-                            # Return the average value of the attribute
-                            return nearest_neighbors["iso3"].mode()
+                    invalid_or_missing_mask = joined['iso3'].isna() | ~joined['iso3'].isin(COUNTRY_CODES)
 
-                        # Step 4: Apply the function to all unmatched points
-                        unmatched_points["iso3"] = unmatched_points.geometry.apply(get_nearest_avg)
+                    if invalid_or_missing_mask.any():
+                        logger.info("Missing or invalid ISO3 country codes found. Attempting to assign correct ones...")
 
-                        # Step 5: Merge the results back into the main DataFrame
-                        for col in unmatched_points.columns:
-                            joined.loc[unmatched_points.index, col] = unmatched_points[col]
-
-                    if (~joined['iso3'].isin(COUNTRY_CODES)).any():
-                        logger.info("Some invalid ISO3 country codes were found. Assigning correct ones....")
-                        invalid_codes_mask = ~joined['iso3'].isin(COUNTRY_CODES)
-                        for idx, row in joined[invalid_codes_mask].iterrows():
-                            centroid = row.geometry.centroid
-                            centroid_trans = coord_trans.TransformPoint(centroid.x, centroid.y)
-                            lat, lon = centroid_trans[1], centroid_trans[0]
+                        for idx, row in joined[invalid_or_missing_mask].iterrows():
                             try:
+                                centroid = row.geometry.centroid
+                                centroid_trans = coord_trans.TransformPoint(centroid.x, centroid.y)
+                                lat, lon = centroid_trans[1], centroid_trans[0]
                                 new_iso3 = fetch_ccode(lat=lat, lon=lon)
                                 if new_iso3:
                                     joined.at[idx, 'iso3'] = new_iso3
+
                             except Exception as e:
-                                logger.warning(f"Failed to fetch ISO3 for point at index {idx} ({lat}, {lon}): {e}")
+                                logger.warning(f"Failed to fetch ISO3 for geometry at index {idx} ({lat}, {lon}): {e}")
+
                     self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, joined['iso3']))))
                     cols = joined.columns.tolist()
 

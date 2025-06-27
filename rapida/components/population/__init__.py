@@ -23,6 +23,29 @@ from urllib.parse import urlencode
 import re
 from rapida.util.download_remote_file import download_remote_files
 
+
+wpop_countries = [
+    "ABW", "AFG", "AGO", "AIA", "ALA", "ALB", "AND", "ARE", "ARG", "ARM", "ASM", "ATA", "ATF", "ATG",
+    "AUS", "AUT", "AZE", "BDI", "BEL", "BEN", "BES", "BFA", "BGD", "BGR", "BHR", "BHS", "BIH", "BLM",
+    "BLR", "BLZ", "BMU", "BOL", "BRA", "BRB", "BRN", "BTN", "BVT", "BWA", "CAF", "CAN", "CHE", "CHL",
+    "CHN", "CIV", "CMR", "COD", "COG", "COK", "COL", "COM", "CPV", "CRI", "CUB", "CUW", "CYM", "CYP",
+    "CZE", "DEU", "DJI", "DMA", "DNK", "DOM", "DZA", "ECU", "EGY", "ERI", "ESH", "ESP", "EST", "ETH",
+    "FIN", "FJI", "FLK", "FRA", "FRO", "FSM", "GAB", "GBR", "GEO", "GGY", "GHA", "GIB", "GIN", "GLP",
+    "GMB", "GNB", "GNQ", "GRC", "GRD", "GRL", "GTM", "GUF", "GUM", "GUY", "HKG", "HMD", "HND", "HRV",
+    "HTI", "HUN", "IDN", "IMN", "IND", "IOT", "IRL", "IRN", "IRQ", "ISL", "ISR", "ITA", "JAM", "JEY",
+    "JOR", "JPN", "KAZ", "KEN", "KGZ", "KHM", "KIR", "KNA", "KOR", "KOS", "KWT", "LAO", "LBN", "LBR",
+    "LBY", "LCA", "LIE", "LKA", "LSO", "LTU", "LUX", "LVA", "MAC", "MAF", "MAR", "MCO", "MDA", "MDG",
+    "MDV", "MEX", "MHL", "MKD", "MLI", "MLT", "MMR", "MNE", "MNG", "MNP", "MOZ", "MRT", "MSR", "MTQ",
+    "MUS", "MWI", "MYS", "MYT", "NAM", "NCL", "NER", "NFK", "NGA", "NIC", "NIU", "NLD", "NOR", "NPL",
+    "NRU", "NZL", "OMN", "PAK", "PAN", "PCN", "PER", "PHL", "PLW", "PNG", "POL", "PRI", "PRK", "PRT",
+    "PRY", "PSE", "PYF", "QAT", "REU", "ROU", "RUS", "RWA", "SAU", "SDN", "SEN", "SGP", "SGS", "SHN",
+    "SJM", "SLB", "SLE", "SLV", "SMR", "SOM", "SPM", "SPR", "SRB", "SSD", "STP", "SUR", "SVK", "SVN",
+    "SWE", "SWZ", "SXM", "SYC", "SYR", "TCA", "TCD", "TGO", "THA", "TJK", "TKL", "TKM", "TLS", "TON",
+    "TTO", "TUN", "TUR", "TUV", "TWN", "TZA", "UGA", "UKR", "UMI", "URY", "USA", "UZB", "VAT", "VCT",
+    "VEN", "VGB", "VIR", "VNM", "VUT", "WLF", "WSM", "YEM", "ZAF", "ZMB", "ZWE"
+]
+
+
 logger = logging.getLogger('rapida')
 
 gdal.UseExceptions()
@@ -131,6 +154,9 @@ class PopulationVariable(Variable):
         if not self.dep_vars:
             sources = list()
             for country in project.countries:
+                if country not in wpop_countries:
+                    logger.info(f"The population dataset for country {country} is missing. The download will therefore skip")
+                    continue
                 # interpolate templates
                 source_blobs = list()
                 for source_template in self.sources:
@@ -295,6 +321,9 @@ class PopulationVariable(Variable):
         sources = []
 
         for country in project.countries:
+            if country not in wpop_countries:
+                logger.info(f"The population dataset for country {country} is missing. The download will therefore skip")
+                continue
             src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
             _, file_name = os.path.split(src_path)
             local_path = os.path.join(self._source_folder_, file_name)
@@ -308,7 +337,6 @@ class PopulationVariable(Variable):
                 src_path = f"{base_url}/{src_blob_path}"
 
             sources.append(src_path)
-
         downloaded_files = download_remote_files(sources, self._source_folder_, progress=progress)
 
         vrt_path = self.local_path.replace('.tif', '.vrt')
@@ -367,8 +395,6 @@ class PopulationVariable(Variable):
         return source
 
     def _compute_affected_(self, progress=None):
-
-
 
         project = Project(os.getcwd())
         if geo.is_raster(self.local_path) and project.raster_mask is not None:

@@ -142,8 +142,11 @@ class Project:
                     gdf = gdf.rename(columns={existing_iso3_column: 'iso3'})
 
                 cols = gdf.columns.tolist()
+                if  "iso3" in cols and gdf['iso3'].isna().any():
+                    gdf.drop(columns=["iso3"], inplace=True)
+                cols = gdf.columns.tolist()
                 if not 'iso3' in cols:
-                    logger.info(f'going to add country code into "iso3" column')
+                    logger.info(f'ISO3 column missing or some values are empty in ISO3 column. Going to add country codes into "iso3" column')
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
                     geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
@@ -158,12 +161,13 @@ class Project:
                         a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
                     centroids = gdf.copy()
                     centroids["geometry"] = gdf.centroid
-
+                    a0_gdf.rename(columns=lambda x: f"a0_{x}" if x in centroids.columns and x != "geometry" else x, inplace=True)
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
                     left_cols = [col for col in centroids.columns if col in joined.columns]
                     left_cols.append('iso3')
                     joined = joined[left_cols]
                     joined['geometry'] = gdf['geometry']
+
 
                     invalid_or_missing_mask = joined['iso3'].isna() | ~joined['iso3'].isin(COUNTRY_CODES)
 

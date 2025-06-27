@@ -48,7 +48,8 @@ dependencies = [
     "nest_asyncio",
     "tensorflow==2.16.2",
     "psutil",
-    "s2cloudless"
+    "s2cloudless",
+    "country-converter"
 ]
 
 [project.optional-dependencies]

@@ -1,14 +1,14 @@
 import h3.api.basic_int as h3
 import logging
 
-import pycountry
 from osgeo import gdal, ogr
 from rich.progress import Progress
+
+from rapida.util.countries import COUNTRY_CODES
 
 gdal.UseExceptions()
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
-COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
 def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, dst_layer_name=None, keep_disputed_areas=False, h3id_precision=7,):
     """

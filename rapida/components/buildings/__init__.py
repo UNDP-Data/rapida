@@ -16,6 +16,23 @@ import geopandas as gpd
 logger = logging.getLogger(__name__)
 
 
+buildings_countries = [
+    "AFG", "AGO", "ALB", "AND", "ARE", "ARG", "ARM", "ATG", "AUS", "AUT", "AZE", "BDI", "BEL", "BEN",
+    "BFA", "BGD", "BGR", "BHR", "BHS", "BIH", "BLR", "BLZ", "BOL", "BRA", "BRB", "BRN", "BTN", "BWA",
+    "CAF", "CAN", "CHE", "CHL", "CHN", "CIV", "CMR", "COD", "COG", "COL", "COM", "CPV", "CRI", "CUB",
+    "CYP", "CZE", "DEU", "DJI", "DMA", "DNK", "DOM", "DZA", "ECU", "EGY", "ERI", "ESH", "ESP", "EST",
+    "ETH", "FIN", "FRA", "GAB", "GBR", "GEO", "GHA", "GIN", "GMB", "GNB", "GNQ", "GRC", "GRD", "GTM",
+    "GUY", "HND", "HRV", "HTI", "HUN", "IDN", "IND", "IRL", "IRN", "IRQ", "ISL", "ISR", "ITA", "JAM",
+    "JOR", "JPN", "KAZ", "KEN", "KGZ", "KHM", "KNA", "KWT", "LAO", "LBN", "LBR", "LBY", "LCA", "LIE",
+    "LKA", "LSO", "LTU", "LUX", "LVA", "MAR", "MCO", "MDA", "MDG", "MDV", "MEX", "MKD", "MLI", "MLT",
+    "MMR", "MNE", "MNG", "MOZ", "MRT", "MUS", "MWI", "MYS", "NAM", "NER", "NGA", "NIC", "NLD", "NOR",
+    "NPL", "OMN", "PAK", "PAN", "PER", "PHL", "PNG", "POL", "PRK", "PRT", "PRY", "QAT", "ROU", "RUS",
+    "RWA", "SAU", "SDN", "SEN", "SGP", "SLE", "SLV", "SMR", "SOM", "SRB", "SSD", "STP", "SUR", "SVK",
+    "SVN", "SWE", "SWZ", "SYC", "SYR", "TCD", "TGO", "THA", "TJK", "TKM", "TLS", "TTO", "TUN", "TUR",
+    "TZA", "UGA", "UKR", "URY", "USA", "UZB", "VAT", "VCT", "VEN", "VNM", "XKX", "YEM", "ZAF", "ZMB", "ZWE"
+]
+
+
 class BuildingsComponent(Component):
 
     def __call__(self, variables=None, **kwargs):
@@ -112,6 +129,9 @@ class BuildingsVariable(Variable):
         with gdal.OpenEx(project.geopackage_file_path, gdal.OF_READONLY | gdal.OF_VECTOR) as poly_ds:
             lyr = poly_ds.GetLayerByName(project.polygons_layer_name)
             for ci, country in enumerate(project.countries):
+                if country not in buildings_countries:
+                    logger.info(f"The buildings dataset for country {country} is missing. The download will therefore skip this country")
+                    continue
                 mode = 'w' if ci == 0 else 'a'
                 logger.info(f'Downloading {self.name} in {country}')
                 source = self.interpolate_template(template=self.source, country=country, **kwargs)

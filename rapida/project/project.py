@@ -8,12 +8,11 @@ import os
 import shutil
 import sys
 import webbrowser
-
-import pycountry
+import country_converter as coco
 import requests
 import click
 import geopandas
-import h3
+import h3.api.basic_int as h3
 import pyogrio
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
@@ -25,11 +24,11 @@ from rapida.admin.osm import fetch_admin
 from rapida.az.blobstorage import check_blob_exists, delete_blob
 from rapida.session import Session
 from rapida.util import geo
+from rapida.util.countries import COUNTRY_CODES
 from rapida.util.dataset2pmtiles import dataset2pmtiles
 
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
-COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
 
 def find_probable_iso3_col(gdf: GeoDataFrame):
@@ -52,9 +51,20 @@ def find_probable_iso3_col(gdf: GeoDataFrame):
         match_count = sum(str(val).upper() in COUNTRY_CODES for val in unique_values)
         if match_count > 0:
             potential_cols[match_count/len(unique_values) * 100] = column
+    if len(potential_cols) < 1:
+        return None, None
     max_value = max(potential_cols)
     return potential_cols[max_value], max_value
 
+
+def fetch_ccode(lat=None, lon=None):
+    url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&format=json&zoom=12&addressdetails=1"
+    headers = {"User-Agent": "my-app/1.0 (email@example.com)"}
+    response = requests.get(url, headers=headers)
+    json_resp = response.json()
+    iso2_cc = json_resp.get("address", {}).get("country_code").upper()
+    iso3 =coco.convert(names=iso2_cc, to='ISO3')
+    return iso3
 
 class Project:
     config_file_name = 'rapida.json'
@@ -132,48 +142,49 @@ class Project:
                     gdf = gdf.rename(columns={existing_iso3_column: 'iso3'})
 
                 cols = gdf.columns.tolist()
+                if  "iso3" in cols and gdf['iso3'].isna().any():
+                    gdf.drop(columns=["iso3"], inplace=True)
+                cols = gdf.columns.tolist()
                 if not 'iso3' in cols:
-                    logger.info(f'going to add country code into "iso3" column')
+                    logger.info(f'ISO3 column missing or some values are empty in ISO3 column. Going to add country codes into "iso3" column')
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
                     geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                     coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
-                    geo_bounds = coord_trans.TransformBounds(*proj_bounds,21)
+                    geo_bounds = coord_trans.TransformBounds(*proj_bounds, 21)
 
-                    admin0_polygons = fetch_admin(bbox=geo_bounds,admin_level=0, h3id_precision=h3id_precision)
+                    admin0_polygons = fetch_admin(bbox=geo_bounds, admin_level=0,
+                                                  h3id_precision=h3id_precision)  # using osm admin to populate the iso3 codes
 
                     target_crs = pCRS.from_user_input(self.projection)
-                    with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8') ) as a0l_bio:
+                    with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8')) as a0l_bio:
                         a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
                     centroids = gdf.copy()
                     centroids["geometry"] = gdf.centroid
-
+                    a0_gdf.rename(columns=lambda x: f"a0_{x}" if x in centroids.columns and x != "geometry" else x, inplace=True)
                     joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
+                    left_cols = [col for col in centroids.columns if col in joined.columns]
+                    left_cols.append('iso3')
+                    joined = joined[left_cols]
                     joined['geometry'] = gdf['geometry']
 
-                    if joined['iso3'].isna().any():
-                        # Step 2: Separate matched and unmatched points
-                        unmatched_points = joined[joined['index_right'].isna()].copy()
 
-                        matched_points = joined.dropna(subset=['index_right']).copy()
+                    invalid_or_missing_mask = joined['iso3'].isna() | ~joined['iso3'].isin(COUNTRY_CODES)
 
-                        # Step 3: Define the function to compute the average of the three closest neighbors
-                        def get_nearest_avg(point_geom):
-                            # Compute distances from this point to all matched points
-                            matched_points["distance"] = matched_points.geometry.distance(point_geom)
+                    if invalid_or_missing_mask.any():
+                        logger.info("Missing or invalid ISO3 country codes found. Attempting to assign correct ones...")
 
-                            # Select the three nearest neighbors
-                            nearest_neighbors = matched_points.nsmallest(3, "distance")
+                        for idx, row in joined[invalid_or_missing_mask].iterrows():
+                            try:
+                                centroid = row.geometry.centroid
+                                centroid_trans = coord_trans.TransformPoint(centroid.x, centroid.y)
+                                lat, lon = centroid_trans[1], centroid_trans[0]
+                                new_iso3 = fetch_ccode(lat=lat, lon=lon)
+                                if new_iso3:
+                                    joined.at[idx, 'iso3'] = new_iso3
 
-                            # Return the average value of the attribute
-                            return nearest_neighbors["iso3"].mode()
-
-                        # Step 4: Apply the function to all unmatched points
-                        unmatched_points["iso3"] = unmatched_points.geometry.apply(get_nearest_avg)
-
-                        # Step 5: Merge the results back into the main DataFrame
-                        for col in unmatched_points.columns:
-                            joined.loc[unmatched_points.index, col] = unmatched_points[col]
+                            except Exception as e:
+                                logger.warning(f"Failed to fetch ISO3 for geometry at index {idx} ({lat}, {lon}): {e}")
 
                     self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, joined['iso3']))))
                     cols = joined.columns.tolist()

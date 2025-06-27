@@ -1,0 +1,5 @@
+import pycountry
+
+PYCOUNTRY_COUNTRY_CODES = [c.alpha_3 for c in pycountry.countries]
+ADDITIONAL_COUNTRIES = ['KOS', 'SPR', 'XKX']
+COUNTRY_CODES = PYCOUNTRY_COUNTRY_CODES + ADDITIONAL_COUNTRIES

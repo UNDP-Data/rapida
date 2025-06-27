@@ -1,10 +1,9 @@
 import requests
 import logging
 import numpy as np
-import pycountry
 
+from rapida.util.countries import COUNTRY_CODES
 
-COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 
 
 logger = logging.getLogger(__name__)

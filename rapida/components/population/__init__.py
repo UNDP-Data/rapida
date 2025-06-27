@@ -2,7 +2,6 @@ import io
 import os
 from typing import List
 import logging
-import pycountry
 import rasterio
 from pyogrio import write_dataframe
 from pyproj import Transformer
@@ -24,7 +23,6 @@ from urllib.parse import urlencode
 import re
 from rapida.util.download_remote_file import download_remote_files
 
-COUNTRY_CODES = set([c.alpha_3 for c in pycountry.countries])
 logger = logging.getLogger('rapida')
 
 gdal.UseExceptions()
@@ -126,9 +124,6 @@ class PopulationVariable(Variable):
 
 
     def compute(self, **kwargs):
-
-
-
         var_path = os.path.join(self._source_folder_, f'{self.name}.tif')
         project = Project(os.getcwd())
         logger.debug(f'Computing {self.name} in {project.countries}')
@@ -298,6 +293,7 @@ class PopulationVariable(Variable):
             return self.local_path
 
         sources = []
+
         for country in project.countries:
             src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
             _, file_name = os.path.split(src_path)

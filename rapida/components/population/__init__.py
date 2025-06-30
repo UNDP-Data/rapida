@@ -210,7 +210,7 @@ class PopulationVariable(Variable):
         imported_file_path = self.import_raster(source=var_path)
         assert imported_file_path == var_path, f'var_path differs from {imported_file_path}'
         self.local_path = var_path
-        self._compute_affected_()
+        self._compute_affected_(**kwargs)
 
     def resolve(self,  **kwargs):
         already_done = kwargs.get('computed', None)
@@ -394,11 +394,11 @@ class PopulationVariable(Variable):
         os.rename(imported_local_path, source)
         return source
 
-    def _compute_affected_(self, progress=None):
-
+    def _compute_affected_(self, progress=None, **kwargs):
         project = Project(os.getcwd())
         if geo.is_raster(self.local_path) and project.raster_mask is not None:
-            task = progress.add_task(description="Computing affected version using GDAL calc")
+            if progress is not None:
+                task = progress.add_task(description="Computing affected version using GDAL calc")
 
             def progress_callback(complete, message, data, progress=progress, task=task):
                 if progress is not None and task is not None:

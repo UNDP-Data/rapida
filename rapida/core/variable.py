@@ -25,6 +25,8 @@ class Variable(BaseModel):
     local_path: FilePath = None
     component: str = None
     operator: str = None
+    source_column: str = None
+    source_column_value: str = None
     _extractor_: str = r"\{([^}]+)\}"
     _default_operators_ = '+-/*%'
     _source_folder_: str = None

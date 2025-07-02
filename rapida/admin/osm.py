@@ -7,6 +7,7 @@ import shapely
 from shapely.geometry import shape, box
 import logging
 from tqdm import tqdm
+from ratelimit import limits, sleep_and_retry
 from rapida.admin.util import bbox_to_geojson_polygon
 
 logger = logging.getLogger(__name__)
@@ -75,10 +76,15 @@ def get_admin_centroid(iso3=None, admin_name=None, osm_admin_level=None, overpas
 
 
 
+@sleep_and_retry
+@limits(calls=10, period=60)
 def fetch_adm_hierarchy(lat=None, lon=None, admin_level=None, overpass_url=OVERPASS_API_URL):
     """
     Fetches all administrative hierarchical levels from  OSM for a given point on Earth represented using geographical
     coordinates.
+
+    Overpass API has ratelimit described at https://dev.overpass-api.de/overpass-doc/en/preface/commons.html
+    Thus, this function limit only 10 requests per minute. That is 600 requests per hour, 7200 requests per day.
 
     :param overpass_url: str
     :param lat: the latitude of the point

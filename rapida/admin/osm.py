@@ -252,9 +252,6 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                         pbar.set_postfix_str(f'{tags.get("name", None)} ', refresh=True)
                         feature_geom = f['geometry']
                         geom = shape(feature_geom)
-                        if clip:
-                            geom = geom.intersection(bbox_polygon)
-                            f['geometry'] = geom.__geo_interface__
                         centroid = shapely.centroid(geom)
                         out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
                         out_props['name'] = tags.get('name', None)
@@ -263,6 +260,9 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
                         out_props['name_en'] = tags.get('name:en', None)
                         out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
                         f['properties'] = out_props
+                        if clip:
+                            geom = geom.intersection(bbox_polygon)
+                            f['geometry'] = geom.__geo_interface__
                         pbar.update(1)
                     pbar.set_postfix_str(f'finished', refresh=True)
                     return geojson

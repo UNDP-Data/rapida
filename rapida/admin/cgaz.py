@@ -83,6 +83,27 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
                                       res=h3id_precision)
                     feature.SetField("h3id", h3id)
                     layer.SetFeature(feature)
+            name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
+            source_name_field = f"admin{admin_level}_name"
+            source_name_index = layer.GetLayerDefn().GetFieldIndex(source_name_field)
+
+            if source_name_index < 0:
+                raise Exception(f"Source {url} does not contain expected name field: {source_name_field}")
+
+            if name_field_index < 0:
+                name_field = ogr.FieldDefn("name", ogr.OFTString)
+                layer.CreateField(name_field)
+                name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
+                if name_field_index < 0:
+                    raise Exception("Error: 'name' field was not created!")
+                layer.ResetReading()
+                for feature in layer:
+                    fid = feature.GetFID()
+                    name_value = feature.GetField(source_name_field)
+                    feature.SetField("name", name_value)
+                    if layer.SetFeature(feature) != 0:
+                        raise Exception(f"Failed to update feature {fid} with name '{name_value}'")
+
             if not keep_disputed_areas:
                 layer.ResetReading()
                 for feature in layer:

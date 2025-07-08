@@ -1,9 +1,13 @@
 import json
 import httpx
 import h3.api.basic_int as h3
+from osgeo import gdal
+
 from rapida.util.http_post_json import http_post_json
 from osm2geojson import json2geojson
 import shapely
+
+from shapely import wkb, wkt
 from shapely.geometry import shape, box
 import logging
 from tqdm import tqdm
@@ -13,6 +17,7 @@ from rapida.admin.util import bbox_to_geojson_polygon
 logger = logging.getLogger(__name__)
 OVERPASS_API_URL = 'https://overpass-api.de/api/interpreter'
 ADMIN_LEVELS = {0: (2,), 1: (3, 4), 2: (4, 5, 6, 7, 8)}
+DISPUTED_BOUNDARIES_URL = "https://undpngddlsgeohubdev01.blob.core.windows.net/admin/disputed_boundaries.fgb"
 
 
 def get_admin0_bbox(iso3=None, overpass_url=OVERPASS_API_URL):
@@ -146,8 +151,10 @@ def osmadml2undpadml(osm_level=None):
 def undpadml2osmadml(undp_level=None):
     return ADMIN_LEVELS[undp_level][-1]
 
+
 def fetch_admin( bbox=None, admin_level=None, osm_level=None,
-                       clip=False, h3id_precision=7, overpass_url=OVERPASS_API_URL
+                       clip=False, h3id_precision=7, overpass_url=OVERPASS_API_URL,
+                 keep_disputed_areas=False
                     ):
     """
     Fetch admin geospatial in a LATLON bounding box from OSM Overpass API
@@ -158,6 +165,8 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
     :param osm_level: int, None, the OSM admin level for witch to fetch data
     :param clip: boolean, False, if True geometries will be clipped to the bbox
     :param: h3id_precision, default=7, the tolerance in meters (~11) use to compute the unique id as a h3 hexagon id
+    :param overpass_url: str, the overpass URL, default='https://overpass-api.de/api/interpreter'
+    :param keep_disputed_areas: boolean, False, if True disputed areas will be kept in the resulting GeoJSON
 
     :return: a python dict representing fetched administrative units in GeoJSON format
 
@@ -239,43 +248,62 @@ def fetch_admin( bbox=None, admin_level=None, osm_level=None,
         logger.debug(overpass_query)
         timeout = httpx.Timeout(connect=10, read=1800, write=1800, pool=1000)
         try:
-            data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
-            nelems = len(data['elements'])
-            if nelems>0:
-                logger.info(f'Going to fetch  admin level {admin_level} boundaries from OSM level {level_value}')
-                with tqdm(total=nelems, desc=f'Downloading ...') as pbar:
-                    geojson = json2geojson(data=data)
-                    bbox_polygon = box(west, south, east, north)
-                    for i,f in enumerate(geojson['features']):
-                        props = f['properties']
-                        tags = props.pop('tags')
-                        pbar.set_postfix_str(f'{tags.get("name", None)} ', refresh=True)
-                        feature_geom = f['geometry']
-                        geom = shape(feature_geom)
-                        centroid = shapely.centroid(geom)
-                        out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
-                        out_props['name'] = tags.get('name', None)
-                        out_props['osm_admin_level'] = level_value
-                        out_props['undp_admin_level'] = admin_level
-                        out_props['name_en'] = tags.get('name:en', None)
-                        out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
-                        f['properties'] = out_props
-                        if clip:
-                            geom = geom.intersection(bbox_polygon)
-                            f['geometry'] = geom.__geo_interface__
-                        pbar.update(1)
-                    pbar.set_postfix_str(f'finished', refresh=True)
-                    return geojson
-            else:
-                logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
-                logger.info(f'Try changing OSM level or omitting it so eventually an OSM level is found!')
-                if osm_level is None:
-                    logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
-                continue
+            with gdal.OpenEx(DISPUTED_BOUNDARIES_URL, gdal.OF_READONLY | gdal.OF_VECTOR) as disputed_boundaries_ds:
+                data = http_post_json(url=overpass_url, query=overpass_query, timeout=timeout)
+                nelems = len(data['elements'])
+                if nelems>0:
+                    logger.info(f'Going to fetch  admin level {admin_level} boundaries from OSM level {level_value}')
+                    with tqdm(total=nelems, desc=f'Downloading ...') as pbar:
+                        geojson = json2geojson(data=data)
+                        bbox_polygon = box(west, south, east, north)
+                        new_features = []
+                        for i,f in enumerate(geojson['features']):
+                            props = f['properties']
+                            tags = props.pop('tags')
+                            pbar.set_postfix_str(f'{tags.get("name", None)} ', refresh=True)
+                            feature_geom = f['geometry']
+                            geom = shape(feature_geom)
+                            found_dispute = False
+                            if not keep_disputed_areas:
+                                layer = disputed_boundaries_ds.GetLayer(0)
+                                layer.ResetReading()
+                                for disputed_feat in layer:
+                                    gref = disputed_feat.GetGeometryRef()
+                                    line_geom = wkt.loads(gref.ExportToWkt())
+                                    if geom.intersects(line_geom):
+                                        logger.info(
+                                            f"Skipping feature '{tags.get('name')}' due to disputed border intersection.")
+                                        found_dispute = True
+                                        break
+                            if found_dispute:
+                                logger.info("Continuing to next feature due to dispute.")
+                                continue
+                            centroid = shapely.centroid(geom)
+                            out_props = fetch_adm_hierarchy(lat=centroid.y, lon=centroid.x, admin_level=level_value)
+                            out_props['name'] = tags.get('name', None)
+                            out_props['osm_admin_level'] = level_value
+                            out_props['undp_admin_level'] = admin_level
+                            out_props['name_en'] = tags.get('name:en', None)
+                            out_props['h3id'] = h3.latlng_to_cell(lat=centroid.y, lng=centroid.x, res=h3id_precision)
+                            f['properties'] = out_props
+                            if clip:
+                                geom = geom.intersection(bbox_polygon)
+                                f['geometry'] = geom.__geo_interface__
+                            new_features.append(f)
+                            pbar.update(1)
+                        geojson['features'] = new_features
+                        pbar.set_postfix_str(f'finished', refresh=True)
+                        return geojson
+                else:
+                    logger.info(f'No features were  retrieved from {overpass_url} using query \n "{overpass_query}"')
+                    logger.info(f'Try changing OSM level or omitting it so eventually an OSM level is found!')
+                    if osm_level is None:
+                        logger.info(f'Moving down to OSM level {VALID_SUBLEVELS[i+1]}')
+                    continue
         except Exception as e:
-            raise e
             logger.error(f'Can not fetch admin data from {overpass_url} at this time. {e}')
             logger.error(overpass_query)
+            raise e
 
 
 

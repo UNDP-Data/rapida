@@ -71,13 +71,18 @@ def admin():
     show_default=True,
     help="Precision level for H3 indexing (default is 7)."
 )
+@click.option('--keep-disputed-areas',
+    is_flag=True,
+    default=False,
+    help="Keep admin polygons that are disputed areas with invalid country code"
+)
 @click.option('--debug',
 
     is_flag=True,
     default=False,
     help="Set log level to debug"
 )
-def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, destination_path=None, debug=False,):
+def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, destination_path=None, debug=False, keep_disputed_areas=None):
     """
     Fetch admin boundaries from OSM
 
@@ -105,7 +110,7 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     if not is_rapida_initialized():
         return
 
-    geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision)
+    geojson = fetch_osm_admin(bbox=bbox, admin_level=admin_level,osm_level=osm_level, clip=clip, h3id_precision=h3id_precision, keep_disputed_areas=keep_disputed_areas)
     if not geojson:
         logger.error('Could not extract admin boundaries from OSM for the provided bbox')
         return

@@ -460,6 +460,10 @@ class SentinelItem(object):
         if url.startswith('s3://'):
             s3_path = url
             bucket = s3_path[5:].split('/')[0]
+            # NOTE: This is a workaround to earth search issue where the data points to a different bucket.
+            # See issue: https://github.com/Element84/earth-search/issues/3
+            if bucket != 'sentinel-s2-l1c':
+                bucket = 'sentinel-s2-l1c'
             object_name = '/'.join(s3_path[5:].split('/')[1:])
             return 'https://{0}.s3.amazonaws.com/{1}'.format(bucket, object_name)
         else:

@@ -24,11 +24,11 @@ except Exception as ie:
 
 class LandusePrediction(PredictionBase):
 
-
+    required_bands = ['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12']
     def __init__(self,item: pystac.Item, tile_size: int = 512, tile_buffer: int = 64):
         super().__init__(item,
                          component_name="landuse",
-                         bands=['B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'],
+                         bands=self.required_bands,
                          output_nodata_value=255,
                          input_nodata_value=0,
                          tile_size=tile_size,

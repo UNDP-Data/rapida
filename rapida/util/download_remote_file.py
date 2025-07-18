@@ -1,12 +1,17 @@
-import asyncio
-import os
 from typing import Iterable
 
 import httpx
+import os
+
+import aiohttp
+import aiofiles
+import asyncio
 import logging
 
-
 logger = logging.getLogger(__name__)
+
+CHUNK_SIZE = 8 * 1024 * 1024
+DEFAULT_CONCURRENCY = 5
 
 
 async def download_remote_file(file_url: str,
@@ -106,7 +111,7 @@ def download_remote_files(file_urls: Iterable[str],
             else:
                 file_name = os.path.basename(url)
                 target_path = os.path.join(dst_folder, file_name)
-
+            print("TARGET PATH FOLDER", target_path)
             for attempt in range(1, max_retries + 1):
                 async with semaphore:
                     try:
@@ -141,3 +146,144 @@ def download_remote_files(file_urls: Iterable[str],
     loop.close()
 
     return downloaded_files
+
+
+async def fetch_and_write(session=None, url=None, offset=None, size=None, file_descriptor=None, sem=None, task_id=None, progress=None):
+    try:
+        headers = {'Range': f'bytes={offset}-{offset + size - 1}'}
+        async with sem:
+            resp = await session.get(url, headers=headers)
+            resp.raise_for_status()
+            content = await resp.read()
+            await file_descriptor.seek(offset)
+            await file_descriptor.write(content)
+            if progress and task_id is not None:
+                progress.update(task_id, advance=len(content))
+
+    except Exception as e:
+        logger.error(f"Failed to fetch and write {url} to {file_descriptor.name}: {e}")
+        raise
+
+
+async def download_s3_object(
+    url,
+    filename,
+    chunk_size: int = CHUNK_SIZE,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    progress=None,
+    max_retries: int = 5,
+    client_session=None,
+):
+    attempt = 0
+    while attempt < max_retries:
+        try:
+            resp = await client_session.head(url)
+            resp.raise_for_status()
+            total_size = int(resp.headers['Content-Length'])
+
+            async with aiofiles.open(filename, 'wb') as f:
+                await f.truncate(total_size)
+
+            task_id = None
+            if progress:
+                task_id = progress.add_task(f'[cyan]Downloading {url}', total=total_size)
+
+            sem = asyncio.Semaphore(concurrency)
+            tasks = []
+            async with aiofiles.open(filename, 'r+b') as fd:
+                for offset in range(0, total_size, chunk_size):
+                    size = min(chunk_size, total_size - offset)
+
+                    tasks.append(
+                        asyncio.create_task(fetch_and_write(
+                            session=client_session,
+                            url=url,
+                            offset=offset,
+                            size=size,
+                            file_descriptor=fd,
+                            sem=sem,
+                            task_id=task_id,
+                            progress=progress
+                        ))
+                    )
+
+                try:
+                    done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
+                    for task in done:
+                        if task.exception():
+                            raise task.exception()
+                    if progress and task_id is not None:
+                        progress.remove_task(task_id)
+
+                    logger.debug(
+                        f"Downloaded {os.path.getsize(filename)} bytes from {url} to {filename}"
+                    )
+                    return filename
+                finally:
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+
+        except asyncio.CancelledError:
+            if os.path.exists(filename):
+                os.remove(filename)
+            raise
+        except Exception as e:
+            attempt += 1
+            logger.warning(f"[Attempt {attempt}/{max_retries}] Failed to download {url}: {e}")
+            if os.path.exists(filename):
+                os.remove(filename)
+            if attempt >= max_retries:
+                logger.error(f"Exceeded max retries for {url}")
+                raise
+            await asyncio.sleep(2 ** attempt)
+    return None
+
+
+async def download_remote_files1(
+        file_urls: Iterable[str],
+        dst_folder: str,
+        progress=None,
+        target_path_func=None):
+    """
+    Download remote files from a list of URLs.
+
+    :param file_urls: The URLs of the files to download.
+    :param dst_folder: The folder to save the files in.
+    :param progress: An optional rich progress bar instance.
+    :param target_path_func: A function that takes a URL as an argument and returns
+    """
+
+    try:
+        async with aiohttp.ClientSession() as client_session:
+            tasks = []
+            os.makedirs(dst_folder, exist_ok=True)
+            for file_url in file_urls:
+                if target_path_func is not None:
+                    target_path = target_path_func(file_url, dst_folder)
+
+                    new_dirname = os.path.dirname(target_path)
+                    if new_dirname != dst_folder:
+                        os.makedirs(new_dirname, exist_ok=True)
+                    file_name = os.path.basename(target_path)
+                else:
+                    file_name = os.path.basename(file_url)
+                    target_path = os.path.join(dst_folder, file_name)
+                tasks.append(
+                    asyncio.create_task(download_s3_object(url=file_url, filename=target_path, progress=progress,
+                                    client_session=client_session))
+                )
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for result in results:
+                if isinstance(result, Exception):
+                    # raise the error as if download on even one fails, the results should not be collected
+                    raise result
+            return results
+    except (KeyboardInterrupt, asyncio.CancelledError) as e:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to download remote files: {e}")
+        raise
+

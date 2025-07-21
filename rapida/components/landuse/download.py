@@ -11,9 +11,8 @@ from rich.progress import Progress
 import geopandas as gpd
 import time
 
-from rapida.components.landuse.sentinel_item import SentinelItem, SentinelItem1
+from rapida.components.landuse.sentinel_item import SentinelItem
 from rapida.components.landuse.stac_collection import StacCollection
-
 
 logger = logging.getLogger('rapida')
 
@@ -117,7 +116,7 @@ async def download_stac(
 
         sentinel_items =  []
         for item in latest_per_tile.values():
-            sentinel_items.append(SentinelItem1(item, mask_file=tmp_cutline_path, mask_layer=polygons_layer_name))
+            sentinel_items.append(SentinelItem(item, mask_file=tmp_cutline_path, mask_layer=polygons_layer_name))
 
         if progress and stac_task:
             progress.update(stac_task, description=f"[cyan]Preparing to download {len(sentinel_items)} scenes", total=len(sentinel_items))
@@ -135,7 +134,7 @@ async def download_stac(
         predict_queue = Queue()
         completed_items = []
 
-        def downloader(item: SentinelItem1):
+        def downloader(item: SentinelItem):
             if stop_event.is_set():
                 return
             try:

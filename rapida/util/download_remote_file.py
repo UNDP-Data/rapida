@@ -74,80 +74,6 @@ async def download_remote_file(file_url: str,
             progress.remove_task(download_task)
 
 
-def download_remote_files(file_urls: Iterable[str],
-                          dst_folder: str,
-                          progress=None,
-                          max_workers: int = 10,
-                          max_retries:int = 5,
-                          target_path_func=None):
-    """
-    Download remote files from a list of URLs.
-
-    :param file_urls: The URLs of the files to download.
-    :param dst_folder: The folder to save the files in.
-    :param progress: An optional rich progress bar instance.
-    :param max_workers: The maximum number of concurrent downloads. Default to 10.
-    :param max_retries: The maximum number of retries if fails to download. Default to 5.
-    :param target_path_func: A function that takes a URL as an argument and returns
-    """
-
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    # limit maximum number of workers to access to remote file server.
-    semaphore = asyncio.Semaphore(max_workers)
-    downloaded_files = []
-
-    async def download_all():
-        async def download_one(url: str):
-            os.makedirs(dst_folder, exist_ok=True)
-            # Use custom target_path_func if provided, otherwise default behavior
-            if target_path_func is not None:
-                target_path = target_path_func(url, dst_folder)
-
-                new_dirname = os.path.dirname(target_path)
-                if new_dirname != dst_folder:
-                    os.makedirs(new_dirname, exist_ok=True)
-                file_name = os.path.basename(target_path)
-            else:
-                file_name = os.path.basename(url)
-                target_path = os.path.join(dst_folder, file_name)
-            print("TARGET PATH FOLDER", target_path)
-            for attempt in range(1, max_retries + 1):
-                async with semaphore:
-                    try:
-                        await download_remote_file(
-                            file_url=url,
-                            output_file=target_path,
-                            progress=progress)
-
-                        downloaded_files.append(target_path)
-                        return
-                    except Exception as e:
-                        logger.warning(f"[{file_name}] Attempt {attempt}/{max_retries} failed: {e}")
-                        if attempt == max_retries:
-                            logger.error(f"Failed to download {file_name} after {max_retries} attempts.")
-                        else:
-                            await asyncio.sleep(3)
-
-        tasks = [
-            asyncio.create_task(download_one(file_url))
-            for file_url in file_urls
-        ]
-        try:
-            await asyncio.gather(*tasks)
-        except KeyboardInterrupt:
-            logger.warning("Download interrupted by user. Cancelling tasks...")
-            for task in tasks:
-                task.cancel()
-            await asyncio.gather(*tasks, return_exceptions=True)
-            raise
-
-    loop.run_until_complete(download_all())
-    loop.close()
-
-    return downloaded_files
-
-
 async def fetch_and_write(session=None, url=None, offset=None, size=None, file_descriptor=None, sem=None, task_id=None, progress=None):
     try:
         headers = {'Range': f'bytes={offset}-{offset + size - 1}'}
@@ -240,7 +166,7 @@ async def download_s3_object(
     return None
 
 
-async def download_remote_files1(
+async def download_remote_files(
         file_urls: Iterable[str],
         dst_folder: str,
         progress=None,
@@ -251,7 +177,7 @@ async def download_remote_files1(
     :param file_urls: The URLs of the files to download.
     :param dst_folder: The folder to save the files in.
     :param progress: An optional rich progress bar instance.
-    :param target_path_func: A function that takes a URL as an argument and returns
+    :param target_path_func: A function that takes a URL as an argument and returns a path to save the file to.
     """
 
     try:

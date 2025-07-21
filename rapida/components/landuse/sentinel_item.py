@@ -1,30 +1,26 @@
+import asyncio
 import json
 import logging
 import os
-import asyncio
 import shutil
 import tempfile
 import time
-
-import aiofiles
-import aiohttp
-import httpx
-import pystac
 from typing import Dict
-from osgeo import ogr, osr, gdal
-import rasterio
-from rasterio.mask import mask
-from rasterio.warp import calculate_default_transform, reproject, Resampling
-import numpy as np
+
 import geopandas as gpd
+import numpy as np
+import pystac
+import rasterio
+from osgeo import ogr, osr, gdal
+from rasterio.mask import mask
+from rasterio.warp import calculate_default_transform
 from rich.progress import Progress
 
+from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.components.landuse.prediction.cloud import CloudDetection
 from rapida.components.landuse.prediction.landuse import LandusePrediction
-from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
-from rapida.util.download_remote_file import download_remote_files, download_remote_files1
+from rapida.util.download_remote_file import download_remote_files
 from rapida.util.setup_logger import setup_logger
-
 
 logger = logging.getLogger(__name__)
 
@@ -190,14 +186,12 @@ class SentinelItem(object):
 
     def download_assets(self,
                         download_dir: str,
-                        progress=None,
-                        max_workers: int = 12) -> Dict[str, str]:
+                        progress=None) -> Dict[str, str]:
         """
         Download all required bands for this STAC item in parallel.
 
         :param download_dir: directory to store downloaded GeoTIFFs
         :param progress: optional rich progress bar
-        :param max_workers: maximum number of parallel downloads
         :return: Dictionary of band name -> downloaded file path
         """
         self._asset_files = {
@@ -205,7 +199,19 @@ class SentinelItem(object):
             for asset_key, band_name in self.target_asset.items()
         }
 
+        cloud_cover = self.item.properties.get('eo:cloud_cover', None)
+        if cloud_cover is not None and cloud_cover < 1.0:
+            for band_name in list(self._asset_files.keys()):
+                if band_name not in LandusePrediction.required_bands:
+                    self._asset_files.pop(band_name, None)
+
+                    # Remove keys in target_asset where value == band_name
+                    keys_to_remove = [k for k, v in self.target_asset.items() if v == band_name]
+                    for k in keys_to_remove:
+                        self.target_asset.pop(k, None)
+
         item_path = os.path.join(download_dir, self.id, "item.json")
+
         if os.path.exists(item_path):
             with open(item_path, "r", encoding="utf-8") as f:
                 existing_item = json.load(f)
@@ -232,21 +238,29 @@ class SentinelItem(object):
 
         def get_target_path_for_url(url, dst_folder):
             target_path = url_to_target_mapping.get(url)
-            # target_dir = os.path.dirname(target_path)
             return target_path
 
-        download_remote_files(file_urls=file_urls,
-                              dst_folder=download_dir,
-                              max_workers=max_workers,
-                              max_retries=5,
-                              target_path_func=get_target_path_for_url,
-                              progress=progress)
+        try:
+            loop = asyncio.get_event_loop()
+            loop.run_until_complete(
+                download_remote_files(
+                    file_urls=file_urls,
+                    dst_folder=download_dir,
+                    target_path_func=get_target_path_for_url,
+                    progress=progress,
+                )
+            )
 
-        # once all downloads are successfully done, write item.json in the folder
-        with open(item_path, "w", encoding="utf-8") as f:
-            json.dump(self.item.to_dict(), f, indent=2)
+            # once all downloads are successfully done, write item.json in the folder
+            with open(item_path, "w", encoding="utf-8") as f:
+                json.dump(self.item.to_dict(), f, indent=2)
 
-        return self.asset_files
+            return self.asset_files
+        except (asyncio.CancelledError, KeyboardInterrupt):
+            raise
+        except Exception as e:
+            logger.error(f"Failed to download assets for item {self.id}: {e}")
+            raise
 
 
     def predict(self, progress=None)->str:
@@ -472,91 +486,6 @@ class SentinelItem(object):
         else:
             return url
 
-
-class SentinelItem1(SentinelItem):
-    def download_assets(self,
-                        download_dir: str,
-                        progress=None,
-                        max_workers: int = 12) -> Dict[str, str]:
-        """
-        Download all required bands for this STAC item in parallel.
-
-        :param download_dir: directory to store downloaded GeoTIFFs
-        :param progress: optional rich progress bar
-        :param max_workers: maximum number of parallel downloads
-        :return: Dictionary of band name -> downloaded file path
-        """
-        self._asset_files = {
-            band_name: os.path.join(download_dir, self.id, f"{band_name}.jp2")
-            for asset_key, band_name in self.target_asset.items()
-        }
-
-        cloud_cover = self.item.properties.get('eo:cloud_cover', None)
-        if cloud_cover is not None and cloud_cover < 1.0:
-            for band_name in list(self._asset_files.keys()):
-                if band_name not in LandusePrediction.required_bands:
-                    self._asset_files.pop(band_name, None)
-
-                    # Remove keys in target_asset where value == band_name
-                    keys_to_remove = [k for k, v in self.target_asset.items() if v == band_name]
-                    for k in keys_to_remove:
-                        self.target_asset.pop(k, None)
-
-        item_path = os.path.join(download_dir, self.id, "item.json")
-
-        if os.path.exists(item_path):
-            with open(item_path, "r", encoding="utf-8") as f:
-                existing_item = json.load(f)
-                if existing_item.get("id") == self.item.id:
-                    logger.warning(f"The same item ({self.id}) has already been downloaded. Skipping")
-                    return self.asset_files
-                else:
-                    # if different item id, delete old prediction file if exists
-                    if os.path.exists(self.predicted_file):
-                        os.remove(self.predicted_file)
-                    if os.path.exists(self.cloud_mask_file):
-                        os.remove(self.cloud_mask_file)
-
-        file_urls = []
-        url_to_target_mapping = {}
-        for asset_key, band_name in self.target_asset.items():
-            asset = self.item.assets[asset_key]
-            url = self._s3_to_http(asset.href)
-            file_urls.append(url)
-            band_dir = os.path.join(download_dir, self.id)
-            file_extension = os.path.splitext(url)[1]
-            target_path = os.path.join(band_dir, f"{band_name}{file_extension}")
-            url_to_target_mapping[url] = target_path
-
-        def get_target_path_for_url(url, dst_folder):
-            target_path = url_to_target_mapping.get(url)
-            return target_path
-
-        try:
-            loop = asyncio.get_event_loop()
-            loop.run_until_complete(
-                download_remote_files1(
-                    file_urls=file_urls,
-                    dst_folder=download_dir,
-                    target_path_func=get_target_path_for_url,
-                    progress=progress,
-                )
-            )
-
-            # once all downloads are successfully done, write item.json in the folder
-            with open(item_path, "w", encoding="utf-8") as f:
-                json.dump(self.item.to_dict(), f, indent=2)
-
-            return self.asset_files
-        except (asyncio.CancelledError, KeyboardInterrupt):
-            raise
-        except Exception as e:
-            logger.error(f"Failed to download assets for item {self.id}: {e}")
-            raise
-
-
-
-
 if __name__ == '__main__':
     setup_logger()
 
@@ -572,7 +501,7 @@ if __name__ == '__main__':
 
     with Progress() as progress:
         t1 = time.time()
-        sentinel_item = SentinelItem1(item, mask_file=mask_file, mask_layer=mask_layer)
+        sentinel_item = SentinelItem(item, mask_file=mask_file, mask_layer=mask_layer)
         sentinel_item.download_assets(download_dir=download_dir,
                                       progress=progress)
         t2 = time.time()

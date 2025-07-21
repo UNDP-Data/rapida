@@ -1,18 +1,20 @@
+import concurrent.futures
 import json
 import logging
-import concurrent.futures
 import threading
-from typing import Any, Dict, List
+from collections import defaultdict
 from datetime import date
-from rich.progress import Progress
-import pystac
-import pystac_client
+from typing import Any, Dict, List
+
 import geopandas as gpd
 import numpy as np
+import pystac
+import pystac_client
 import shapely
+from rich.progress import Progress
 from shapely.geometry import Point, MultiPoint, Polygon, shape, mapping
 from shapely.ops import unary_union
-from collections import defaultdict
+
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.util.setup_logger import setup_logger
 
@@ -125,6 +127,7 @@ class StacCollection(object):
 
         # Apply grid:code optimization
         optimized_items = self._optimize_by_grid_code(all_items, intersects_geometry)
+
 
         return optimized_items
 

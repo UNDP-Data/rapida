@@ -133,15 +133,22 @@ class LanduseVariable(Variable):
         progress: Progress = kwargs.get('progress', None)
 
         if force or not os.path.exists(self.prediction_output_image):
-            asyncio.run(download_stac(stac_url=self.stac_url,
-                          collection_id=self.collection_id,
-                          geopackage_file_path=project.geopackage_file_path,
-                          polygons_layer_name=project.polygons_layer_name,
-                          output_file=self.prediction_output_image,
-                          target_srs=project.target_srs,
-                          datetime_range=self.datetime_range,
-                          cloud_cover=self.cloud_cover,
-                          progress=progress))
+            loop = asyncio.get_event_loop()
+            try:
+                run = loop.create_task(download_stac(stac_url=self.stac_url,
+                              collection_id=self.collection_id,
+                              geopackage_file_path=project.geopackage_file_path,
+                              polygons_layer_name=project.polygons_layer_name,
+                              output_file=self.prediction_output_image,
+                              target_srs=project.target_srs,
+                              datetime_range=self.datetime_range,
+                              cloud_cover=self.cloud_cover,
+                              progress=progress))
+                loop.run_until_complete(run)
+            except (KeyboardInterrupt, asyncio.CancelledError) as e:
+                logger.info(f'Cancelled download task for {self.name}')
+                run.cancel()
+                raise
 
 
     def _compute_affected_(self, **kwargs):

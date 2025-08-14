@@ -1,3 +1,4 @@
+import asyncio
 import io
 import os
 from typing import List
@@ -171,7 +172,7 @@ class PopulationVariable(Variable):
                 if not os.path.exists(self._source_folder_):
                     os.makedirs(self._source_folder_)
 
-                downloaded_files = download_remote_files(source_blobs, self._source_folder_, progress=kwargs.get('progress', None))
+                downloaded_files = asyncio.run(download_remote_files(source_blobs, self._source_folder_, progress=kwargs.get('progress', None)))
 
                 assert len(self.sources) == len(downloaded_files), f'Not all sources were downloaded for {self.name} variable'
                 src_path = self.interpolate_template(template=self.source, country=country, **kwargs)
@@ -337,7 +338,7 @@ class PopulationVariable(Variable):
                 src_path = f"{base_url}/{src_blob_path}"
 
             sources.append(src_path)
-        downloaded_files = download_remote_files(sources, self._source_folder_, progress=progress)
+        downloaded_files = asyncio.run(download_remote_files(sources, self._source_folder_, progress=progress))
 
         vrt_path = self.local_path.replace('.tif', '.vrt')
         vrt_options = gdal.BuildVRTOptions(

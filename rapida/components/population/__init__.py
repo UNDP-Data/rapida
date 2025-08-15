@@ -258,7 +258,6 @@ class PopulationVariable(Variable):
 
                     src_rasters.append(affected_local_path)
                     var_ops.append((f'{target_year}_{self.name}_affected', self.operator))
-                print(var_ops)
                 gdf = zst(src_rasters=src_rasters,
                                   polygon_ds=project.geopackage_file_path,
                                   polygon_layer=polygons_layer, vars_ops=var_ops, progress=progress

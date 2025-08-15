@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import hashlib
-import io
 import json
 import logging
 import os
@@ -16,11 +15,9 @@ import h3.api.basic_int as h3
 import pyogrio
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
-from pyproj import CRS as pCRS
 from azure.storage.fileshare import ShareClient
 
 from rapida import constants
-from rapida.admin.osm import fetch_admin
 from rapida.az.blobstorage import check_blob_exists, delete_blob
 from rapida.session import Session
 from rapida.util import geo
@@ -145,59 +142,38 @@ class Project:
                 if  "iso3" in cols and gdf['iso3'].isna().any():
                     gdf.drop(columns=["iso3"], inplace=True)
                 cols = gdf.columns.tolist()
-                if not 'iso3' in cols:
-                    logger.info(f'ISO3 column missing or some values are empty in ISO3 column. Going to add country codes into "iso3" column')
+                if 'iso3' not in cols:
+                    logger.info(
+                        'ISO3 column missing or some values are empty in ISO3 column. '
+                        'Going to add country codes into "iso3" column'
+                    )
                     geo_srs = osr.SpatialReference()
                     geo_srs.ImportFromEPSG(4326)
                     geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
                     coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
-                    geo_bounds = coord_trans.TransformBounds(*proj_bounds, 21)
+                    centroids = gdf.geometry.centroid
+                    transformed = [coord_trans.TransformPoint(x, y) for x, y in zip(centroids.x, centroids.y)]
+                    lats = [t[1] for t in transformed]
+                    lons = [t[0] for t in transformed]
 
-                    admin0_polygons = fetch_admin(bbox=geo_bounds, admin_level=0,
-                                                  h3id_precision=h3id_precision)  # using osm admin to populate the iso3 codes
-
-                    target_crs = pCRS.from_user_input(self.projection)
-                    with io.BytesIO(json.dumps(admin0_polygons, indent=2).encode('utf-8')) as a0l_bio:
-                        a0_gdf = geopandas.read_file(a0l_bio).to_crs(crs=target_crs)
-                    centroids = gdf.copy()
-                    centroids["geometry"] = gdf.centroid
-                    a0_gdf.rename(columns=lambda x: f"a0_{x}" if x in centroids.columns and x != "geometry" else x, inplace=True)
-                    joined = geopandas.sjoin(centroids, a0_gdf, how="left", predicate="within")
-                    left_cols = [col for col in centroids.columns if col in joined.columns]
-                    left_cols.append('iso3')
-                    joined = joined[left_cols]
-                    joined['geometry'] = gdf['geometry']
-
-
-                    invalid_or_missing_mask = joined['iso3'].isna() | ~joined['iso3'].isin(COUNTRY_CODES)
-
-                    if invalid_or_missing_mask.any():
-                        logger.info("Missing or invalid ISO3 country codes found. Attempting to assign correct ones...")
-
-                        for idx, row in joined[invalid_or_missing_mask].iterrows():
-                            try:
-                                centroid = row.geometry.centroid
-                                centroid_trans = coord_trans.TransformPoint(centroid.x, centroid.y)
-                                lat, lon = centroid_trans[1], centroid_trans[0]
-                                new_iso3 = fetch_ccode(lat=lat, lon=lon)
-                                if new_iso3:
-                                    joined.at[idx, 'iso3'] = new_iso3
-
-                            except Exception as e:
-                                logger.warning(f"Failed to fetch ISO3 for geometry at index {idx} ({lat}, {lon}): {e}")
-
-                    self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, joined['iso3']))))
-                    cols = joined.columns.tolist()
-
-                    for col_name in ('index_right', 'index_left'):
-                        if col_name in cols:
-                            joined.drop(columns=[col_name], inplace=True)
-
-                    joined.to_file(filename=self.geopackage_file_path, driver='GPKG', engine='pyogrio', mode='w', layer=self.polygons_layer_name,
-                                 promote_to_multi=True, index=False)
-
-                    gdf = joined
-
+                    iso3_codes = []
+                    for lat, lon in zip(lats, lons):
+                        try:
+                            iso3_codes.append(fetch_ccode(lat=lat, lon=lon))
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch ISO3 for point ({lat}, {lon}): {e}")
+                            iso3_codes.append(None)
+                    gdf["iso3"] = iso3_codes
+                    self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, gdf["iso3"]))))
+                    gdf.to_file(
+                        filename=self.geopackage_file_path,
+                        driver="GPKG",
+                        engine="pyogrio",
+                        mode="w",
+                        layer=self.polygons_layer_name,
+                        promote_to_multi=True,
+                        index=False
+                    )
 
                 if 'h3id' in cols:
                     h3ids = gdf['h3id'].tolist()

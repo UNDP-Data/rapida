@@ -246,32 +246,32 @@ class PopulationVariable(Variable):
             if self.operator:
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
                 logger.debug(f'Evaluating variable {self.name} using zonal stats')
-
+                year = kwargs.get('year')
+                target_year = kwargs.get('target_year')
                 # raster variable, run zonal stats
                 src_rasters = [self.local_path]
-                var_ops = [(self.name, self.operator)]
+                var_ops = [(f"{target_year}_{self.name}", self.operator)]
                 if project.raster_mask is not None:
                     path, file_name = os.path.split(self.local_path)
                     fname, ext = os.path.splitext(file_name)
                     affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
 
                     src_rasters.append(affected_local_path)
-                    var_ops.append((f'{self.name}_affected', self.operator))
-
+                    var_ops.append((f'{target_year}_{self.name}_affected', self.operator))
+                print(var_ops)
                 gdf = zst(src_rasters=src_rasters,
                                   polygon_ds=project.geopackage_file_path,
                                   polygon_layer=polygons_layer, vars_ops=var_ops, progress=progress
                                   )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
                 assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
-                year = kwargs.get('year')
-                target_year = kwargs.get('target_year')
+
                 countries = set(gdf['iso3'])
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
-                    gdf.loc[gdf['iso3'] == country, self.name] *= coeff
+                    gdf.loc[gdf['iso3'] == country, f'{target_year}_{self.name}'] *= coeff
                     if project.raster_mask is not None:
-                        gdf.loc[gdf['iso3'] == country, f'{self.name}_affected'] *= coeff
+                        gdf.loc[gdf['iso3'] == country, f'{target_year}_{self.name}_affected'] *= coeff
             else:
                 # we eval inside GeoDataFrame
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')

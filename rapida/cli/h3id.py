@@ -23,4 +23,4 @@ logger = logging.getLogger(__name__)
 @click.option('-c', '--h3id_column', default="h3id", show_default=True, type=str, help="column name to add h3id to.")
 @click.option('--h3id_precision', '-p', default=7, show_default=True, type=int, help='precision of h3id')
 def addh3id(dataset_path=None, h3id_precision=7, layer=None, h3id_column=None):
-    add_h3id(dataset_path=dataset_path, h3id_precision=h3id_precision, layer=layer, h3id_column=h3id_column)
+    add_h3id(dataset_path=dataset_path, h3id_precision=h3id_precision, layer_name=layer, h3id_column=h3id_column)

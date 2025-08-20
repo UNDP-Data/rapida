@@ -1,11 +1,11 @@
-import h3
+import h3.api.basic_int as h3
 from osgeo import gdal, ogr
 
 
-def add_h3id(dataset_path=None, h3id_precision=7, layer=None, h3id_column=None):
+def add_h3id(dataset_path=None, h3id_precision=7, layer_name=None, h3id_column=None):
     with gdal.OpenEx(dataset_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as ds:
 
-        layer = ds.GetLayerByName(layer) if isinstance(layer, str) else ds.GetLayer(layer)
+        layer = ds.GetLayerByName(layer_name) if isinstance(layer_name, str) else ds.GetLayer(layer_name)
         h3id_field_index = layer.GetLayerDefn().GetFieldIndex(h3id_column)
         if h3id_field_index < 0:
             h3id_field = ogr.FieldDefn(h3id_column, ogr.OFTInteger64)
@@ -19,4 +19,4 @@ def add_h3id(dataset_path=None, h3id_precision=7, layer=None, h3id_column=None):
                 layer.SetFeature(feature)
         else:
             raise Exception(f'{layer} already has h3id field!, Please delete it first! \n'
-                            f'ogrinfo {dataset_path} -sql "++++ TABLE {layer} DROP COLUMN {h3id_column}"')
+                            f'ogrinfo {dataset_path} -sql "ALTER TABLE {layer_name} DROP COLUMN {h3id_column}"')

@@ -113,6 +113,8 @@ class PopulationVariable(Variable):
                 description=f'[blue]Assessing {self.component}->{self.name}', total=None)
 
         if not self.dep_vars:  # simple variable,
+
+
             if not force:
                 # logger.debug(f'Downloading {self.name} source')
                 self.download(**kwargs)
@@ -125,18 +127,21 @@ class PopulationVariable(Variable):
                     progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}', )
 
         else:
+            logger.debug(f'Formula based eval {self.operator} {force} for {self.name}')
+
             if self.operator:
                 if not force:
-                    # logger.debug(f'Downloading {self.name} from  source')
+                    logger.debug(f'Downloading {self.name} from  source {self.source}')
                     self.download(**kwargs)
-                    if progress is not None and variable_task is not None:
-                        progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
+                    # if progress is not None and variable_task is not None:
+                    #     progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
                 else:
-                    # logger.info(f'Computing {self.name}={self.sources} using GDAL')
+                    logger.debug(f'Computing {self.name}={self.sources} using GDAL')
                     self.compute(**kwargs)
-                    if progress is not None and variable_task is not None:
-                        progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
+                    # if progress is not None and variable_task is not None:
+                    #     progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
             else:
+
                 logger.debug(f'Resolving {self.name}={self.sources}')
                 sources = self.resolve(**kwargs)
 
@@ -235,6 +240,9 @@ class PopulationVariable(Variable):
 
         dst_layer = f'stats.{self.component}'
         progress = kwargs.get('progress', None)
+        year = kwargs.get('year')
+        target_year = kwargs.get('target_year')
+        varname = f'{self.name}_{target_year}'
         with Session() as s:
             project = Project(path=os.getcwd())
             layers = geopandas.list_layers(project.geopackage_file_path)
@@ -246,45 +254,52 @@ class PopulationVariable(Variable):
             if self.operator:
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
                 logger.debug(f'Evaluating variable {self.name} using zonal stats')
-                year = kwargs.get('year')
-                target_year = kwargs.get('target_year')
                 # raster variable, run zonal stats
                 src_rasters = [self.local_path]
-                var_ops = [(f"{target_year}_{self.name}", self.operator)]
+                var_ops = [(varname, self.operator)]
                 if project.raster_mask is not None:
                     path, file_name = os.path.split(self.local_path)
                     fname, ext = os.path.splitext(file_name)
                     affected_local_path = os.path.join(path, f'{fname}_affected{ext}')
 
                     src_rasters.append(affected_local_path)
-                    var_ops.append((f'{target_year}_{self.name}_affected', self.operator))
+                    var_ops.append((f'{varname}_affected', self.operator))
                 gdf = zst(src_rasters=src_rasters,
                                   polygon_ds=project.geopackage_file_path,
                                   polygon_layer=polygons_layer, vars_ops=var_ops, progress=progress
                                   )
                 assert 'year' in kwargs, f'Need year kword to compute pop coeff'
-                assert 'target_year' in kwargs, f'Need target_year kword to compute pop coeff'
+                assert 'target_year' in kwargs, f'Need target_year keyword to compute pop coeff'
 
                 countries = set(gdf['iso3'])
                 for country in countries:
                     coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
-                    gdf.loc[gdf['iso3'] == country, f'{target_year}_{self.name}'] *= coeff
+                    gdf.loc[gdf['iso3'] == country, f'{varname}'] *= coeff
                     if project.raster_mask is not None:
-                        gdf.loc[gdf['iso3'] == country, f'{target_year}_{self.name}_affected'] *= coeff
+                        gdf.loc[gdf['iso3'] == country, f'{varname}_affected'] *= coeff
             else:
                 # we eval inside GeoDataFrame
+
                 logger.debug(f'Evaluating variable {self.name} using GeoPandas eval')
                 gdf = geopandas.read_file(filename=project.geopackage_file_path,layer=dst_layer)
-                expr = f'{self.name}={self.sources}'
-                gdf.eval(expr, inplace=True)
+                sources = None
+                for vname in self.dep_vars:
+                    yvname = f'{vname}_{target_year}'
+                    lsources = sources or self.sources
+                    sources = lsources.replace(vname, f'{yvname}')
+                expr = f'{varname}={sources}'
+
+                gdf.eval(expr, inplace=True, parser='pandas')
+
                 # affected
                 if project.raster_mask is not None:
                     affected_sources = ''
                     for vname in self.dep_vars:
+                        yvname = f'{vname}_{target_year}'
                         v = affected_sources or self.sources
-                        affected_sources = v.replace(vname, f'{vname}_affected')
+                        affected_sources = v.replace(vname, f'{yvname}_affected')
 
-                    expr = f'{self.name}_affected={affected_sources}'
+                    expr = f'{varname}_affected={affected_sources}'
                     gdf.eval(expr, inplace=True)
 
 

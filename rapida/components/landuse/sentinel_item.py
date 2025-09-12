@@ -186,7 +186,8 @@ class SentinelItem(object):
 
     def download_assets(self,
                         download_dir: str,
-                        progress=None) -> Dict[str, str]:
+                        progress=None,
+                        force=False) -> Dict[str, str]:
         """
         Download all required bands for this STAC item in parallel.
 
@@ -212,7 +213,7 @@ class SentinelItem(object):
 
         item_path = os.path.join(download_dir, self.id, "item.json")
 
-        if os.path.exists(item_path):
+        if not force and os.path.exists(item_path):
             with open(item_path, "r", encoding="utf-8") as f:
                 existing_item = json.load(f)
                 if existing_item.get("id") == self.item.id:

@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import shutil
@@ -55,6 +56,55 @@ def gdal_callback(complete, message, data):
         if timeout_event and timeout_event.is_set():
             logger.info(f'GDAL was signalled to stop...')
             return 0
+
+def find_sentinel_imagery( stac_url: str, collection_id: str,
+    geopackage_file_path: str, polygons_layer_name: str,
+    datetime_range:str, cloud_cover: int = 5,
+    progress: Progress = None,
+):
+    """
+    Find Sentinel2 imagery
+    :param stac_url:
+    :param collection_id:
+    :param geopackage_file_path:
+    :param polygons_layer_name:
+    :param datetime_range:
+    :param cloud_cover:
+    :param progress:
+    :return: list[SentinelItem]
+    """
+    if progress:
+        stac_task = progress.add_task(f"[cyan]Connecting to {stac_url}/{collection_id}", total=None)
+
+    stac_collection = StacCollection(stac_url=stac_url,
+                                     mask_file=geopackage_file_path,
+                                     mask_layer=polygons_layer_name)
+
+    if progress and stac_task:
+        progress.update(stac_task, description="[yellow]Searching for STAC items...")
+
+    latest_per_tile = stac_collection.search_items(
+        collection_id=collection_id,
+        datetime_range=datetime_range,
+        cloud_cover=cloud_cover,
+        progress=progress, )
+
+    if len(latest_per_tile.values()) == 0:
+        if progress and stac_task:
+            progress.remove_task(stac_task)
+        raise RuntimeError(
+            f"No items found from Sentinel 2. Try to set wider date range or increase cloud cover rate.")
+    if progress and stac_task:
+        progress.update(stac_task, description=f"[green]Found {len(latest_per_tile)} STAC item(s)...", advance=100, total=100)
+
+    tmp_cutline_path = make_buffer_polygon(geopackage_file_path, polygons_layer_name)
+    sentinel_items = []
+    for item in latest_per_tile.values():
+        sentinel_items.append(SentinelItem(item, mask_file=tmp_cutline_path, mask_layer=polygons_layer_name))
+    return sentinel_items
+
+
+
 
 
 async def download_stac(

@@ -1,5 +1,5 @@
 from typing import Iterable
-
+from osgeo.gdal import Info
 import httpx
 import os
 
@@ -179,7 +179,6 @@ async def download_remote_files(
     :param progress: An optional rich progress bar instance.
     :param target_path_func: A function that takes a URL as an argument and returns a path to save the file to.
     """
-
     try:
         async with aiohttp.ClientSession() as client_session:
             tasks = []
@@ -206,6 +205,8 @@ async def download_remote_files(
                 if isinstance(result, Exception):
                     # raise the error as if download on even one fails, the results should not be collected
                     raise result
+
+            Info(result)
             return results
     except (KeyboardInterrupt, asyncio.CancelledError) as e:
         raise

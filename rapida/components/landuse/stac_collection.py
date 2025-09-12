@@ -71,6 +71,7 @@ class StacCollection(object):
         merged_geom = unary_union(df_polygon['geometry'])
         intersects_geometry = mapping(merged_geom)
 
+
         query = {}
         if cloud_cover == 0:
             query["eq"] = cloud_cover
@@ -118,6 +119,7 @@ class StacCollection(object):
 
         work_geoms = self._merge_or_voronoi(df_polygon)
 
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = [executor.submit(search_single_polygon, geom) for geom in work_geoms]
             concurrent.futures.wait(futures)
@@ -128,7 +130,7 @@ class StacCollection(object):
         # Apply grid:code optimization
         optimized_items = self._optimize_by_grid_code(all_items, intersects_geometry)
 
-
+        #TODO handle extreme cases, like a small area inside the item and more than one item
         return optimized_items
 
     def _optimize_by_grid_code(self, all_items: Dict[str, Dict], intersects_geometry: Dict[str, Any]) -> Dict[

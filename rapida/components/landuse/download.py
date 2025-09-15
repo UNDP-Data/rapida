@@ -118,6 +118,7 @@ async def download_stac(
     cloud_cover: int = 5,
     progress: Progress = None,
     max_workers: int = os.cpu_count() // 2,
+    force=False
 ):
     """
     download STAC data from Earth Search to create tiff file for each asset (eg, B02, B03) required
@@ -188,7 +189,7 @@ async def download_stac(
             if stop_event.is_set():
                 return
             try:
-                item.download_assets(download_dir=output_dir, progress=progress)
+                item.download_assets(download_dir=output_dir, progress=progress, force=force)
                 if not os.path.exists(item.predicted_file):
                     # if the predicted file does not exist in the folder, add a prediction task to the queue
                     predict_queue.put(item)
@@ -205,7 +206,9 @@ async def download_stac(
             try:
                 nonlocal predict_task
                 while True:
+
                     item = predict_queue.get()
+
                     if item is None:
                         break
                     with predict_task_lock:
@@ -227,6 +230,7 @@ async def download_stac(
                     completed_items.append(item)
                     progress.update(predict_task, advance=1)
                     predict_queue.task_done()
+
             except (KeyboardInterrupt, asyncio.CancelledError) as e:
                 stop_event.set()
                 logger.info("Prediction was interrupted by user.")
@@ -236,6 +240,7 @@ async def download_stac(
                     os.remove(item.predicted_file)
                 if item in completed_items:
                     completed_items.remove(item)
+                raise e
 
         try:
             prediction_thread = threading.Thread(target=predictor)

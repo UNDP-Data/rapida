@@ -133,7 +133,7 @@ class LanduseVariable(Variable):
                 progress.remove_task(variable_task)
 
 
-    def download(self, force=False, **kwargs):
+    def download_new(self, force=False, **kwargs):
 
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', None)
@@ -160,7 +160,7 @@ class LanduseVariable(Variable):
 
 
 
-    def download_old(self, force=False, **kwargs):
+    def download(self, force=False, **kwargs):
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', None)
 
@@ -175,6 +175,7 @@ class LanduseVariable(Variable):
                               target_srs=project.target_srs,
                               datetime_range=self.datetime_range,
                               cloud_cover=self.cloud_cover,
+
                               progress=progress))
                 loop.run_until_complete(run)
             except (KeyboardInterrupt, asyncio.CancelledError) as e:

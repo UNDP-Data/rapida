@@ -6,7 +6,7 @@ import shutil
 import tempfile
 import time
 from typing import Dict
-
+import shutil
 import geopandas as gpd
 import numpy as np
 import pystac
@@ -212,19 +212,23 @@ class SentinelItem(object):
                         self.target_asset.pop(k, None)
 
         item_path = os.path.join(download_dir, self.id, "item.json")
-
-        if not force and os.path.exists(item_path):
-            with open(item_path, "r", encoding="utf-8") as f:
-                existing_item = json.load(f)
-                if existing_item.get("id") == self.item.id:
-                    logger.warning(f"The same item ({self.id}) has already been downloaded. Skipping")
-                    return self.asset_files
-                else:
-                    # if different item id, delete old prediction file if exists
-                    if os.path.exists(self.predicted_file):
-                        os.remove(self.predicted_file)
-                    if os.path.exists(self.cloud_mask_file):
-                        os.remove(self.cloud_mask_file)
+        """
+            I really question the lines below. The decision to skip download needs to be made based on the size 
+            in bytes of the existing local file and the remote one. The force flag is sued to skip this decision and \
+            just overwrite the file. 
+        """
+        # if not force and os.path.exists(item_path):
+        #     with open(item_path, "r", encoding="utf-8") as f:
+        #         existing_item = json.load(f)
+        #         if existing_item.get("id") == self.item.id:
+        #             logger.warning(f"The same item ({self.id}) has already been downloaded. Skipping")
+        #             return self.asset_files
+        #         else:
+        #             # if different item id, delete old prediction file if exists
+        #             if os.path.exists(self.predicted_file):
+        #                 os.remove(self.predicted_file)
+        #             if os.path.exists(self.cloud_mask_file):
+        #                 os.remove(self.cloud_mask_file)
 
         file_urls = []
         url_to_target_mapping = {}
@@ -248,16 +252,19 @@ class SentinelItem(object):
                     file_urls=file_urls,
                     dst_folder=download_dir,
                     target_path_func=get_target_path_for_url,
-                    progress=progress,
+                    progress=progress, force=force
                 )
             )
 
             # once all downloads are successfully done, write item.json in the folder
+            # While item.json not real imagery data it contains some extracted medatada which can be usewful
             with open(item_path, "w", encoding="utf-8") as f:
                 json.dump(self.item.to_dict(), f, indent=2)
 
             return self.asset_files
         except (asyncio.CancelledError, KeyboardInterrupt):
+            logger.error(f'Download was cancelled. Removing {download_dir}')
+            if os.path.exists(download_dir) and force:shutil.rmtree(download_dir)
             raise
         except Exception as e:
             logger.error(f"Failed to download assets for item {self.id}: {e}")

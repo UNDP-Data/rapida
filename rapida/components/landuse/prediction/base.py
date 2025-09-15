@@ -388,7 +388,10 @@ class PredictionBase(object):
 
                 # add first batch to process
                 for _ in range(num_workers):
-                    row, col = next(job_iter)
+                    try:
+                        row, col = next(job_iter)
+                    except StopIteration:
+                        break
                     task_id = progress.add_task(f"[green]Processing tile ({row}, {col})",
                                                 total=None) if progress else None
                     fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path, mask_union)

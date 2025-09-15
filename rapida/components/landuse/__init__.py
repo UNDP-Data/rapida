@@ -1,15 +1,16 @@
 import asyncio
+import datetime
 import logging
 import os
 from typing import List
-
 from osgeo import gdal
 from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
 
-from rapida.components.landuse.download import download_stac
+from rapida.components.landuse.download import download_stac, find_sentinel_imagery
 from rapida.components.landuse.constants import STAC_MAP
+from rapida.components.landuse.sentinel_item import SentinelItem
 from rapida.constants import GTIFF_CREATION_OPTIONS, POLYGONS_LAYER_NAME
 from rapida.core.component import Component
 from rapida.core.variable import Variable
@@ -23,6 +24,7 @@ logger = logging.getLogger('rapida')
 
 
 class LanduseComponent(Component):
+
     def __call__(self, variables: List[str], datetime_range: str=None, cloud_cover:int = None, **kwargs):
         if not variables:
             variables = self.variables
@@ -92,7 +94,10 @@ class LanduseVariable(Variable):
         """
         project = Project(os.getcwd())
         output_dir = os.path.join(os.path.dirname(project.geopackage_file_path), self.component)
-        return os.path.join(output_dir, f"{self.component}_prediction.tif")
+        start_dates, end_dates = self.datetime_range.split('/')
+        start_date = datetime.datetime.fromisoformat(start_dates)
+        end_date = datetime.datetime.fromisoformat(end_dates)
+        return os.path.join(output_dir, f"{self.component}_prediction_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.tif")
 
 
     def __init__(self, **kwargs):
@@ -112,12 +117,12 @@ class LanduseVariable(Variable):
 
         try:
             self.download(**kwargs)
-            self.compute(**kwargs)
+            # self.compute(**kwargs)
 
             if progress is not None and variable_task is not None:
                 progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
 
-            self.evaluate(**kwargs)
+            #self.evaluate(**kwargs)
 
             if progress is not None and variable_task is not None:
                 progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
@@ -126,6 +131,33 @@ class LanduseVariable(Variable):
         finally:
             if variable_task is not None:
                 progress.remove_task(variable_task)
+
+
+    def download_new(self, force=False, **kwargs):
+
+        project = Project(os.getcwd())
+        progress: Progress = kwargs.get('progress', None)
+        if force or not os.path.exists(self.prediction_output_image):
+            s2_items = find_sentinel_imagery(  stac_url=self.stac_url,
+                                    collection_id=self.collection_id,
+                                    geopackage_file_path=project.geopackage_file_path,
+                                    polygons_layer_name=project.polygons_layer_name,
+                                    datetime_range=self.datetime_range,
+                                    cloud_cover=self.cloud_cover,
+                                    progress=progress)
+
+            output_dir = os.path.dirname(self.prediction_output_image)
+            os.makedirs(output_dir, exist_ok=True)
+            download_task = None
+            if progress:
+                download_task = progress.add_task(f"[cyan]Downloading {len(s2_items)} Sentinel2 items", total=len(s2_items))
+            for item in s2_items:
+                item.download_assets(download_dir=output_dir, progress=progress, force=force)
+                if progress and download_task:
+                    progress.update(download_task, description=f"[green]Downloaded {item.id} ", advance=1)
+            if progress and download_task:
+                progress.update(download_task, description=f"[green]Downloaded {len(s2_items)} Sentinel2 items ")
+
 
 
     def download(self, force=False, **kwargs):
@@ -143,6 +175,7 @@ class LanduseVariable(Variable):
                               target_srs=project.target_srs,
                               datetime_range=self.datetime_range,
                               cloud_cover=self.cloud_cover,
+
                               progress=progress))
                 loop.run_until_complete(run)
             except (KeyboardInterrupt, asyncio.CancelledError) as e:

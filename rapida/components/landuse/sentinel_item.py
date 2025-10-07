@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import tempfile
 import time
 from typing import Dict
@@ -20,7 +19,7 @@ from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP
 from rapida.components.landuse.prediction.cloud import CloudDetection
 from rapida.components.landuse.prediction.landuse import LandusePrediction
 from rapida.util.download_remote_file import download_remote_files
-from rapida.util.setup_logger import setup_logger
+
 
 logger = logging.getLogger(__name__)
 
@@ -271,7 +270,7 @@ class SentinelItem(object):
             raise
 
 
-    def predict(self, progress=None)->str:
+    def predict(self, progress=None, **kwargs)->str:
         """
         Predict land use from downloaded assets
 
@@ -288,7 +287,7 @@ class SentinelItem(object):
                                        output_file_path=temp_file,
                                        mask_file=self.mask_file,
                                        mask_layer=self.mask_layer,
-                                       progress=progress,)
+                                       progress=progress,**kwargs)
 
             return temp_file
         except Exception as e:
@@ -494,43 +493,103 @@ class SentinelItem(object):
         else:
             return url
 
-if __name__ == '__main__':
-    setup_logger()
 
-    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_36MTC_20240819_0_L1C"
-    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRU_20250421_0_L1C"
-    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
-    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
-    mask_file = "/data/rwanda_tests/data/rwanda_tests.gpkg"
-    mask_layer = "polygons"
-    download_dir = "/data/sentinel_tests"
+    def create(self, progress=None):
+        logger.info(f'Entering create')
+        t1 = time.time()
+        predict_task = None
+        landuse_prediction = LandusePrediction(item=self.item)
+        if progress:
+            predict_task = progress.add_task(f"[cyan]Starting {landuse_prediction.component_name} prediction")
 
+
+        temp_file = f"{self.predicted_file}.jano"
+        img_paths = [self.asset_files[band] for band in landuse_prediction.target_bands]
+        col_size, row_size, min_resolution_path = landuse_prediction.preinference_check(img_paths)
+        print(col_size, row_size, min_resolution_path)
+        return temp_file
+
+def test_jins_model(work_dir='/tmp'):
+    """
+    Testing the prediction speed/time as Jin designed it.
+    :return:
+    """
+    item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2C_36NYG_20250219_0_L1C"
+    mask = '/data/surge/ugaken.fgb'
     item = pystac.Item.from_file(item_url)
 
     with Progress() as progress:
-        t1 = time.time()
-        sentinel_item = SentinelItem(item, mask_file=mask_file, mask_layer=mask_layer)
-        sentinel_item.download_assets(download_dir=download_dir,
-                                      progress=progress)
-        t2 = time.time()
-        logger.info(f"download time: {t2 - t1}")
+        start_time = time.time()
+        sentinel_item = SentinelItem(item, mask_file=None, mask_layer=None)
+        sentinel_item.download_assets(download_dir=work_dir,
+                                      progress=progress, force=False)
+        down_time = time.time()
+        logger.info(f"download time: {down_time - start_time}")
 
         downloaded_files = list(sentinel_item.asset_files.values())
-        logger.info(f"downloaded files: {downloaded_files}")
+        logger.info(f"downloaded files: {len(downloaded_files)} {downloaded_files}")
+        #
+        # sentinel_item.detect_cloud(progress=progress, force=True)
+        #
+        # t3 = time.time()
+        # logger.info(f"cloud detection time: {t3 - t2}")
+        #
+        #temp_prediction_file = sentinel_item.predict(progress=progress)
+        temp_prediction_file = sentinel_item.create(progress=progress)
 
-        sentinel_item.detect_cloud(progress=progress, force=True)
+        pred_time = time.time()
+        logger.info(f"landuse prediction time: {pred_time-down_time} {os.path.abspath(temp_prediction_file)}")
+        #
+        # # temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
+        # sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file, progress=progress)
+        #
+        # t5 = time.time()
+        # logger.info(f"cloud masking time: {t5 - t4}, total time: {t5 - t1}")
 
-        t3 = time.time()
-        logger.info(f"cloud detection time: {t3 - t2}")
 
-        temp_prediction_file = sentinel_item.predict(progress=progress)
+if __name__ == '__main__':
 
-        t4 = time.time()
-        logger.info(f"landuse prediction time: {t4 - t3}")
+    # import logging
+    # logging.basicConfig()
+    # logger = logging.getLogger()
+    from rapida.util.setup_logger import setup_logger
+    logger = setup_logger(name='rapida', make_root=False)
+    test_jins_model()
 
-        # temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
-        sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file, progress=progress)
-
-        t5 = time.time()
-        logger.info(f"cloud masking time: {t5 - t4}, total time: {t5 - t1}")
+    # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_36MTC_20240819_0_L1C"
+    # # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRU_20250421_0_L1C"
+    # # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2A_35MRT_20240819_0_L1C"
+    # # item_url = "https://earth-search.aws.element84.com/v1/collections/sentinel-2-l1c/items/S2B_35MRT_20240715_0_L1C"
+    # mask_file = "/data/rwanda_tests/data/rwanda_tests.gpkg"
+    # mask_layer = "polygons"
+    # download_dir = "/data/sentinel_tests"
+    #
+    # item = pystac.Item.from_file(item_url)
+    #
+    # with Progress() as progress:
+    #     t1 = time.time()
+    #     sentinel_item = SentinelItem(item, mask_file=mask_file, mask_layer=mask_layer)
+    #     sentinel_item.download_assets(download_dir=download_dir,
+    #                                   progress=progress)
+    #     t2 = time.time()
+    #     logger.info(f"download time: {t2 - t1}")
+    #
+    #     downloaded_files = list(sentinel_item.asset_files.values())
+    #     logger.info(f"downloaded files: {downloaded_files}")
+    #
+    #     sentinel_item.detect_cloud(progress=progress, force=True)
+    #
+    #     t3 = time.time()
+    #     logger.info(f"cloud detection time: {t3 - t2}")
+    #
+    #     temp_prediction_file = sentinel_item.predict(progress=progress)
+    #
+    #     t4 = time.time()
+    #     logger.info(f"landuse prediction time: {t4 - t3}")
+    #
+    #     # temp_prediction_file = f"{sentinel_item.predicted_file}.tmp"
+    #     sentinel_item.mask_cloud_pixels(temp_prediction_file, sentinel_item.predicted_file, progress=progress)
+    #
+    #     t5 = time.time()
+    #     logger.info(f"cloud masking time: {t5 - t4}, total time: {t5 - t1}")
 

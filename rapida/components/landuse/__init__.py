@@ -116,13 +116,13 @@ class LanduseVariable(Variable):
                 description=f'[blue] Assessing {self.component}->{self.name}', total=None)
 
         try:
-            self.download(**kwargs)
-            self.compute(**kwargs)
+            self.download_new(**kwargs)
+            #self.compute(**kwargs)
 
             if progress is not None and variable_task is not None:
                 progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
 
-            self.evaluate(**kwargs)
+            #self.evaluate(**kwargs)
 
             if progress is not None and variable_task is not None:
                 progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
@@ -152,7 +152,8 @@ class LanduseVariable(Variable):
             if progress:
                 download_task = progress.add_task(f"[cyan]Downloading {len(s2_items)} Sentinel2 items", total=len(s2_items))
             for item in s2_items:
-                item.download_assets(download_dir=output_dir, progress=progress, force=force)
+                #item.download_assets(download_dir=output_dir, progress=progress, force=force)
+                item.download(download_dir=output_dir, progress=progress, force=force)
                 if progress and download_task:
                     progress.update(download_task, description=f"[green]Downloaded {item.id} ", advance=1)
             if progress and download_task:

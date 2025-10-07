@@ -4,11 +4,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
 import pystac_client
 from dateutil import parser as dateparser
-#from rapida.util.chunker import chunker
-from rapida.components.landuse.search_utils.tiles import _cloud_from_props, _iso_to_ts, Candidate, get_tileinfo
-from rapida.components.landuse.search_utils.zones import generate_mgrs_tiles
-import logging
+from  math import floor
+from rapida.components.landuse.search_utils.tiles import (_cloud_from_props, _iso_to_ts,
+                                                          Candidate, get_tileinfo, midpoint_from_range
+                                                          )
+from rapida.components.landuse.search_utils.zones import generate_mgrs_tiles, utm_bounds
+from shapely.geometry import shape
+from shapely.ops import unary_union
+from threading import Event
+from rich.progress import Progress, TaskProgressColumn,BarColumn, TimeRemainingColumn, TextColumn
 
+
+import logging
 logger = logging.getLogger(__name__)
 
 
@@ -31,8 +38,45 @@ def expand_timerange(start_date: str, end_date: str, days: int = 7) -> tuple[str
     return expanded_start.date().isoformat(), expanded_end.date().isoformat()
 
 
+def pick_cover_no_gap(mgrs_poly, candidates, mid_ts):
+    """
+    Require 100% coverage. If impossible with given candidates, raise.
+    candidates must have .tile_data_geometry (same UTM CRS as ideal_poly),
+    .time_ts, .cloud_cover, .data_coverage.
+    """
+    # order: closer to mid, then less cloud, then more data
+    scandidates = sorted(
+        candidates,
+        key=lambda c: (abs(c.time_ts - mid_ts), c.cloud_cover, -c.data_coverage)
+    )
+
+
+    remain = mgrs_poly
+    chosen = []
+    should_stop = False
+    for c in scandidates:
+        # quick skip if no overlap with what remains
+        gain = remain.intersection(c.tile_data_geometry).area
+        if gain <= 0:
+            continue
+        chosen.append(c)
+        # subtract this tile's data from remaining
+        remain = remain.difference(c.tile_data_geometry).buffer(0)  # buffer(0) to clean slivers
+        if remain.is_empty:
+            #covered = unary_union([x.tile_data_geometry for x in chosen]).intersection(mgrs_poly).buffer(0)
+            should_stop = True
+            return chosen, should_stop
+
+    return candidates, should_stop
+
+    # # If we get here: not fully covered
+    # missing_area = remain.area
+    # raise RuntimeError(f"Coverage incomplete: missing {missing_area:.3f} m²")
+
+
 def search( client=None, collection="sentinel-2-l1c",
-            start_date=None,end_date=None, mgrs_id=None,
+            start_date=None,end_date=None, mgrs_id=None,max_cloud_cover=10,
+            stop:Event = None
             ):
     """
 
@@ -43,42 +87,27 @@ def search( client=None, collection="sentinel-2-l1c",
     :param mgrs_id:
     :return:
     """
-
-    nitems = 0
-    min_data_coverage = 0
-    while nitems < 1 and min_data_coverage <= 90:
-        #print(f'Searching in {mgrs_id} between {start_date} and {end_date}')
+    mid = midpoint_from_range(range_str=f"{start_date}/{end_date}" if start_date and end_date else None)
+    prev_coverage = 0
+    mgrs_poly, crs = utm_bounds(mgrs_id)
+    while True:
+        # print(f'Searching in {mgrs_id} between {start_date} and {end_date}')
         search_result = client.search(
             collections=[collection],
             bbox=bbox,
             datetime=f"{start_date}/{end_date}" if start_date and end_date else None,
-            # query={
-            #     "grid:code": {"eq": f"MGRS-{mgrs_id}"},
-            #     "eo:cloud_cover": {"lte": 10},
-            # },
-
-            filter_lang="cql2-json",
-            filter={
-                "and": [
-                    {"eq": [{"property": "grid:code"}, f"MGRS-{mgrs_id}"]},
-                    # accept any of the common cloud fields, coalesced to a number
-                    {"lte": [
-                        {"coalesce": [
-                            {"property": "eo:cloud_cover"},
-                            {"property": "s2:cloud_coverage_assessment"},
-                            {"property": "cloudyPixelPercentage"}
-                        ]},
-                        10
-                    ]}
-                ]
-            },
+            query={
+                "grid:code": {"eq": f"MGRS-{mgrs_id}"},
+                "eo:cloud_cover": {"lte": max_cloud_cover},
+            }
         )
-
         items = [itm.to_dict() for itm in search_result.items()]
 
-        start_date, end_date = expand_timerange(start_date=start_date, end_date=end_date,)
-        nitems = len(items)
+        if not items: #early exit
+            start_date, end_date = expand_timerange(start_date=start_date, end_date=end_date, )
+            continue
 
+        if stop.is_set():break
         def process_item(it, mgrs_id):
             props = it.get("properties", {})
             item_id = it.get("id", "")
@@ -93,8 +122,8 @@ def search( client=None, collection="sentinel-2-l1c",
                 cloud_cover = _cloud_from_props(props),
                 meta = {"hrefs": it.get("assets", {}), "grid": mgrs_id},
                 nodata_coverage = 100 - tile_info["dataCoveragePercentage"],
-                tile_geometry = tile_info["tileGeometry"],
-                tile_data_geometry = tile_info["tileDataGeometry"],
+                tile_geometry = shape(tile_info["tileGeometry"]),
+                tile_data_geometry = shape(tile_info["tileDataGeometry"]),
                 data_coverage= tile_info["dataCoveragePercentage"]
             )
 
@@ -102,15 +131,30 @@ def search( client=None, collection="sentinel-2-l1c",
         candidates = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(process_item, it, mgrs_id) for it in items]
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    cand = result
-                    min_data_coverage = max(min_data_coverage, cand.data_coverage)
-                    candidates.append(cand)
-    if mgrs_id == '21LYE':
-        print(mgrs_id, start_date, end_date, candidates[0].cloud_cover, min_data_coverage)
-    return sorted(candidates, key=lambda c: (c.time_ts, c.cloud_cover))
+            try:
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result:
+                        cand = result
+                        candidates.append(cand)
+            except KeyboardInterrupt:
+                for future in futures:
+                    if not future.cancelled():
+                        future.cancel()
+                break
+        scandidates = sorted(candidates, key=lambda c: (abs(c.time_ts - mid), c.cloud_cover, -c.data_coverage))
+        union = unary_union([x.tile_data_geometry for x in scandidates])
+        coverage = int(floor(union.area/mgrs_poly.area*100))
+
+        if coverage-prev_coverage == 0 and coverage>100:
+            candidates = scandidates
+            logger.debug(f'Found {len(candidates)} suitable candidates in {mgrs_id} between {start_date} and {end_date}')
+            break
+        prev_coverage = coverage
+        start_date, end_date = expand_timerange(start_date=start_date, end_date=end_date, )
+        if stop.is_set(): break
+
+    return candidates
 
 
 
@@ -125,33 +169,47 @@ def fetch_s2_tiles(
 
     tiles = {}
     failed = {}
+    stop = Event()
+    ndone = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        jobs = dict()
-        for grid_id in mgrs_grids:
-            jobs_dict = dict(
-                client=client, collection=collection,
-                start_date=start_date, end_date=end_date,mgrs_id=grid_id
-                )
-            jobs[executor.submit(search, **jobs_dict)] = grid_id
-        try:
-            for future in concurrent.futures.as_completed(jobs):
-                gid = jobs[future]
-                try:
-                    candidates = future.result()
-                    tiles[gid] = candidates
-                except Exception as e:
-                    failed[gid] = e
-        except KeyboardInterrupt:
-            for future in jobs:
-                if not future.cancelled():future.cancel()
+        with Progress() as progress:
+            jobs = dict()
+            for grid_id in mgrs_grids:
+                jobs_dict = dict(
+                    client=client, collection=collection,
+                    start_date=start_date, end_date=end_date,mgrs_id=grid_id, stop=stop
+                    )
+                jobs[executor.submit(search, **jobs_dict)] = grid_id
+            njobs = len(mgrs_grids)
+            total_task = progress.add_task(
+                description=f'[red]Going to search Sentinel2 data  in {njobs} MGRS 100K grids ', total=njobs)
+            try:
+                for future in concurrent.futures.as_completed(jobs):
+                    gid = jobs[future]
+                    try:
+                        candidates = future.result()
+                        tiles[gid] = candidates
+                    except Exception as e:
+                        failed[gid] = e
+                    ndone += 1
+                    progress.update(total_task,
+                                    description=f'[red]Processed {ndone} MGRS grids',
+                                    advance=1)
+
+            except KeyboardInterrupt:
+                stop.set()
+                for future in jobs:
+                    if not future.cancelled():
+                        future.cancel()
+
 
     return tiles
 
 
 if __name__ == "__main__":
-    #from rapida.util.setup_logger import setup_logger
-    logger.setLevel(logging.DEBUG)
-    # logger = setup_logger(level=logging.DEBUG)
+    from rapida.util.setup_logger import setup_logger
+    # logger.setLevel(logging.DEBUG)
+    logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
     BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]
     bbox = BRAZIL_BBOX
@@ -160,10 +218,13 @@ if __name__ == "__main__":
     client = pystac_client.Client.open(CATALOG_URL)
     grids = generate_mgrs_tiles(bbox=bbox)
 
-    start_time = datetime.now()
     results = fetch_s2_tiles(client=client, mgrs_grids=grids, start_date=start_date, end_date=end_date)
     end_time = datetime.now()
-    print(f"Elapsed time: {(end_time - start_time).total_seconds()} seconds")
-    for grid in grids:
-        print(grid, len(results[grid]), [(c.cloud_cover, c.data_coverage) for c in results[grid]])
+
+    for grid, candiadtes in results.items():
+        r = results[grid]
+        print(grid, [c for c in r])
+
+
+
 

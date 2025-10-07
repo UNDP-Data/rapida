@@ -30,8 +30,9 @@ class Candidate:
     union_group: Optional[str] = None
 
     def __str__(self):
-        return f"{self.id} {self.time_ts} {self.cloud_cover} {self.nodata_coverage}"
-
+        return f"{self.id} {datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
+    def __repr__(self):
+        return f"{datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
 @dataclass
 class Config:
     t0_ts: int
@@ -65,7 +66,7 @@ def _cloud_from_props(props: dict) -> float:
     for k in ("eo:cloud_cover", "s2:cloud_cover", "cloud_cover"):
         if k in props and props[k] is not None:
             v = float(props[k])
-            return v * 100.0 if 0.0 <= v <= 1.0 else v
+            return v
     return 0.0
 
 def _grid_from_props(props: dict, item_id: str) -> Optional[str]:

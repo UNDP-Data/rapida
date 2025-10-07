@@ -1,5 +1,10 @@
 import math
-
+from typing import List, Tuple
+from math import floor, ceil
+from shapely.geometry import Polygon, box
+from pyproj import CRS, Transformer
+import mgrs as mgrs_lib
+_mgrs = mgrs_lib.MGRS()
 
 def utm_lat_band(latitude: float = None) -> str | None:
     """
@@ -23,11 +28,7 @@ def utm_grid_zone(longitude: float = None):
 
     return int(math.floor((longitude + 180) / 6) + 1)
 
-from typing import List, Tuple
-from math import floor, ceil
-from shapely.geometry import Polygon, box
-from pyproj import CRS, Transformer
-import mgrs as mgrs_lib
+
 
 # Latitude bands (MGRS/UTM), degrees. Note: X band is 72–84 (12° tall).
 _BAND_TO_LAT = {
@@ -55,6 +56,41 @@ def _project_polygon_lonlat_to_utm(poly_ll: Polygon, crs_utm: CRS) -> Polygon:
     xys = [transformer.transform(x, y) for (x, y) in poly_ll.exterior.coords]
     return Polygon(xys)
 
+
+
+def _parse_mgrs_100k(grid_id: str):
+    s = grid_id.strip().upper()
+    *z, band, l1, l2 = s
+    zone = int(''.join(z))
+    return zone, band, f"{l1}{l2}"
+
+def utm_bounds(grid_id: str):
+    """
+    Exact 100 km square in UTM (integer coords).
+    """
+    zone, band, letters = _parse_mgrs_100k(grid_id)
+    crs_utm = _utm_crs_for(zone, band)
+
+    # Get a point INSIDE the square (center), transform to UTM
+    lat_c, lon_c = _mgrs.toLatLon(f"{zone}{band}{letters}5000050000")  # 50km,50km center
+    to_utm = Transformer.from_crs("EPSG:4326", crs_utm, always_xy=True)
+    e_c, n_c = to_utm.transform(lon_c, lat_c)
+
+    # Snap the center to the SW corner on a 100km grid
+    e0 = math.floor(e_c / 100000.0) * 100000
+    n0 = math.floor(n_c / 100000.0) * 100000
+
+    poly_utm = box(e0, n0, e0 + 100000, n0 + 100000)
+    return poly_utm, crs_utm
+
+def wgs84_bounds(grid_id: str):
+    """
+    Return WGS84 (lon/lat) polygon for the same square.
+    """
+    poly_utm, crs_utm = utm_bounds(grid_id)
+    to_ll = Transformer.from_crs(crs_utm, "EPSG:4326", always_xy=True)
+    ring_ll = [to_ll.transform(x, y) for x, y in poly_utm.exterior.coords]
+    return Polygon(ring_ll)
 
 def mgrs_100k_squares(zone: int, band: str, filter_polygon) -> List[str]:
     """
@@ -86,10 +122,7 @@ def mgrs_100k_squares(zone: int, band: str, filter_polygon) -> List[str]:
         (min_lon, max_lat),
         (min_lon, min_lat),
     ])
-    # import geopandas as gpd
-    # gdf = gpd.GeoDataFrame(geometry=[rect_ll])
-    # gdf.set_crs('EPSG:4326', inplace=True)
-    # gdf.to_file(f'rect_{zone}_{band}.geojson', driver='GeoJSON')
+
 
     intersection_ll = filter_polygon.intersection(rect_ll)
     if not intersection_ll.geom_type in ("Polygon", "MultiPolygon"):
@@ -110,7 +143,6 @@ def mgrs_100k_squares(zone: int, band: str, filter_polygon) -> List[str]:
     end_y   = ceil(maxy / km) * km
 
     transformer_to_ll = Transformer.from_crs(crs_utm, "EPSG:4326", always_xy=True)
-    m = mgrs_lib.MGRS()
 
     ids = list()
     # polygons = list()
@@ -124,7 +156,7 @@ def mgrs_100k_squares(zone: int, band: str, filter_polygon) -> List[str]:
                 c = cell.intersection(rect_utm).centroid  # robust even if clipped at edges
                 lon, lat = transformer_to_ll.transform(c.x, c.y)
                 # MGRS with 0 precision returns e.g. '21LYE'
-                mgrs_full = m.toMGRS(lat, lon, MGRSPrecision=0)
+                mgrs_full = _mgrs.toMGRS(lat, lon, MGRSPrecision=0)
                 # last two letters are the 100 km grid ID
                 square = mgrs_full[-2:]
                 ids.append((square, cell))
@@ -134,6 +166,75 @@ def mgrs_100k_squares(zone: int, band: str, filter_polygon) -> List[str]:
 
     return ids
 
+
+
+def full_mgrs_100k_squares(zone: int, band: str, filter = None) -> List[str]:
+    """
+    Return the list of MGRS 100 km two-letter grid IDs (e.g., 'YE','ZE',...)
+    that exist within the given UTM zone and latitude band.
+
+    Args:
+        zone: 1..60
+        band: one of C..X excluding I, O
+
+    Returns:
+        Sorted list of unique two-letter 100 km IDs.
+    """
+    band = band.upper()
+    if zone < 1 or zone > 60:
+        raise ValueError("zone must be in 1..60")
+    if band not in _BAND_TO_LAT or band in ("I", "O"):
+        raise ValueError("band must be C..X excluding I and O")
+
+    # 1) Build the zone-band rectangle in lon/lat
+    min_lon, max_lon = _zone_lon_bounds(zone)
+    min_lat, max_lat = _BAND_TO_LAT[band]
+    # UTM is defined between ~[-80, 84] anyway; the band table respects that.
+    # Build a rectangle polygon (lon/lat, CCW)
+    rect_ll = Polygon([
+        (min_lon, min_lat),
+        (max_lon, min_lat),
+        (max_lon, max_lat),
+        (min_lon, max_lat),
+        (min_lon, min_lat),
+    ])
+
+
+    # 2) Project zone-band rect to UTM
+    crs_utm = _utm_crs_for(zone, band)
+    rect_utm = _project_polygon_lonlat_to_utm(rect_ll, crs_utm)
+
+    # 3) Create a 100 km grid covering the UTM bbox; only keep cells that intersect rect_utm
+    minx, miny, maxx, maxy = rect_utm.bounds
+    # snap to 100 km lines
+    km = 100_000.0
+    start_x = floor(minx / km) * km
+    start_y = floor(miny / km) * km
+    end_x   = ceil(maxx / km) * km
+    end_y   = ceil(maxy / km) * km
+
+    transformer_to_ll = Transformer.from_crs(crs_utm, "EPSG:4326", always_xy=True)
+
+    grids = dict()
+    # Iterate grid cells; intersect with rect_utm; sample centroid → MGRS; extract 100k letters
+    y = start_y
+    while y < end_y:
+        x = start_x
+        while x < end_x:
+            cell = box(x, y, x + km, y + km)
+            if cell.intersects(rect_utm):
+                c = cell.intersection(rect_utm).centroid  # robust even if clipped at edges
+                lon, lat = transformer_to_ll.transform(c.x, c.y)
+                # MGRS with 0 precision returns e.g. '21LYE'
+                mgrs_full = _mgrs.toMGRS(lat, lon, MGRSPrecision=0)
+                # last two letters are the 100 km grid ID
+                square = mgrs_full[-2:]
+                if filter is not None and square not in filter:continue
+                grids[square] = cell
+            x += km
+        y += km
+
+    return grids
 
 
 

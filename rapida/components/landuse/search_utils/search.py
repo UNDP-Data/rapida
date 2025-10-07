@@ -46,31 +46,16 @@ def search( client=None, collection="sentinel-2-l1c",
 
     nitems = 0
     min_data_coverage = 0
-    while nitems < 1 and min_data_coverage <= 90:
-        #print(f'Searching in {mgrs_id} between {start_date} and {end_date}')
+    while nitems < 1 or min_data_coverage <= 90: # should always be OR to make sure both the conditions are met
+        logger.debug(f'Searching in {mgrs_id} between {start_date} and {end_date}')
+        print(f'Searching in {mgrs_id} between {start_date} and {end_date}')
         search_result = client.search(
             collections=[collection],
             bbox=bbox,
             datetime=f"{start_date}/{end_date}" if start_date and end_date else None,
-            # query={
-            #     "grid:code": {"eq": f"MGRS-{mgrs_id}"},
-            #     "eo:cloud_cover": {"lte": 10},
-            # },
-
-            filter_lang="cql2-json",
-            filter={
-                "and": [
-                    {"eq": [{"property": "grid:code"}, f"MGRS-{mgrs_id}"]},
-                    # accept any of the common cloud fields, coalesced to a number
-                    {"lte": [
-                        {"coalesce": [
-                            {"property": "eo:cloud_cover"},
-                            {"property": "s2:cloud_coverage_assessment"},
-                            {"property": "cloudyPixelPercentage"}
-                        ]},
-                        10
-                    ]}
-                ]
+            query={
+                "grid:code": {"eq": f"MGRS-{mgrs_id}"},
+                "eo:cloud_cover": {"lte": 10}
             },
         )
 
@@ -98,7 +83,6 @@ def search( client=None, collection="sentinel-2-l1c",
                 data_coverage= tile_info["dataCoveragePercentage"]
             )
 
-
         candidates = []
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(process_item, it, mgrs_id) for it in items]
@@ -106,8 +90,9 @@ def search( client=None, collection="sentinel-2-l1c",
                 result = future.result()
                 if result:
                     cand = result
-                    min_data_coverage = max(min_data_coverage, cand.data_coverage)
                     candidates.append(cand)
+                    min_data_coverage = max(min_data_coverage, cand.data_coverage)
+
     if mgrs_id == '21LYE':
         print(mgrs_id, start_date, end_date, candidates[0].cloud_cover, min_data_coverage)
     return sorted(candidates, key=lambda c: (c.time_ts, c.cloud_cover))
@@ -165,5 +150,7 @@ if __name__ == "__main__":
     end_time = datetime.now()
     print(f"Elapsed time: {(end_time - start_time).total_seconds()} seconds")
     for grid in grids:
+        # if grid == '21LZE':
+            # print(results[grid])
         print(grid, len(results[grid]), [(c.cloud_cover, c.data_coverage) for c in results[grid]])
 

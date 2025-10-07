@@ -65,7 +65,7 @@ def _cloud_from_props(props: dict) -> float:
     for k in ("eo:cloud_cover", "s2:cloud_cover", "cloud_cover"):
         if k in props and props[k] is not None:
             v = float(props[k])
-            return v * 100.0 if 0.0 <= v <= 1.0 else v
+            return v
     return 0.0
 
 def _grid_from_props(props: dict, item_id: str) -> Optional[str]:

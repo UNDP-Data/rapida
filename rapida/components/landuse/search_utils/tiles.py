@@ -20,17 +20,17 @@ from tqdm import tqdm
 class Candidate:
     id: str
     time_ts: int           # integer timestamp (e.g., Unix seconds)
-    cloud: float           # 0..100
-    nodata: float          # 0..100
+    cloud_cover: float           # 0..100
+    nodata_coverage: float          # 0..100
     meta: Optional[dict] = None
-    data_percentage: Optional[float] = None
+    data_coverage: Optional[float] = None
     tile_data_geometry: Optional[dict] = None
     tile_info: Optional[dict] = None
     tile_geometry: Optional[dict] = None
     union_group: Optional[str] = None
 
     def __str__(self):
-        return f"{self.id} {self.time_ts} {self.cloud} {self.nodata}"
+        return f"{self.id} {self.time_ts} {self.cloud_cover} {self.nodata_coverage}"
 
 @dataclass
 class Config:
@@ -210,7 +210,7 @@ def find_corresponding_union(best_cand, candidates, threshold=1.0, tolerance=0.0
                 best_gain = gain
                 best_idx = i
             elif gain == best_gain and best_idx is not None:
-                if c.cloud < remaining[best_idx][0].cloud:
+                if c.cloud_cover < remaining[best_idx][0].cloud_cover:
                     best_idx = i
             elif gain == best_gain and best_idx is None:
                 best_idx = i
@@ -226,7 +226,7 @@ def find_corresponding_union(best_cand, candidates, threshold=1.0, tolerance=0.0
     if coverage + tolerance < threshold:
         return selected
 
-    sorted_selected = sorted(selected, key=lambda c: c.cloud)
+    sorted_selected = sorted(selected, key=lambda c: c.cloud_cover)
     pruned = []
     pruned_union = None
     for c in sorted_selected:
@@ -262,14 +262,14 @@ def prune_candidates(tiles: Tiles, cfg: Config) -> Tiles:
 
         strict = [
             c for c in cands
-            if c.cloud <= cfg.max_cloud and c.nodata <= cfg.max_nodata
+            if c.cloud_cover <= cfg.max_cloud and c.nodata_coverage <= cfg.max_nodata
         ]
         if strict:
             pruned[tid] = strict
         else:
 
             # This will select the best tile based on cloud cover and in case of equality of any 2 tiles, break the tie based on percentage of nodata
-            best = min(cands, key=lambda c: (c.cloud, c.nodata))
+            best = min(cands, key=lambda c: (c.cloud_cover, c.nodata_coverage))
 
             corresponding_union = find_corresponding_union(best, valid)
             if corresponding_union:
@@ -288,14 +288,14 @@ def rank_topk(tiles: Tiles, cfg: Config) -> Tiles:
     for cands in tiles.values():
         for c in cands:
             all_dt.append(_days_from_ts(c.time_ts, cfg.t0_ts))
-            all_cl.append(c.cloud); all_nd.append(c.nodata)
+            all_cl.append(c.cloud_cover); all_nd.append(c.nodata_coverage)
     if not all_dt: return {tid: [] for tid in tiles}
     n_dt = _normalize(all_dt); n_cl = _normalize(all_cl); n_nd = _normalize(all_nd)
 
     def unary(c: Candidate) -> float:
         return (cfg.lambda_T * n_dt[_days_from_ts(c.time_ts, cfg.t0_ts)]
-              + cfg.lambda_C * n_cl[c.cloud]
-              + cfg.lambda_N * n_nd[c.nodata])
+                + cfg.lambda_C * n_cl[c.cloud_cover]
+                + cfg.lambda_N * n_nd[c.nodata_coverage])
 
     reduced: Tiles = {}
     for tid, cands in tiles.items():
@@ -308,15 +308,15 @@ def initial_labels(tiles: Tiles, cfg: Config) -> Dict[str, int]:
     for cands in tiles.values():
         for c in cands:
             all_dt.append(_days_from_ts(c.time_ts, cfg.t0_ts))
-            all_cl.append(c.cloud); all_nd.append(c.nodata)
+            all_cl.append(c.cloud_cover); all_nd.append(c.nodata_coverage)
     n_dt = _normalize(all_dt) if all_dt else {}
     n_cl = _normalize(all_cl) if all_cl else {}
     n_nd = _normalize(all_nd) if all_nd else {}
 
     def unary(c: Candidate) -> float:
         return (cfg.lambda_T * n_dt.get(_days_from_ts(c.time_ts, cfg.t0_ts), 0.0)
-              + cfg.lambda_C * n_cl.get(c.cloud, 0.0)
-              + cfg.lambda_N * n_nd.get(c.nodata, 0.0))
+                + cfg.lambda_C * n_cl.get(c.cloud_cover, 0.0)
+                + cfg.lambda_N * n_nd.get(c.nodata_coverage, 0.0))
 
     labels = {}
     for tid, cands in tiles.items():
@@ -337,7 +337,7 @@ def _unary_cache(tiles: Tiles, cfg: Config) -> Dict[Tuple[str,int], float]:
     for cands in tiles.values():
         for c in cands:
             all_dt.append(_days_from_ts(c.time_ts, cfg.t0_ts))
-            all_cl.append(c.cloud); all_nd.append(c.nodata)
+            all_cl.append(c.cloud_cover); all_nd.append(c.nodata_coverage)
     n_dt = _normalize(all_dt) if all_dt else {}
     n_cl = _normalize(all_cl) if all_cl else {}
     n_nd = _normalize(all_nd) if all_nd else {}
@@ -346,8 +346,8 @@ def _unary_cache(tiles: Tiles, cfg: Config) -> Dict[Tuple[str,int], float]:
     for tid, cands in tiles.items():
         for i, c in enumerate(cands):
             cache[(tid, i)] = (cfg.lambda_T * n_dt.get(_days_from_ts(c.time_ts, cfg.t0_ts), 0.0)
-                             + cfg.lambda_C * n_cl.get(c.cloud, 0.0)
-                             + cfg.lambda_N * n_nd.get(c.nodata, 0.0))
+                               + cfg.lambda_C * n_cl.get(c.cloud_cover, 0.0)
+                               + cfg.lambda_N * n_nd.get(c.nodata_coverage, 0.0))
     return cache
 
 def objective(labels: Dict[str,int], tiles: Tiles, adj: Adj, cfg: Config) -> float:
@@ -650,9 +650,9 @@ def search(client=None, bbox=None, name=None, collection="sentinel-2-l1c", limit
         cand = Candidate(
             id=item_id,
             time_ts=_iso_to_ts(dt_iso),
-            cloud=_cloud_from_props(props),
+            cloud_cover=_cloud_from_props(props),
             meta={"hrefs": it.get("assets", {}), "grid": grid},
-            nodata = 100 - tile_info["dataCoveragePercentage"],
+            nodata_coverage=100 - tile_info["dataCoveragePercentage"],
             tile_info=tile_info,
         )
         return grid, cand

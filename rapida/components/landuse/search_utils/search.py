@@ -38,42 +38,6 @@ def expand_timerange(start_date: str, end_date: str, days: int = 7) -> tuple[str
     return expanded_start.date().isoformat(), expanded_end.date().isoformat()
 
 
-def pick_cover_no_gap(mgrs_poly, candidates, mid_ts):
-    """
-    Require 100% coverage. If impossible with given candidates, raise.
-    candidates must have .tile_data_geometry (same UTM CRS as ideal_poly),
-    .time_ts, .cloud_cover, .data_coverage.
-    """
-    # order: closer to mid, then less cloud, then more data
-    scandidates = sorted(
-        candidates,
-        key=lambda c: (abs(c.time_ts - mid_ts), c.cloud_cover, -c.data_coverage)
-    )
-
-
-    remain = mgrs_poly
-    chosen = []
-    should_stop = False
-    for c in scandidates:
-        # quick skip if no overlap with what remains
-        gain = remain.intersection(c.tile_data_geometry).area
-        if gain <= 0:
-            continue
-        chosen.append(c)
-        # subtract this tile's data from remaining
-        remain = remain.difference(c.tile_data_geometry).buffer(0)  # buffer(0) to clean slivers
-        if remain.is_empty:
-            #covered = unary_union([x.tile_data_geometry for x in chosen]).intersection(mgrs_poly).buffer(0)
-            should_stop = True
-            return chosen, should_stop
-
-    return candidates, should_stop
-
-    # # If we get here: not fully covered
-    # missing_area = remain.area
-    # raise RuntimeError(f"Coverage incomplete: missing {missing_area:.3f} m²")
-
-
 def search( client=None, collection="sentinel-2-l1c",
             start_date=None,end_date=None, mgrs_id=None,max_cloud_cover=10,
             stop:Event = None
@@ -91,7 +55,6 @@ def search( client=None, collection="sentinel-2-l1c",
     prev_coverage = 0
     mgrs_poly, crs = utm_bounds(mgrs_id)
     while True:
-        # print(f'Searching in {mgrs_id} between {start_date} and {end_date}')
         search_result = client.search(
             collections=[collection],
             bbox=bbox,

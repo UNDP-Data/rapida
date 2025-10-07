@@ -175,7 +175,12 @@ if __name__ == "__main__":
     logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
     BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]
-    bbox = BRAZIL_BBOX
+    BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]
+    NIGERIA_BBOX = [6.0, 7.0, 8.0, 9.0]
+    CHINA_BBOX = [100.0, 30.0, 110.0, 40.0]
+
+    bbox = CHINA_BBOX
+
     start_date = "2024-03-01"
     end_date = "2024-03-30"
     client = pystac_client.Client.open(CATALOG_URL)

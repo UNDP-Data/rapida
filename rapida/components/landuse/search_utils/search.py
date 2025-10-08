@@ -123,23 +123,26 @@ def search( client=None, collection="sentinel-2-l1c",
 
 
 def fetch_s2_tiles(
-    client=None,
+    bbox=None,
     collection="sentinel-2-l1c",
-    mgrs_grids=None,
     start_date=None,
     end_date=None,
+    max_cloud_cover=None
 ):
 
     tiles = {}
     failed = {}
     stop = Event()
     ndone = 0
+
+    client = pystac_client.Client.open(CATALOG_URL)
+    mgrs_grids = generate_mgrs_tiles(bbox=bbox)
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         with Progress() as progress:
             jobs = dict()
             for grid_id in mgrs_grids:
                 jobs_dict = dict(
-                    client=client, collection=collection,
+                    client=client, collection=collection, max_cloud_cover=max_cloud_cover,
                     start_date=start_date, end_date=end_date,mgrs_id=grid_id, stop=stop
                     )
                 jobs[executor.submit(search, **jobs_dict)] = grid_id
@@ -180,18 +183,13 @@ if __name__ == "__main__":
     CHINA_BBOX = [100.0, 30.0, 110.0, 40.0]
 
     bbox = CHINA_BBOX
-
+    max_cloud_cover=10
     start_date = "2024-03-01"
     end_date = "2024-03-30"
-    client = pystac_client.Client.open(CATALOG_URL)
-    grids = generate_mgrs_tiles(bbox=bbox)
+    results = fetch_s2_tiles(bbox=bbox, start_date=start_date, end_date=end_date, max_cloud_cover=max_cloud_cover)
 
-    results = fetch_s2_tiles(client=client, mgrs_grids=grids, start_date=start_date, end_date=end_date)
-    end_time = datetime.now()
-
-    for grid, candiadtes in results.items():
-        r = results[grid]
-        print(grid, [c for c in r])
+    for grid, candidates in results.items():
+        logger.info(f'{grid}: {[c for c in candidates]}')
 
 
 

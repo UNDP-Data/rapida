@@ -32,7 +32,7 @@ class Candidate:
     def __str__(self):
         return f"{self.id} {datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
     def __repr__(self):
-        return f"{datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} cloud-cover:{self.cloud_cover} data coverage:{self.data_coverage}"
+        return f"[{datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} cloud-cover:{self.cloud_cover:02.2f}%, data-coverage:{self.data_coverage}%]"
 @dataclass
 class Config:
     t0_ts: int

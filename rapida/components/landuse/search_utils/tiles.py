@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from math import exp
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -20,14 +20,42 @@ from tqdm import tqdm
 class Candidate:
     id: str
     time_ts: int           # integer timestamp (e.g., Unix seconds)
+    ref_ts: int
     cloud_cover: float           # 0..100
     nodata_coverage: float          # 0..100
-    meta: Optional[dict] = None
+    grid: str
+    assets: Optional[dict] = None
     data_coverage: Optional[float] = None
     tile_data_geometry: Optional[dict] = None
     tile_info: Optional[dict] = None
     tile_geometry: Optional[dict] = None
-    union_group: Optional[str] = None
+    # union_group: Optional[str] = None
+
+    @property
+    def quality_score(self) -> float:
+        """
+        Compute a balanced (0–100) quality score combining:
+          • temporal proximity (33.3%)
+          • low cloud cover (33.3%)
+          • data coverage (33.3%)
+        All three normalized to [0,1].
+        """
+        # --- normalize components ---
+        # 1) time proximity → 1.0 if exact match, decays exponentially with days
+        days_diff = abs(self.time_ts - self.ref_ts) / 86400
+        time_factor = exp(-days_diff / 3.0)  # ~3-day half-decay window
+
+        # 2) cloud → 1.0 at 0%, 0.0 at 100%
+        cloud_factor = 1.0 - min(max(self.cloud_cover, 0), 100) / 100.0
+
+        # 3) data coverage → 0.0–1.0 directly
+        data_factor = min(max(self.data_coverage, 0), 100) / 100.0
+
+        # --- equal weights (each 1/3 of total) ---
+        weight = 100 / 3.0
+        score = weight * (time_factor + cloud_factor + data_factor)
+
+        return round(score, 3)
 
     def __str__(self):
         return f"{self.id} {datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
@@ -652,7 +680,7 @@ def search(client=None, bbox=None, name=None, collection="sentinel-2-l1c", limit
             id=item_id,
             time_ts=_iso_to_ts(dt_iso),
             cloud_cover=_cloud_from_props(props),
-            meta={"hrefs": it.get("assets", {}), "grid": grid},
+            assets={"hrefs": it.get("assets", {}), "grid": grid},
             nodata_coverage=100 - tile_info["dataCoveragePercentage"],
             tile_info=tile_info,
         )
@@ -759,7 +787,7 @@ def s3_to_https(s3_url: str) -> str:
 
 def download_item(cand: Candidate) -> str | None:
     # for c in cands:
-    meta = cand.meta
+    meta = cand.assets
     asset_links = meta.get("hrefs", {})
     blue_link = asset_links.get("blue")
     if not blue_link:

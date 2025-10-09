@@ -82,8 +82,10 @@ def search( client=None, collection="sentinel-2-l1c",
             return Candidate(
                 id=item_id,
                 time_ts = _iso_to_ts(dt_iso),
+                ref_ts = mid,
                 cloud_cover = _cloud_from_props(props),
-                meta = {"hrefs": it.get("assets", {}), "grid": mgrs_id},
+                assets = it.get("assets", {}),
+                grid = mgrs_id,
                 nodata_coverage = 100 - tile_info["dataCoveragePercentage"],
                 tile_geometry = shape(tile_info["tileGeometry"]),
                 tile_data_geometry = shape(tile_info["tileDataGeometry"]),
@@ -137,6 +139,7 @@ def fetch_s2_tiles(
 
     client = pystac_client.Client.open(CATALOG_URL)
     mgrs_grids = generate_mgrs_tiles(bbox=bbox)
+    mgrs_grids = ['21LYF']
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         with Progress() as progress:
             jobs = dict()
@@ -168,12 +171,15 @@ def fetch_s2_tiles(
                     if not future.cancelled():
                         future.cancel()
 
+    for grid, err in failed.items():
+        logger.error(f'Failed to search S2')
 
     return tiles
 
 
 if __name__ == "__main__":
     from rapida.util.setup_logger import setup_logger
+    from rapida.components.landuse.search_utils.s2 import Sentinel2Item
     # logger.setLevel(logging.DEBUG)
     logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
@@ -182,7 +188,7 @@ if __name__ == "__main__":
     NIGERIA_BBOX = [6.0, 7.0, 8.0, 9.0]
     CHINA_BBOX = [100.0, 30.0, 110.0, 40.0]
 
-    bbox = CHINA_BBOX
+    bbox = BRAZIL_BBOX
     max_cloud_cover=10
     start_date = "2024-03-01"
     end_date = "2024-03-30"
@@ -190,6 +196,7 @@ if __name__ == "__main__":
 
     for grid, candidates in results.items():
         logger.info(f'{grid}: {[c for c in candidates]}')
+        s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates)
 
 
 

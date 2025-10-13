@@ -2,6 +2,8 @@
 import concurrent
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
+from typing import List
+
 import pystac_client
 from dateutil import parser as dateparser
 from  math import floor
@@ -137,6 +139,7 @@ def fetch_s2_tiles(
     stop = Event()
     ndone = 0
 
+    CATALOG_URL = "https://earth-search.aws.element84.com/v1"
     client = pystac_client.Client.open(CATALOG_URL)
     mgrs_grids = generate_mgrs_tiles(bbox=bbox)
     mgrs_grids = ['21LYF']
@@ -172,9 +175,25 @@ def fetch_s2_tiles(
                         future.cancel()
 
     for grid, err in failed.items():
-        logger.error(f'Failed to search S2')
+        logger.error(f'Failed to search S2Grid {grid} : {err}')
 
     return tiles
+
+
+def align_to_mgrs(candidates: List[Candidate], mgrs_id: str):
+    """
+    Align to mgrs grid perfectly so mosaicking is seamless
+    Parameters
+    ----------
+    candidates
+    mgrs_id
+
+    Returns
+    -------
+
+    """
+    pass
+
 
 
 if __name__ == "__main__":
@@ -184,12 +203,11 @@ if __name__ == "__main__":
     logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
     BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]
-    BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]
     NIGERIA_BBOX = [6.0, 7.0, 8.0, 9.0]
     CHINA_BBOX = [100.0, 30.0, 110.0, 40.0]
 
     bbox = BRAZIL_BBOX
-    max_cloud_cover=10
+    max_cloud_cover=5
     start_date = "2024-03-01"
     end_date = "2024-03-30"
     results = fetch_s2_tiles(bbox=bbox, start_date=start_date, end_date=end_date, max_cloud_cover=max_cloud_cover)
@@ -197,6 +215,8 @@ if __name__ == "__main__":
     for grid, candidates in results.items():
         logger.info(f'{grid}: {[c for c in candidates]}')
         s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates)
+
+        # s2i._select_tiles_()
 
 
 

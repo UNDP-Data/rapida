@@ -1,6 +1,8 @@
 import math
 from typing import List, Tuple
 from math import floor, ceil
+
+import geopandas as gpd
 from shapely.geometry import Polygon, box
 from pyproj import CRS, Transformer
 import mgrs as mgrs_lib
@@ -238,33 +240,38 @@ def full_mgrs_100k_squares(zone: int, band: str, filter = None) -> List[str]:
 
 
 
+
 def generate_mgrs_tiles(bbox=None):
     grids = []
     lonmin, latmin, lonmax, latmax = bbox
 
     bbox_poly = box(*bbox)
-    # how many zones we have in the bbox
     start_zone = utm_grid_zone(lonmin)
     end_zone = utm_grid_zone(lonmax)
-    start_band= utm_lat_band(latmin)
-    end_band= utm_lat_band(latmax)
+    start_band = utm_lat_band(latmin)
+    end_band = utm_lat_band(latmax)
+
     zones = sorted({start_zone, end_zone})
     bands = sorted({start_band, end_band})
-    i = 0
 
+    rows = []
     for zone in zones:
         for band in bands:
-            d = []
-            for element in mgrs_100k_squares(zone, band, bbox_poly):
-                grid, polygon = element
-                tile = f'{zone}{band}{grid}'
-                d.append({
-                    "tile": tile,
-                    "geometry": polygon,
+            for grid, polygon in mgrs_100k_squares(zone, band, bbox_poly):
+                grid_id = f"{zone}{band}{grid}"
+                poly_utm, crs_utm = utm_bounds(grid_id)
+                rows.append({
+                    "tile": f"{zone}{band}{grid}",
+                    "geometry": polygon
                 })
-                i+=1
-                grids.append(tile)
-    return grids
+
+    # create GeoDataFrame
+    gdf = gpd.GeoDataFrame(rows, crs=crs_utm)
+
+    # save to FlatGeobuf
+    gdf.to_file("mgrs_100k_tiles.fgb", driver="FlatGeobuf")
+
+    return gdf
 
 if __name__ == '__main__':
     BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]

@@ -9,6 +9,7 @@ import mgrs
 import pyproj
 import requests
 from shapely import transform
+from shapely.geometry.base import BaseGeometry
 from tqdm import tqdm
 
 
@@ -26,9 +27,9 @@ class Candidate:
     grid: str
     assets: Optional[dict] = None
     data_coverage: Optional[float] = None
-    tile_data_geometry: Optional[dict] = None
+    tile_data_geometry: BaseGeometry = None
     tile_info: Optional[dict] = None
-    tile_geometry: Optional[dict] = None
+    tile_geometry: BaseGeometry = None
     # union_group: Optional[str] = None
 
     @property
@@ -61,6 +62,7 @@ class Candidate:
         return f"{self.id} {datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
     def __repr__(self):
         return f"[{datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} cloud-cover:{self.cloud_cover:02.2f}%, data-coverage:{self.data_coverage}%]"
+
 @dataclass
 class Config:
     t0_ts: int
@@ -784,35 +786,38 @@ def s3_to_https(s3_url: str) -> str:
     bucket, key = parts
     return f"https://{bucket}.s3.amazonaws.com/{key}"
 
+import os
 
 def download_item(cand: Candidate) -> str | None:
     # for c in cands:
-    meta = cand.assets
-    asset_links = meta.get("hrefs", {})
-    blue_link = asset_links.get("blue")
+    print(f"Downloading {cand.id}")
+    assets = cand.assets
+
+    blue_link = assets.get("blue").get("href")
     if not blue_link:
         return None
 
     outpath = f"/tmp/{cand.id}_b3.tif"
     if os.path.exists(outpath):
+        print(f"Already downloaded {outpath}")
         return outpath
 
     try:
-        href = s3_to_https(blue_link['href'])
+        href = s3_to_https(blue_link)
         print(href)
         with requests.get(href, stream=True, timeout=30) as r:
             r.raise_for_status()
             total_size = int(r.headers.get("content-length", 0))
             block_size = 1024  # 1 KB
-            progress = tqdm(total=total_size, unit="B", unit_scale=True, desc=id)
+            # progress = tqdm(total=total_size, unit="B", unit_scale=True, desc=id)
 
             with open(outpath, "wb") as f:
                 for chunk in r.iter_content(chunk_size=block_size):
                     if chunk:
                         f.write(chunk)
-                        progress.update(len(chunk))
-            progress.close()
-
+                        # progress.update(len(chunk))
+            # progress.close()
+        print(f"Downloaded {outpath}")
         return outpath
 
     except Exception as e:

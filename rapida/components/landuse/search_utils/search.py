@@ -1,5 +1,6 @@
 
 import concurrent
+import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
 import pystac_client
@@ -40,7 +41,7 @@ def expand_timerange(start_date: str, end_date: str, days: int = 7) -> tuple[str
 
 def search( client=None, collection="sentinel-2-l1c",
             start_date=None,end_date=None, mgrs_id=None,max_cloud_cover=10,
-            stop:Event = None
+            stop:Event = None, dev=False
             ):
     """
 
@@ -55,17 +56,25 @@ def search( client=None, collection="sentinel-2-l1c",
     prev_coverage = 0
     mgrs_poly, crs = utm_bounds(mgrs_id)
     while True:
-        search_result = client.search(
-            collections=[collection],
-            bbox=bbox,
-            datetime=f"{start_date}/{end_date}" if start_date and end_date else None,
-            query={
-                "grid:code": {"eq": f"MGRS-{mgrs_id}"},
-                "eo:cloud_cover": {"lte": max_cloud_cover},
-            }
-        )
-        items = [itm.to_dict() for itm in search_result.items()]
 
+        try:
+            with ('/tmp/search.json') as injson:
+                items = json.load(injson)
+        except Exception:
+
+            search_result = client.search(
+                collections=[collection],
+                bbox=bbox,
+                datetime=f"{start_date}/{end_date}" if start_date and end_date else None,
+                query={
+                    "grid:code": {"eq": f"MGRS-{mgrs_id}"},
+                    "eo:cloud_cover": {"lte": max_cloud_cover},
+                }
+            )
+            items = [itm.to_dict() for itm in search_result.items()]
+            if dev:
+                with open('/tmp/search.json') as out:
+                    json.dump(items, out, indent=4)
         if not items: #early exit
             start_date, end_date = expand_timerange(start_date=start_date, end_date=end_date, )
             continue
@@ -129,7 +138,8 @@ def fetch_s2_tiles(
     collection="sentinel-2-l1c",
     start_date=None,
     end_date=None,
-    max_cloud_cover=None
+    max_cloud_cover=None,
+    progress = None
 ):
 
     tiles = {}
@@ -141,35 +151,38 @@ def fetch_s2_tiles(
     mgrs_grids = generate_mgrs_tiles(bbox=bbox)
     mgrs_grids = ['21LYF']
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
-        with Progress() as progress:
-            jobs = dict()
-            for grid_id in mgrs_grids:
-                jobs_dict = dict(
-                    client=client, collection=collection, max_cloud_cover=max_cloud_cover,
-                    start_date=start_date, end_date=end_date,mgrs_id=grid_id, stop=stop
-                    )
-                jobs[executor.submit(search, **jobs_dict)] = grid_id
-            njobs = len(mgrs_grids)
+
+        jobs = dict()
+        for grid_id in mgrs_grids:
+            jobs_dict = dict(
+                client=client, collection=collection, max_cloud_cover=max_cloud_cover,
+                start_date=start_date, end_date=end_date,mgrs_id=grid_id, stop=stop
+                )
+            jobs[executor.submit(search, **jobs_dict)] = grid_id
+        njobs = len(mgrs_grids)
+        total_task = None
+        if progress is not None:
             total_task = progress.add_task(
                 description=f'[red]Going to search Sentinel2 data  in {njobs} MGRS 100K grids ', total=njobs)
-            try:
-                for future in concurrent.futures.as_completed(jobs):
-                    gid = jobs[future]
-                    try:
-                        candidates = future.result()
-                        tiles[gid] = candidates
-                    except Exception as e:
-                        failed[gid] = e
-                    ndone += 1
+        try:
+            for future in concurrent.futures.as_completed(jobs):
+                gid = jobs[future]
+                try:
+                    candidates = future.result()
+                    tiles[gid] = candidates
+                except Exception as e:
+                    failed[gid] = e
+                ndone += 1
+                if progress is not None and total_task is not None:
                     progress.update(total_task,
                                     description=f'[red]Processed {ndone} MGRS grids',
                                     advance=1)
 
-            except KeyboardInterrupt:
-                stop.set()
-                for future in jobs:
-                    if not future.cancelled():
-                        future.cancel()
+        except KeyboardInterrupt:
+            stop.set()
+            for future in jobs:
+                if not future.cancelled():
+                    future.cancel()
 
     for grid, err in failed.items():
         logger.error(f'Failed to search S2')
@@ -178,6 +191,7 @@ def fetch_s2_tiles(
 
 
 if __name__ == "__main__":
+    import asyncio
     from rapida.util.setup_logger import setup_logger
     from rapida.components.landuse.search_utils.s2 import Sentinel2Item
     # logger.setLevel(logging.DEBUG)
@@ -187,17 +201,24 @@ if __name__ == "__main__":
     BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]
     NIGERIA_BBOX = [6.0, 7.0, 8.0, 9.0]
     CHINA_BBOX = [100.0, 30.0, 110.0, 40.0]
+    with Progress() as progress:
+        bbox = BRAZIL_BBOX
+        max_cloud_cover=3
+        start_date = "2024-03-01"
+        end_date = "2024-03-30"
+        results = fetch_s2_tiles(bbox=bbox,
+                                 start_date=start_date, end_date=end_date,
+                                 max_cloud_cover=max_cloud_cover, progress=progress)
+        bands = ['B01', 'B02', 'B03', 'B04', 'B05']
+        #bands = ['B01']
 
-    bbox = BRAZIL_BBOX
-    max_cloud_cover=10
-    start_date = "2024-03-01"
-    end_date = "2024-03-30"
-    results = fetch_s2_tiles(bbox=bbox, start_date=start_date, end_date=end_date, max_cloud_cover=max_cloud_cover)
+        for grid, candidates in results.items():
+            try:
+                logger.info(f'{grid}: {[c for c in candidates]}')
+                s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, root_folder='/tmp')
+                asyncio.run(s2i.download(bands=bands, progress=progress))
 
-    for grid, candidates in results.items():
-        logger.info(f'{grid}: {[c for c in candidates]}')
-        s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates)
-
-
+            except KeyboardInterrupt:
+                pass
 
 

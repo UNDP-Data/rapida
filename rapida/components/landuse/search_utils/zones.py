@@ -253,25 +253,17 @@ def generate_mgrs_tiles(bbox=None):
 
     zones = sorted({start_zone, end_zone})
     bands = sorted({start_band, end_band})
-
-    rows = []
     for zone in zones:
         for band in bands:
             for grid, polygon in mgrs_100k_squares(zone, band, bbox_poly):
                 grid_id = f"{zone}{band}{grid}"
                 poly_utm, crs_utm = utm_bounds(grid_id)
-                rows.append({
-                    "tile": f"{zone}{band}{grid}",
-                    "geometry": polygon
-                })
+                grids.append(poly_utm)
+    return grids
 
-    # create GeoDataFrame
-    gdf = gpd.GeoDataFrame(rows, crs=crs_utm)
+def create_mgrs_fgb(bbox=None):
+    grids = generate_mgrs_tiles(bbox=bbox)
 
-    # save to FlatGeobuf
-    gdf.to_file("mgrs_100k_tiles.fgb", driver="FlatGeobuf")
-
-    return gdf
 
 if __name__ == '__main__':
     BRAZIL_BBOX = [-56.0, -15.0, -54.0, -13.0]

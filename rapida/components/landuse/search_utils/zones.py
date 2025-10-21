@@ -242,7 +242,7 @@ def full_mgrs_100k_squares(zone: int, band: str, filter = None) -> List[str]:
 
 
 def generate_mgrs_tiles(bbox=None):
-    grids = []
+    grids = {}
     lonmin, latmin, lonmax, latmax = bbox
 
     bbox_poly = box(*bbox)
@@ -257,8 +257,9 @@ def generate_mgrs_tiles(bbox=None):
         for band in bands:
             for grid, polygon in mgrs_100k_squares(zone, band, bbox_poly):
                 grid_id = f"{zone}{band}{grid}"
-                poly_utm, crs_utm = utm_bounds(grid_id)
-                grids.append(poly_utm)
+                #poly_utm, crs_utm = utm_bounds(grid_id)
+                #grids.append(poly_utm)
+                grids[grid_id] = utm_bounds(grid_id)
     return grids
 
 def create_mgrs_fgb(bbox=None):

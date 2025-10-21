@@ -3,6 +3,8 @@ import concurrent
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
+
+import geopandas
 import pystac_client
 from dateutil import parser as dateparser
 from  math import floor
@@ -12,7 +14,6 @@ from rapida.components.landuse.search_utils.tiles import (_cloud_from_props, _is
 from rapida.components.landuse.search_utils.zones import generate_mgrs_tiles, utm_bounds
 from shapely.geometry import shape
 from shapely.ops import unary_union
-from shapely import frechet_distance
 from threading import Event
 from rich.progress import Progress, TaskProgressColumn,BarColumn, TimeRemainingColumn, TextColumn
 
@@ -71,9 +72,11 @@ def search( client=None, collection="sentinel-2-l1c",
         if progress is not None:
             if search_progress is None:
                 search_progress = progress.add_task(
-                    description=f'[red]Searching for Sentinel2 data between {start_date} and {end_date} and {max_cloud_cover}% cloud cover')
+                    description=f'[red]Searching for Sentinel2 data between {start_date} and {end_date} and {max_cloud_cover}% cloud cover',
+                total=None, start=False)
             else:
-                progress.update(search_progress, description=f'[red]Searching for Sentinel2 data between {start_date} and {end_date} and {max_cloud_cover}% cloud cover')
+                progress.update(search_progress, description=f'[red]Searching for Sentinel2 data between {start_date} and {end_date} and {max_cloud_cover}% cloud cover',
+                                total=None,)
         search_result = client.search(
             collections=[collection],
             bbox=bbox,
@@ -92,7 +95,7 @@ def search( client=None, collection="sentinel-2-l1c",
             continue
 
         if stop.is_set():break
-        def process_item(it, mgrs_id, mid):
+        def process_item(it, mgrs_id, ref_ts, mgrs_poly, mgrs_crs):
             props = it.get("properties", {})
             item_id = it.get("id", "")
             tile_info = get_tileinfo(it)
@@ -103,24 +106,25 @@ def search( client=None, collection="sentinel-2-l1c",
             return Candidate(
                 id=item_id,
                 time_ts = _iso_to_ts(dt_iso),
-                ref_ts = mid,
                 cloud_cover = _cloud_from_props(props),
                 assets = it.get("assets", {}),
                 grid = mgrs_id,
                 nodata_coverage = 100 - tile_info["dataCoveragePercentage"],
                 tile_geometry = shape(tile_info["tileGeometry"]),
                 tile_data_geometry = shape(tile_info["tileDataGeometry"]),
-                data_coverage= tile_info["dataCoveragePercentage"]
+                data_coverage= tile_info["dataCoveragePercentage"],
+                ref_ts = ref_ts,
+                mgrs_geometry = mgrs_poly,
+                mgrs_crs = mgrs_crs
             )
 
         candidates = []
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(process_item, it, mgrs_id, mid) for it in items]
+            futures = [executor.submit(process_item, itm, mgrs_id, mid, mgrs_poly, crs) for itm in items]
             try:
                 for future in as_completed(futures):
-                    result = future.result()
-                    if result:
-                        cand = result
+                    cand = future.result()
+                    if cand:
                         candidates.append(cand)
             except KeyboardInterrupt:
                 for future in futures:
@@ -129,11 +133,13 @@ def search( client=None, collection="sentinel-2-l1c",
                 break
         #sort candidates
         scandidates = sorted(candidates, key=lambda c:-c.quality_score)
-        #merge/unnion the polygons covering the valid pixels until the whole MGRS 100K tile is covered
+
+        #merge/union the polygons covering the valid pixels until the whole MGRS 100K tile is covered
         union = unary_union([x.tile_data_geometry for x in scandidates])
         coverage = int(floor(union.area/mgrs_poly.area*100))
 
-        if coverage-prev_coverage == 0 and coverage>100:
+        #if coverage-prev_coverage == 0 and coverage>100:
+        if coverage>100:
             candidates = scandidates
             logger.debug(f'Found {len(candidates)} suitable candidates in {mgrs_id} between {start_date} and {end_date}')
             break
@@ -143,7 +149,7 @@ def search( client=None, collection="sentinel-2-l1c",
         if stop.is_set(): break
 
     # candidates were found, check if they should be pruned
-    # prunning = optimisation in the sense that candidates with very similar spatial extent of data pixels are ignored
+    # pruning = optimisation in the sense that candidates with very similar spatial extent of data pixels are ignored
     # in this way a MGRS grid can be easily assembled
 
     if progress is not None and search_progress is not None:
@@ -152,23 +158,47 @@ def search( client=None, collection="sentinel-2-l1c",
     if prune:
         pruned = []
         coverage = None
+        prev_coverage_score_perc = None
         for i, c in enumerate(candidates):
+
+
             if not pruned:
                 coverage = mgrs_poly.intersection(c.tile_data_geometry)
                 pruned.append(c)
+                # gdf = gpd.GeoDataFrame(geometry=[c.tile_data_geometry], crs=crs)
+                # gdf.to_file(f'/tmp/{mgrs_id}/coverage_{i}.fgb')
+                prev_coverage_score_perc = coverage.area/mgrs_poly.area*100
             else:
-                # new extends current coverage and intersects theoretical MGRS
-                cov = coverage.union(c.tile_data_geometry).intersection(mgrs_poly)
 
-                similarity_iou = coverage.intersection(cov).area / coverage.union(cov).area * 100
-                similarity_hauss = sim(coverage, cov, coverage.hausdorff_distance(cov))
-                similarity = (similarity_iou+similarity_hauss)*.5
-                if similarity > 90:
+                # new extends current coverage and intersects theoretical MGRS
+                #cov_poly = c.tile_data_geometry.intersection(mgrs_poly).union(coverage)
+                covc = c.tile_data_geometry.intersection(mgrs_poly)
+
+                cov_poly = coverage.union(covc)
+
+                r = covc.area/coverage.area*100
+                cov_score_perc = cov_poly.area/mgrs_poly.area*100
+
+                # the similarity is more complicated
+                similarity = coverage.intersection(cov_poly).area / coverage.union(cov_poly).area * 100
+                # similarity_hauss = sim(coverage, cov_poly, coverage.hausdorff_distance(cov_poly))
+                # similarity = (similarity+similarity_hauss)*.5
+                r = cov_score_perc-prev_coverage_score_perc
+
+
+                # gdf = gpd.GeoDataFrame(geometry=[c.tile_data_geometry], crs=crs)
+                # gdf.to_file(f'/tmp/{mgrs_id}/coverage_{i}.fgb')
+                if similarity > 90 and r == 0:
+                    logger.debug(f'Pruning {c} because of high similarity {similarity} with coverage')
                     continue
-                if similarity == 100:
+                if cov_score_perc >= 100 or r>0 :
+                    pruned.append(c)
                     break
-                pruned.append(c)
-                coverage = cov
+                #print(i, pruned, c, similarity, cov_score_perc,r)
+                coverage = cov_poly
+                prev_coverage_score_perc = cov_score_perc
+
+
         return pruned
 
     return candidates
@@ -192,8 +222,10 @@ def fetch_s2_tiles(
     ndone = 0
 
     client = pystac_client.Client.open(CATALOG_URL)
-    mgrs_grids = generate_mgrs_tiles(bbox=bbox)
-    mgrs_grids = ['21LYF']
+    mgrs_grids = list(generate_mgrs_tiles(bbox=bbox))
+    #mgrs_grids = mgrs_grids[1:2]
+    #mgrs_grids = ['21LYF']
+    #mgrs_grids = ['21LXD']
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
 
         jobs = dict()
@@ -213,8 +245,8 @@ def fetch_s2_tiles(
             for future in concurrent.futures.as_completed(jobs):
                 gid = jobs[future]
                 try:
-                    candidates = future.result()
-                    tiles[gid] = candidates
+                    cands = future.result()
+                    tiles[gid] = cands
                 except Exception as e:
                     failed[gid] = e
                 ndone += 1
@@ -234,6 +266,8 @@ def fetch_s2_tiles(
 
 
 if __name__ == "__main__":
+    from osgeo import gdal
+
     import asyncio
     import geopandas as gpd
     from rapida.util.setup_logger import setup_logger
@@ -254,16 +288,22 @@ if __name__ == "__main__":
                                  start_date=start_date, end_date=end_date,
                                  max_cloud_cover=max_cloud_cover, progress=progress, prune=True)
         bands = ['B01', 'B02', 'B03', 'B04', 'B05']
-        #bands = ['B01']
-
+        #bands = ['B03']
+        band_files = {}
         for grid, candidates in results.items():
             try:
-                logger.info(f'{grid}: {[c for c in candidates]}')
+                #logger.info(f'{grid}: {[c for c in candidates]}')
                 s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, root_folder='/tmp')
+                downloaded = s2i.download(bands=bands, progress=progress, force=False)
+                for bname, bfile in downloaded.items():
+                    if not bname in band_files:
+                        band_files[bname] = []
+                    band_files[bname].append(bfile)
 
-                asyncio.run(s2i.download(bands=bands, progress=progress, force=False))
 
             except KeyboardInterrupt:
                 pass
 
-
+        for band, bfiles in band_files.items():
+            with gdal.BuildVRT(f'/tmp/{band}.vrt',bfiles) as vrt_ds:
+                vrt_ds.GetRasterBand(1).ComputeStatistics(approx_ok=True)

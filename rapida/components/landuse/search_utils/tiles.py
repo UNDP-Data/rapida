@@ -30,8 +30,8 @@ class Candidate:
     tile_data_geometry: BaseGeometry = None
     tile_info: Optional[dict] = None
     tile_geometry: BaseGeometry = None
-    # union_group: Optional[str] = None
-
+    mgrs_geometry: BaseGeometry = None
+    mgrs_crs: pyproj.CRS = None
     @property
     def quality_score(self) -> float:
         """
@@ -58,10 +58,20 @@ class Candidate:
 
         return round(score, 3)
 
+
+    @property
+    def datetime(self):
+        return datetime.fromtimestamp(self.time_ts)
+    @property
+    def date(self):
+        return self.datetime.date()
+
+
     def __str__(self):
-        return f"{self.id} {datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
+        #return f"{self.id} {self.date.strftime('%d-%m-%Y')} {self.cloud_cover} {self.nodata_coverage}"
+        return self.__repr__()
     def __repr__(self):
-        return f"[{datetime.fromtimestamp(self.time_ts).strftime('%d-%m-%Y')} cloud-cover:{self.cloud_cover:02.2f}%, data-coverage:{self.data_coverage}%]"
+        return f"[{self.date.strftime('%d-%m-%Y')} cloud-cover:{self.cloud_cover:02.2f}%, data-coverage:{self.data_coverage}%]"
 
 @dataclass
 class Config:

@@ -62,20 +62,18 @@ class Sentinel2Item:
     perfectly aligned with 100K MGRS grid
     """
 
-    def __init__(self, mgrs_grid:str=None, s2_tiles:List[Candidate] = None, root_folder:str = None, concurrent_bands=50):
+    def __init__(self, mgrs_grid:str=None, s2_tiles:List[Candidate] = None, workdir:str = None, concurrent_bands=50):
 
         self.utm_zone, self.mgrs_band, self.mgrs_grid_letters = _parse_mgrs_100k(grid_id=mgrs_grid)
         self.mgrs_grid = mgrs_grid
         self.s2_tiles = sorted(s2_tiles, key=lambda c:-c.quality_score)
-        self.root_folder = os.path.join(os.path.abspath(root_folder), self.mgrs_grid)
-        os.makedirs(self.root_folder, exist_ok=True)
+        self.workdir = os.path.join(os.path.abspath(workdir), self.mgrs_grid)
+        os.makedirs(self.workdir, exist_ok=True)
         self.__urls__ = {}
         self.__files__ = {}
         self.__bands__ = {}
         self._prepare_urls_()
-        for band in self.bands:
-            band_file = os.path.join(self.root_folder, f'{band}.tif')
-            self[band] = band_file
+
         self.semaphore = asyncio.Semaphore(concurrent_bands)
 
     def _s3_to_http(self, url):
@@ -121,14 +119,16 @@ class Sentinel2Item:
         return sorted(self.__urls__.keys())
 
 
-    def __setitem__(self, key, value):
-        assert key in self.bands, f'Sentinel2 band "{key}" is invalid. Valid bands are {"".join(self.bands)}'
-        self.__bands__[key] = value
+    def __setitem__(self, band, band_file):
+        assert band in self.bands, f'Sentinel2 band "{band}" is invalid. Valid bands are {"".join(self.bands)}'
+        self.__bands__[band] = band_file
 
-    def __getitem__(self, key):
-        if not key in self.bands:
-            raise ValueError(f'Sentinel2 band "{key}" is invalid. Valid bands are {"".join(self.bands)}')
-        return self.__bands__.get(key, None)
+    def __getitem__(self, band):
+        if not band in self.bands:
+            raise ValueError(f'Sentinel2 band "{band}" is invalid. Valid bands are {"".join(self.bands)}')
+        return self.__bands__.get(band, None)
+
+
 
 
 
@@ -265,7 +265,7 @@ class Sentinel2Item:
         :param: mosaic
         :return:
         """
-        band_file = self[band]
+
 
 
         band_urls = self.urls[band]
@@ -278,7 +278,7 @@ class Sentinel2Item:
             position = [c.date for c in self.s2_tiles].index(date)
             original_file_name = '_'.join(rest)
             new_file_name = f"{date.strftime('%Y%m%d')}_{original_file_name}"
-            file_path = os.path.join(self.root_folder,band,new_file_name )
+            file_path = os.path.join(self.workdir, band, new_file_name)
             positions[file_path] = position
             tasks.append(
                 asyncio.create_task(
@@ -318,8 +318,8 @@ class Sentinel2Item:
                             description=f'[red]Downloaded band {band} in MGRS grid {self.mgrs_grid}')
 
         if mosaic:
-            self.__mosaic__(band=band, progress=progress)
-        return self[band]
+            return self.__mosaic__(band=band, progress=progress)
+
 
 
 
@@ -407,9 +407,10 @@ class Sentinel2Item:
 
     def __mosaic__(self, band: str = None, progress=None):
 
-        band_file = self[band]
-        if os.path.exists(band_file):
-            return
+        band_file = os.path.join(self.workdir, f'{band}.tif')
+        if os.path.exists(band_file) and os.path.getsize(band_file) > 0:
+            self[band] = band_file
+            return band_file
 
         files = self.files[band]
 
@@ -531,7 +532,7 @@ class Sentinel2Item:
             return
 
         files = self.files[band]
-        band_file = os.path.join(self.root_folder, f'{band}.tif')
+        band_file = os.path.join(self.workdir, f'{band}.tif')
 
         mgrs_poly = self.s2_tiles[0].mgrs_geometry
         asset_name = SENTINEL2_BAND_MAP[band]

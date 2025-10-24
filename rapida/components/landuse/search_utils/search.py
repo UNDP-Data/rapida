@@ -1,3 +1,5 @@
+import math
+import os.path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
 import pystac_client
@@ -167,7 +169,8 @@ def search( client=None, collection="sentinel-2-l1c",
                 cov_poly = mgrs_poly.intersection(c.tile_data_geometry)
                 coverage = cov_poly.area / mgrs_poly.area * 100
                 pruned.append(c)
-                if round(coverage) >= 100:
+
+                if math.isclose(coverage, b=100, abs_tol=1e-5):
                     break
             else:
                 # if any other candidate is toi similar skip it because it will bring little value
@@ -177,7 +180,7 @@ def search( client=None, collection="sentinel-2-l1c",
                 cov_poly = c.tile_data_geometry.intersection(mgrs_poly).union(cov_poly)
                 coverage = cov_poly.area/mgrs_poly.area*100
                 pruned.append(c)
-                if round(coverage) >= 100: # round is for 99.99..etc
+                if math.isclose(coverage, b=100, abs_tol=1e-5):
                     break
 
         return pruned
@@ -215,7 +218,7 @@ def fetch_s2_tiles(
 
     client = pystac_client.Client.open(stac_url)
     mgrs_grids = mgrs_100k_tiles_for_bbox(*bbox) # avoid data
-    #mgrs_grids = {'36NWF':mgrs_grids['36NWF']}
+    mgrs_grids = {'36NZG':mgrs_grids['36NZG']}
 
     with ThreadPoolExecutor(max_workers=5) as executor:
 
@@ -292,7 +295,8 @@ if __name__ == "__main__":
         for grid, candidates in results.items():
             try:
                 logger.info(f'{grid}: {[c for c in candidates]}')
-                s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, root_folder='/tmp')
+                s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, workdir='/tmp')
+
                 downloaded = s2i.download(bands=bands, progress=progress, force=False)
                 for bname, bfile in downloaded.items():
                     if not bname in band_files:
@@ -305,7 +309,7 @@ if __name__ == "__main__":
 
         for band, bfiles in band_files.items():
              for fl in bfiles:
-                 
+
                  print(band, fl)
             # with gdal.BuildVRT(f'/tmp/{band}.vrt',bfiles) as vrt_ds:
             #     vrt_ds.GetRasterBand(1).ComputeStatistics(approx_ok=True)

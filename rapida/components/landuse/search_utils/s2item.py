@@ -20,8 +20,8 @@ import aiofiles
 import random
 from affine import Affine
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP, SENTINEL2_BAND_MAP
-from rapida.components.landuse.search_utils.tiles import Candidate
-from rapida.components.landuse.search_utils.zones import _parse_mgrs_100k
+from rapida.components.landuse.search_utils.mgrstiles import Candidate
+from rapida.components.landuse.search_utils.mgrsconv import _parse_mgrs_100k
 from typing import List, Tuple
 import math
 import logging
@@ -276,7 +276,7 @@ class Sentinel2Item:
             year, month, day, *rest = chunk[1:].split('/')
             date = datetime.date(year=int(year), month=int(month), day=int(day))
             position = [c.date for c in self.s2_tiles].index(date)
-            original_file_name = rest[-1]
+            original_file_name = '_'.join(rest)
             new_file_name = f"{date.strftime('%Y%m%d')}_{original_file_name}"
             file_path = os.path.join(self.root_folder,band,new_file_name )
             positions[file_path] = position

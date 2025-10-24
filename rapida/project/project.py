@@ -23,7 +23,7 @@ from rapida.session import Session
 from rapida.util import geo
 from rapida.util.countries import COUNTRY_CODES
 from rapida.util.dataset2pmtiles import dataset2pmtiles
-
+from rapida.util.get_geographic_bbox import get_geographic_bounds
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -297,6 +297,13 @@ class Project:
             return mask_layer_name
         else:
             return None
+
+    @property
+    def geobounds(self):
+        return get_geographic_bounds(
+            src_ds=self.geopackage_file_path,
+            layer_name=self.polygons_layer_name
+        )
 
     @property
     def data_folder(self):

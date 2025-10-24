@@ -7,6 +7,7 @@ from osgeo import gdal
 from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
+from sympy.matrices.expressions.blockmatrix import bounds
 
 from rapida.components.landuse.download import download_stac, find_sentinel_imagery
 from rapida.components.landuse.constants import STAC_MAP
@@ -18,6 +19,9 @@ from rapida.project.project import Project
 from rapida.session import Session
 from rapida.stats.raster_zonal_stats import zst
 from rapida.util import geo
+
+from rapida.components.landuse.search_utils.search import fetch_s2_tiles
+
 
 
 logger = logging.getLogger('rapida')
@@ -101,6 +105,7 @@ class LanduseVariable(Variable):
 
 
     def __init__(self, **kwargs):
+
         super().__init__(**kwargs)
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
@@ -109,7 +114,6 @@ class LanduseVariable(Variable):
 
     def __call__(self, *args, **kwargs):
         progress: Progress = kwargs.get('progress', None)
-
         variable_task = None
         if progress is not None:
             variable_task = progress.add_task(
@@ -136,28 +140,34 @@ class LanduseVariable(Variable):
     def download_new(self, force=False, **kwargs):
 
         project = Project(os.getcwd())
+        start_date, end_date = self.datetime_range.split('/')
         progress: Progress = kwargs.get('progress', None)
         if force or not os.path.exists(self.prediction_output_image):
-            s2_items = find_sentinel_imagery(  stac_url=self.stac_url,
-                                    collection_id=self.collection_id,
-                                    geopackage_file_path=project.geopackage_file_path,
-                                    polygons_layer_name=project.polygons_layer_name,
-                                    datetime_range=self.datetime_range,
-                                    cloud_cover=self.cloud_cover,
-                                    progress=progress)
 
-            output_dir = os.path.dirname(self.prediction_output_image)
-            os.makedirs(output_dir, exist_ok=True)
-            download_task = None
-            if progress:
-                download_task = progress.add_task(f"[cyan]Downloading {len(s2_items)} Sentinel2 items", total=len(s2_items))
-            for item in s2_items:
-                #item.download_assets(download_dir=output_dir, progress=progress, force=force)
-                item.download(download_dir=output_dir, progress=progress, force=force)
-                if progress and download_task:
-                    progress.update(download_task, description=f"[green]Downloaded {item.id} ", advance=1)
-            if progress and download_task:
-                progress.update(download_task, description=f"[green]Downloaded {len(s2_items)} Sentinel2 items ")
+            results = fetch_s2_tiles(stac_url=self.stac_url, bbox=project.geobounds,
+                                     start_date=start_date, end_date=end_date,
+                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True)
+            print(results)
+            # s2_items = find_sentinel_imagery(  stac_url=self.stac_url,
+            #                         collection_id=self.collection_id,
+            #                         geopackage_file_path=project.geopackage_file_path,
+            #                         polygons_layer_name=project.polygons_layer_name,
+            #                         datetime_range=self.datetime_range,
+            #                         cloud_cover=self.cloud_cover,
+            #                         progress=progress)
+            #
+            # output_dir = os.path.dirname(self.prediction_output_image)
+            # os.makedirs(output_dir, exist_ok=True)
+            # download_task = None
+            # if progress:
+            #     download_task = progress.add_task(f"[cyan]Downloading {len(s2_items)} Sentinel2 items", total=len(s2_items))
+            # for item in s2_items:
+            #     #item.download_assets(download_dir=output_dir, progress=progress, force=force)
+            #     item.download(download_dir=output_dir, progress=progress, force=force)
+            #     if progress and download_task:
+            #         progress.update(download_task, description=f"[green]Downloaded {item.id} ", advance=1)
+            # if progress and download_task:
+            #     progress.update(download_task, description=f"[green]Downloaded {len(s2_items)} Sentinel2 items ")
 
 
 

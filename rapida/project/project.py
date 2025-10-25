@@ -322,6 +322,8 @@ class Project:
             {"Name": self.name, "Path": self.path, "Valid": self.is_valid}, indent=4
         )
 
+
+
     @property
     def is_valid(self):
         """Conditions for a valid project"""

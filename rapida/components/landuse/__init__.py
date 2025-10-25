@@ -2,13 +2,16 @@ import asyncio
 import datetime
 import logging
 import os
+from concurrent.futures.thread import ThreadPoolExecutor
+from threading import Event
+from concurrent.futures import  as_completed
 from typing import List
 from osgeo import gdal
 from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
 import geopandas as gpd
-from sympy.matrices.expressions.blockmatrix import bounds
-
+from rapida.components.landuse.search_utils.s2item import Sentinel2Item
+from rapida.components.landuse.constants import SENTINEL2_BAND_MAP
 from rapida.components.landuse.download import download_stac, find_sentinel_imagery
 from rapida.components.landuse.constants import STAC_MAP
 from rapida.components.landuse.sentinel_item import SentinelItem
@@ -120,7 +123,8 @@ class LanduseVariable(Variable):
                 description=f'[blue] Assessing {self.component}->{self.name}', total=None)
 
         try:
-            self.download_new(**kwargs)
+            self.download(**kwargs)
+
             #self.compute(**kwargs)
 
             if progress is not None and variable_task is not None:
@@ -137,41 +141,63 @@ class LanduseVariable(Variable):
                 progress.remove_task(variable_task)
 
 
-    def download_new(self, force=False, **kwargs):
+    def download(self, force=False, **kwargs):
 
         project = Project(os.getcwd())
         start_date, end_date = self.datetime_range.split('/')
         progress: Progress = kwargs.get('progress', None)
+        stop = Event()
+        total_n_files = 0
         if force or not os.path.exists(self.prediction_output_image):
 
-            results = fetch_s2_tiles(stac_url=self.stac_url, bbox=project.geobounds,
+            s2_tiles_dict = fetch_s2_tiles(stac_url=self.stac_url, bbox=project.geobounds,
                                      start_date=start_date, end_date=end_date,
                                      max_cloud_cover=self.cloud_cover, progress=progress, prune=True)
-            print(results)
-            # s2_items = find_sentinel_imagery(  stac_url=self.stac_url,
-            #                         collection_id=self.collection_id,
-            #                         geopackage_file_path=project.geopackage_file_path,
-            #                         polygons_layer_name=project.polygons_layer_name,
-            #                         datetime_range=self.datetime_range,
-            #                         cloud_cover=self.cloud_cover,
-            #                         progress=progress)
-            #
-            # output_dir = os.path.dirname(self.prediction_output_image)
-            # os.makedirs(output_dir, exist_ok=True)
-            # download_task = None
-            # if progress:
-            #     download_task = progress.add_task(f"[cyan]Downloading {len(s2_items)} Sentinel2 items", total=len(s2_items))
-            # for item in s2_items:
-            #     #item.download_assets(download_dir=output_dir, progress=progress, force=force)
-            #     item.download(download_dir=output_dir, progress=progress, force=force)
-            #     if progress and download_task:
-            #         progress.update(download_task, description=f"[green]Downloaded {item.id} ", advance=1)
-            # if progress and download_task:
-            #     progress.update(download_task, description=f"[green]Downloaded {len(s2_items)} Sentinel2 items ")
+            for k, v in s2_tiles_dict.items():
+                total_n_files+= len(v) * len(SENTINEL2_BAND_MAP)
 
+            output_dir = os.path.dirname(self.prediction_output_image)
+            os.makedirs(output_dir, exist_ok=True)
+            download_task = None
+            if progress:
+                download_task = progress.add_task(f"[cyan]Downloading {total_n_files} Sentinel2 images in {len(s2_tiles_dict)} grids ", total=len(s2_tiles_dict))
 
+            failed= {}
+            ndone = 0
+            with ThreadPoolExecutor(max_workers=5, ) as tpe:
+                jobs = dict()
+                s2items = {}
+                for mgrs_grid_id, candidates in s2_tiles_dict.items():
+                    s2i = Sentinel2Item(mgrs_grid=mgrs_grid_id, s2_tiles=candidates, workdir=output_dir, target_crs=project.projection)
+                    jobs[tpe.submit(s2i.download, bands=s2i.bands, progress=progress, force=force, )] = mgrs_grid_id
 
-    def download(self, force=False, **kwargs):
+                try:
+                    for future in as_completed(jobs):
+                        gid = jobs[future]
+                        try:
+                            downloaded = future.result()
+                            ndone+=1
+                            if progress is not None and download_task is not None:
+                                progress.update(download_task,advance=1)
+                        except Exception as e:
+                            failed[gid] = e
+                            if progress is not None and download_task is not None:
+                                progress.update(download_task, advance=1)
+                except KeyboardInterrupt:
+                    stop.set()
+                    for future in jobs:
+                        if not future.cancelled():
+                            future.cancel()
+                finally:
+                    if progress is not None and download_task is not None:
+                        progress.update(download_task,
+                                        description=f'[red]Downloaded Sentinel2 imagery in {ndone} MGRS grids',
+                                        advance=1)
+
+            for grid, err in failed.items():
+                logger.error(f'Failed to download S2 imagery in {grid} because {err}')
+
+    def download_old(self, force=False, **kwargs):
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', None)
 

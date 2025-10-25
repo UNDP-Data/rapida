@@ -1,14 +1,14 @@
 import asyncio
 import datetime
 import threading
-
+from rasterio.shutil import copy as rio_copy
 from rasterio.windows import bounds, from_bounds
-
+from rasterio.enums import Resampling
 from concurrent.futures.thread import ThreadPoolExecutor
 from concurrent.futures import as_completed
-
+from rasterio.warp import calculate_default_transform, aligned_target, transform_bounds
 import numpy as np
-
+from pyproj import CRS
 from rasterio.merge import merge
 import os.path
 import rasterio
@@ -62,18 +62,21 @@ class Sentinel2Item:
     perfectly aligned with 100K MGRS grid
     """
 
-    def __init__(self, mgrs_grid:str=None, s2_tiles:List[Candidate] = None, workdir:str = None, concurrent_bands=50):
+    def __init__(self, mgrs_grid:str=None, s2_tiles:List[Candidate] = None,
+                 target_resolution=(10,10), target_crs=None,
+                 workdir:str = None, concurrent_bands=50):
 
         self.utm_zone, self.mgrs_band, self.mgrs_grid_letters = _parse_mgrs_100k(grid_id=mgrs_grid)
         self.mgrs_grid = mgrs_grid
         self.s2_tiles = sorted(s2_tiles, key=lambda c:-c.quality_score)
         self.workdir = os.path.join(os.path.abspath(workdir), self.mgrs_grid)
-        os.makedirs(self.workdir, exist_ok=True)
+        self.target_crs = CRS.from_user_input(target_crs)
+        self.target_resolution=target_resolution
         self.__urls__ = {}
         self.__files__ = {}
         self.__bands__ = {}
         self._prepare_urls_()
-
+        os.makedirs(self.workdir, exist_ok=True)
         self.semaphore = asyncio.Semaphore(concurrent_bands)
 
     def _s3_to_http(self, url):
@@ -118,6 +121,29 @@ class Sentinel2Item:
     def bands(self):
         return sorted(self.__urls__.keys())
 
+    @property
+    def vrt(self):
+        vrts = {}
+        for band in self.bands:
+            band_file = self[band]
+            if band_file is not None:
+                out_path = band_file.replace('.tif', '.vrt')
+                with rasterio.open(band_file) as src:
+                    transform, width, height = calculate_default_transform(
+                        src.crs, self.target_crs, src.width, src.height, *src.bounds, resolution=self.target_resolution
+                    )
+
+                    nt, w, h = aligned_target(transform=transform, width=src.width, height=src.height,
+                                              resolution=self.target_resolution)
+
+
+                    with WarpedVRT(src, crs=self.target_crs, dtype=src.dtypes[0], nodata=src.nodata, transform=nt,
+                                   width=src.width, height=src.height,resampling=Resampling.nearest, count=src.count) as vrt:
+                        rio_copy(vrt, out_path, driver="VRT")
+                        vrts[band] = out_path
+        return vrts
+
+
 
     def __setitem__(self, band, band_file):
         assert band in self.bands, f'Sentinel2 band "{band}" is invalid. Valid bands are {"".join(self.bands)}'
@@ -126,7 +152,10 @@ class Sentinel2Item:
     def __getitem__(self, band):
         if not band in self.bands:
             raise ValueError(f'Sentinel2 band "{band}" is invalid. Valid bands are {"".join(self.bands)}')
-        return self.__bands__.get(band, None)
+        band_file = self.__bands__.get(band, None)
+        if band_file is None:
+            logger.debug(f'There is no imagery for MGRS {self.mgrs_grid} and band {band} in {self.workdir}.Consider downloading it first ')
+        return band_file
 
 
 
@@ -314,11 +343,13 @@ class Sentinel2Item:
                     raise
         self.__files__[band] = tuple(self.__files__[band])
         if progress is not None and progress_task is not None:
-            progress.update(progress_task,
-                            description=f'[red]Downloaded band {band} in MGRS grid {self.mgrs_grid}')
+            progress.update(
+                progress_task,
+                description=f'[red]Downloaded band {band} in MGRS-{self.mgrs_grid}'
+            )
 
         if mosaic:
-            return self.__mosaic__(band=band, progress=progress)
+            return self.__mosaic__(band=band, progress=progress, force=force)
 
 
 
@@ -394,22 +425,22 @@ class Sentinel2Item:
                 for t in band_tasks:
                     t.cancel()
                 await asyncio.gather(*band_tasks, return_exceptions=True)
+                print(self.files)
                 raise
             finally:
                 # Ensure all tasks are drained exactly once
                 await asyncio.gather(*band_tasks, return_exceptions=True)
-                for t in band_tasks:
-                    if t.done():
-                        logger.info(f'{t.get_name()} is done')
+
                 if progress is not None and progress_task is not None:
                     progress.remove_task(progress_task)
                 return downloaded_bands
 
-    def __mosaic__(self, band: str = None, progress=None):
+    def __mosaic__(self, band: str = None, progress=None, force=None):
 
         band_file = os.path.join(self.workdir, f'{band}.tif')
-        if os.path.exists(band_file) and os.path.getsize(band_file) > 0:
+        if os.path.exists(band_file) and os.path.getsize(band_file) > 0 and not force:
             self[band] = band_file
+            logger.debug(f'Reusing {band_file}')
             return band_file
 
         files = self.files[band]
@@ -465,10 +496,16 @@ class Sentinel2Item:
                         wins = {block: win for block, win in dst.block_windows()}
                         progress_task = None
                         if progress is not None:
-                            progress_task = progress.add_task(
-                                description=f"[red]Merging Sentinel-2 for {self.mgrs_grid}",
-                                total=len(wins)
-                            )
+                            if len(files) > 1:
+                                progress_task = progress.add_task(
+                                    description=f"[red]Merging {len(files)} Sentinel2 images for band {band} in {self.mgrs_grid}",
+                                    total=len(wins)
+                                )
+                            else:
+                                progress_task = progress.add_task(
+                                    description=f"[red]Clipping band {band} in {self.mgrs_grid}",
+                                    total=len(wins)
+                                )
                         for block, window in wins.items():
                             # __fill_window__(window=window,src_ds=src,vrt_datasets=vrt_datasets,no_data=no_data, dst_ds=dst)
                             bbox = bounds(window=window, transform=dst.transform)
@@ -484,7 +521,6 @@ class Sentinel2Item:
                                 dst.write(out, 1, window=window)
                                 if progress is not None and progress_task is not None:
                                     progress.update(progress_task,
-                                                    description=f'[red]Merged image block in MGRS grid {self.mgrs_grid}',
                                                     advance=1)
 
                                 continue
@@ -509,10 +545,11 @@ class Sentinel2Item:
                             dst.write(out, 1, window=window)
                             if progress is not None and progress_task is not None:
                                 progress.update(progress_task,
-                                                description=f'[red]Processed image block in  MGRS grid {self.mgrs_grid}',
+                                                #description=f'[red]Processed image block in  MGRS grid {self.mgrs_grid}',
                                                 advance=1)
 
             self[band] = band_file
+            return band_file
 
         finally:
             for vrt in vrt_datasets:vrt.close()
@@ -557,7 +594,25 @@ class Sentinel2Item:
 
     def download(self, bands: List[str] = None, progress: Progress = None,
                        connect_timeout=25, read_timeout=900, force=False):
-        return asyncio.run(
-            self.__download__(bands=bands, progress=progress, connect_timeout=connect_timeout,
-                          read_timeout=read_timeout, force=force)
-        )
+        if threading.current_thread() == threading.main_thread():
+
+            return asyncio.run(
+                self.__download__(bands=bands, progress=progress, connect_timeout=connect_timeout,
+                              read_timeout=read_timeout, force=force)
+            )
+        else:
+            loop = asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(
+                    self.__download__(bands=bands, progress=progress, connect_timeout=connect_timeout,
+                                      read_timeout=read_timeout, force=force)
+                    )
+
+            finally:
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception as ee:
+                    pass
+                asyncio.set_event_loop(None)
+                loop.close()
+

@@ -19,7 +19,7 @@ dependencies = [
     "GDAL",
     "azure-storage-blob",
     "overturemaps",
-    "async",
+    "uvloop",
     "aiofiles",
     "aiohttp",
     "azure-storage-file-share",

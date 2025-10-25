@@ -1,8 +1,8 @@
 import math
-import os.path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
 import pystac_client
+import rasterio
 from dateutil import parser as dateparser
 from  math import floor
 from rapida.components.landuse.search_utils.mgrstiles import (_cloud_from_props, _iso_to_ts,
@@ -57,18 +57,22 @@ def search( client=None, collection="sentinel-2-l1c",
         :param stop: event  to force early exit
         :param progress: progress bart
         :param prune:bool. If true the candidates wil be trimmed/pruned at the point the full coverage is truly achieved
-        This is because the search is greedy and return more items. Otherwise all these items/images would be downloaded
+        This is because the search is greedy and return more items. Otherwise, all these items/images would be downloaded
         :return: list of candidates or an empty list
     """
     mid = midpoint_from_range(range_str=f"{start_date}/{end_date}" if start_date and end_date else None)
-    mid_date = datetime.fromtimestamp(mid).date()
+    initial_start_date = datetime.fromisoformat(start_date).date()
+
     niter = 0
     search_progress = None
     cloud_cover = max_cloud_cover
     tile_candidates: list[Candidate] = []
     while True:
-        # this is because the start tiles on every row in every UTM zone do not contain data
-        if (mid_date-datetime.fromisoformat(start_date).date()).days > 90:
+
+        #this is because the start tiles on every row in every UTM zone do not contain data
+        if (initial_start_date-datetime.fromisoformat(start_date).date()).days > 365:
+            logger.debug(f'Could not find S2 imagery in {mgrs_id} between {start_date} anb {end_date}. '
+                         f'The tile is probably located at the border and covered by neighbors.')
             break
         if progress is not None:
             if search_progress is None:
@@ -170,7 +174,7 @@ def search( client=None, collection="sentinel-2-l1c",
                 coverage = cov_poly.area / mgrs_poly.area * 100
                 pruned.append(c)
 
-                if math.isclose(coverage, b=100, abs_tol=1e-5):
+                if math.isclose(coverage, b=100, abs_tol=1e-2):
                     break
             else:
                 # if any other candidate is toi similar skip it because it will bring little value
@@ -180,7 +184,7 @@ def search( client=None, collection="sentinel-2-l1c",
                 cov_poly = c.tile_data_geometry.intersection(mgrs_poly).union(cov_poly)
                 coverage = cov_poly.area/mgrs_poly.area*100
                 pruned.append(c)
-                if math.isclose(coverage, b=100, abs_tol=1e-5):
+                if math.isclose(coverage, b=100, abs_tol=1e-2):
                     break
 
         return pruned
@@ -195,6 +199,7 @@ def fetch_s2_tiles(
     start_date=None, end_date=None, max_cloud_cover=None,
     progress = None, prune=True
 ) -> dict[str:list[Candidate]]:
+
     """
     Fetch Sentinel2 imagery from stac_url between start and end dates with max_cloud_cover
     in a specific geographic area defined by the bbox .
@@ -214,11 +219,11 @@ def fetch_s2_tiles(
     tiles = {}
     failed = {}
     stop = Event()
-    ndone = 0
+
 
     client = pystac_client.Client.open(stac_url)
     mgrs_grids = mgrs_100k_tiles_for_bbox(*bbox) # avoid data
-    mgrs_grids = {'36NZG':mgrs_grids['36NZG']}
+    #mgrs_grids = {'36NZF': mgrs_grids['36NZF']}
 
     with ThreadPoolExecutor(max_workers=5) as executor:
 
@@ -234,7 +239,7 @@ def fetch_s2_tiles(
         total_task = None
         if progress is not None:
             total_task = progress.add_task(
-                description=f'[red]Going to search Sentinel2 data  in {njobs} MGRS 100K grids ', total=njobs)
+                description=f'[red]Searching Sentinel2 data  in {njobs} MGRS 100K grids ', total=njobs)
         try:
             for future in as_completed(jobs):
                 gid = jobs[future]
@@ -244,13 +249,15 @@ def fetch_s2_tiles(
                     # so the ones that have no imagery (no candidates were foud) are discarded
                     if cands:
                         tiles[gid] = cands
-                except Exception as e:
-                    failed[gid] = e
-                ndone += 1
-                if progress is not None and total_task is not None:
+                    image_word = 'images' if len(cands) > 1 else 'image'
                     progress.update(total_task,
-                                    description=f'[red]Processed {gid} MGRS grid',
+                                    description=f'[red]Found {len(cands)} Sentinel2 {image_word} in MGRS-{gid}',
                                     advance=1)
+                except Exception as e:
+                    print(e)
+                    failed[gid] = e
+                    if progress is not None and total_task is not None:
+                        progress.update(total_task,advance=1)
         except KeyboardInterrupt:
             stop.set()
             for future in jobs:
@@ -258,6 +265,14 @@ def fetch_s2_tiles(
                     future.cancel()
 
 
+    if progress is not None and total_task is not None:
+        ngrids, nfound = len(mgrs_grids),len(tiles)
+        delta = ngrids-nfound
+        if delta>0:
+            progress.update(total_task,description=f'[red]{delta} MGRS grids contained no imagery. This is probably all right as not all tiles must contain  data')
+        else:
+            progress.update(total_task,
+                description=f'[red]All tiles were searched successfully')
     for grid, err in failed.items():
         logger.error(f'Failed to search S2 tiles in {grid} because {err}')
 
@@ -280,6 +295,7 @@ if __name__ == "__main__":
 
     with Progress() as progress:
         bbox=UGAKEN_BBOX
+
         max_cloud_cover=3
         start_date = "2024-03-01"
         end_date = "2024-03-30"
@@ -294,22 +310,21 @@ if __name__ == "__main__":
 
         for grid, candidates in results.items():
             try:
-                logger.info(f'{grid}: {[c for c in candidates]}')
-                s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, workdir='/tmp')
-
+                #logger.info(f'{grid}: {[c for c in candidates]}')
+                s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, workdir='/tmp', target_crs='ESRI:54034')
                 downloaded = s2i.download(bands=bands, progress=progress, force=False)
-                for bname, bfile in downloaded.items():
-                    if not bname in band_files:
-                        band_files[bname] = []
-                    band_files[bname].append(bfile)
+                # for k, v in s2i.vrt.items():
+                #     pass
+                #     with rasterio.open(v) as vsrc:
+                #         print(k, tuple(vsrc.bounds))
+                # for bname, bfile in downloaded.items():
+                #     if not bname in band_files:
+                #         band_files[bname] = []
+                #     band_files[bname].append(bfile)
 
 
             except KeyboardInterrupt:
                 pass
 
-        for band, bfiles in band_files.items():
-             for fl in bfiles:
 
-                 print(band, fl)
-            # with gdal.BuildVRT(f'/tmp/{band}.vrt',bfiles) as vrt_ds:
-            #     vrt_ds.GetRasterBand(1).ComputeStatistics(approx_ok=True)
+

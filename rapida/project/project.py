@@ -306,6 +306,12 @@ class Project:
         )
 
     @property
+    def bounds(self):
+        info = pyogrio.read_info(self.geopackage_file_path, layer=self.polygons_layer_name)
+        return tuple(info['total_bounds'])
+
+
+    @property
     def data_folder(self):
         return os.path.join(self.path, self.data_folder_name)
 

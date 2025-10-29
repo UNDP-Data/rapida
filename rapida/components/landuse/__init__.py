@@ -1,11 +1,16 @@
 import asyncio
 import datetime
+import json
 import logging
 import os
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
 from concurrent.futures import  as_completed
 from typing import List
+
+import geopandas
+import rasterio
+
 from osgeo import gdal
 from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress
@@ -108,12 +113,13 @@ class LanduseVariable(Variable):
 
 
     def __init__(self, **kwargs):
-
+        kwargs.update({'s2_tiles':{}}) #  only way to patch because of pydantic
         super().__init__(**kwargs)
         project = Project(path=os.getcwd())
         geopackage_path = project.geopackage_file_path
         output_filename = f"{self.name}.tif"
         self.local_path = os.path.join(os.path.dirname(geopackage_path), self.component, output_filename)
+
 
     def __call__(self, *args, **kwargs):
         progress: Progress = kwargs.get('progress', None)
@@ -144,15 +150,19 @@ class LanduseVariable(Variable):
     def download(self, force=False, **kwargs):
 
         project = Project(os.getcwd())
+
+
         start_date, end_date = self.datetime_range.split('/')
         progress: Progress = kwargs.get('progress', None)
         stop = Event()
         total_n_files = 0
+        s2_images = {}
         if force or not os.path.exists(self.prediction_output_image):
 
             s2_tiles_dict = fetch_s2_tiles(stac_url=self.stac_url, bbox=project.geobounds,
                                      start_date=start_date, end_date=end_date,
-                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True)
+                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True,#filter_for_dev=['36NYF', '36NZF']
+                                     )
             for k, v in s2_tiles_dict.items():
                 total_n_files+= len(v) * len(SENTINEL2_BAND_MAP)
 
@@ -166,9 +176,10 @@ class LanduseVariable(Variable):
             ndone = 0
             with ThreadPoolExecutor(max_workers=5, ) as tpe:
                 jobs = dict()
-                s2items = {}
                 for mgrs_grid_id, candidates in s2_tiles_dict.items():
+                    #print(json.dumps(candidates[0].assets, indent=4))
                     s2i = Sentinel2Item(mgrs_grid=mgrs_grid_id, s2_tiles=candidates, workdir=output_dir, target_crs=project.projection)
+                    self.s2_tiles[mgrs_grid_id] = s2i
                     jobs[tpe.submit(s2i.download, bands=s2i.bands, progress=progress, force=force, )] = mgrs_grid_id
 
                 try:
@@ -176,6 +187,7 @@ class LanduseVariable(Variable):
                         gid = jobs[future]
                         try:
                             downloaded = future.result()
+
                             ndone+=1
                             if progress is not None and download_task is not None:
                                 progress.update(download_task,advance=1)
@@ -185,10 +197,19 @@ class LanduseVariable(Variable):
                                 progress.update(download_task, advance=1)
                 except KeyboardInterrupt:
                     stop.set()
-                    for future in jobs:
-                        if not future.cancelled():
-                            future.cancel()
+                    for s2i in self.s2_tiles.values():
+                        loop = getattr(s2i, "_loop", None)
+                        task = getattr(s2i, "_task", None)
+                        if loop and task and not task.done():
+                            try:
+                                loop.call_soon_threadsafe(task.cancel)
+                            except RuntimeError:
+                                pass
+                    # this only cancels pending (not running) futures, still good to call:
+                    tpe.shutdown(wait=False, cancel_futures=True)
+
                 finally:
+
                     if progress is not None and download_task is not None:
                         progress.update(download_task,
                                         description=f'[red]Downloaded Sentinel2 imagery in {ndone} MGRS grids',
@@ -196,6 +217,28 @@ class LanduseVariable(Variable):
 
             for grid, err in failed.items():
                 logger.error(f'Failed to download S2 imagery in {grid} because {err}')
+                # it is debatable if the error is to be swallowed or propagated
+
+
+            for mgrs_grid, s2itm in self.s2_tiles.items():
+                for band, vrt in s2itm.vrts.items():
+                    if band not in s2_images:s2_images[band] = []
+                    s2_images[band].append(vrt)
+
+
+            vrts = []
+            for band, vrt_files in s2_images.items():
+                #opts = gdal.BuildVRTOptions()
+                band_vrt = os.path.join(output_dir, f'{band}.vrt')
+                #band_vrt = f'/vsimem/{band}.vrt'
+
+                with gdal.BuildVRT(destName=band_vrt, srcDSOrSrcDSTab=vrt_files) as bvrt:
+                    bvrt.FlushCache()
+                    vrts.append(band_vrt)
+
+
+
+
 
     def download_old(self, force=False, **kwargs):
         project = Project(os.getcwd())
@@ -287,8 +330,16 @@ class LanduseVariable(Variable):
 
                 return affected_local_path
 
-
     def compute(self, **kwargs):
+        progress = kwargs.get('progress', None)
+        variable_task = None
+        if progress:
+            variable_task = progress.add_task(f"[red]Creating variable {self.name}", total=100)
+
+        source_value = self.target_band_value
+
+
+    def compute_old(self, **kwargs):
         progress = kwargs.get('progress', None)
         variable_task = None
         if progress:

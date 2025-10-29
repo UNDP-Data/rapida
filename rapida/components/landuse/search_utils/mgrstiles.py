@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import pyproj
 import requests
 from shapely.geometry.polygon import Polygon
+from shapely.ops import transform
+from pyproj import Transformer
 
 
 # ---------------------------
@@ -27,6 +29,7 @@ class Candidate:
     tile_geometry: Polygon = None
     mgrs_geometry: Polygon = None
     mgrs_crs: pyproj.CRS = None
+
     @property
     def quality_score(self) -> float:
         """
@@ -53,6 +56,9 @@ class Candidate:
 
         return round(score, 3)
 
+    def reproject(self, dst_crs:str=None, geom='tile_geometry'):
+        transformer = Transformer.from_crs(self.mgrs_crs, dst_crs, always_xy=True)
+        return transform(transformer.transform, getattr(self, geom))
 
     @property
     def datetime(self):
@@ -60,6 +66,13 @@ class Candidate:
     @property
     def date(self):
         return self.datetime.date()
+    @property
+    def nodata(self):
+        return self.assets['red']['raster:bands'][0]['nodata']
+
+    @property
+    def dtype(self):
+        return self.assets['red']['raster:bands'][0]['data_type']
 
 
     def __str__(self):

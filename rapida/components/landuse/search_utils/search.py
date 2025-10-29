@@ -197,7 +197,7 @@ def search( client=None, collection="sentinel-2-l1c",
 def fetch_s2_tiles(
     stac_url=None, bbox=None, collection="sentinel-2-l1c",
     start_date=None, end_date=None, max_cloud_cover=None,
-    progress = None, prune=True
+    progress = None, prune=True, filter_for_dev=None
 ) -> dict[str:list[Candidate]]:
 
     """
@@ -214,6 +214,7 @@ def fetch_s2_tiles(
     :param max_cloud_cover: int
     :param progress:rich progress
     :param prune:bool
+    :param filter_for_dev, used during dev only to run for one grid
     :return: dict of identified MGRS 100K grid that intersect the bbox and the list of candidate image tiles
     """
     tiles = {}
@@ -223,7 +224,9 @@ def fetch_s2_tiles(
 
     client = pystac_client.Client.open(stac_url)
     mgrs_grids = mgrs_100k_tiles_for_bbox(*bbox) # avoid data
-    #mgrs_grids = {'36NZF': mgrs_grids['36NZF']}
+    if filter_for_dev:
+
+        mgrs_grids = {f: mgrs_grids[f] for f in filter_for_dev if f in mgrs_grids}
 
     with ThreadPoolExecutor(max_workers=5) as executor:
 

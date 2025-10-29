@@ -3,11 +3,8 @@ import datetime
 import threading
 from rasterio.shutil import copy as rio_copy
 from rasterio.windows import bounds, from_bounds
-from rasterio.enums import Resampling
-from concurrent.futures.thread import ThreadPoolExecutor
-from concurrent.futures import as_completed
 from rasterio.warp import calculate_default_transform, aligned_target, transform_bounds
-import numpy as np
+from osgeo import gdal
 from pyproj import CRS
 from rasterio.merge import merge
 import os.path
@@ -18,29 +15,31 @@ from rich.progress import Progress
 import aiohttp
 import aiofiles
 import random
-from affine import Affine
+from contextlib import suppress
 from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP, SENTINEL2_BAND_MAP
 from rapida.components.landuse.search_utils.mgrstiles import Candidate
 from rapida.components.landuse.search_utils.mgrsconv import _parse_mgrs_100k
+
 from typing import List, Tuple
 import math
 import logging
-
+gdal.UseExceptions()
 logger = logging.getLogger(__name__)
+rlog = logging.getLogger('rasterio')
+rlog.setLevel(logging.ERROR)
 
-
-def compute_offsets(remote_size: int, nchunks: int) -> List[Tuple[int, int]]:
+def compute_offsets(remote_size: int, chunks: int) -> List[Tuple[int, int]]:
     """
     Split [0, remote_size) into <= nchunks contiguous, gap-free, non-overlapping ranges.
     Final chunk absorbs the remainder.
     """
-    if nchunks <= 0:
+    if chunks <= 0:
         raise ValueError("nchunks must be >= 1")
     if remote_size <= 0:
         return [(0, 0)]
 
     # ceil() ensures we never create more than `nchunks` tasks
-    chunk_size = math.ceil(remote_size / nchunks)
+    chunk_size = math.ceil(remote_size / chunks)
     offsets: List[Tuple[int, int]] = []
     start = 0
     while start < remote_size:
@@ -53,6 +52,9 @@ def compute_offsets(remote_size: int, nchunks: int) -> List[Tuple[int, int]]:
     # assert offsets[-1][1] == remote_size
     # assert all(offsets[i][1] == offsets[i+1][0] for i in range(len(offsets)-1))
     return offsets
+
+
+
 class Sentinel2Item:
     """
     A sophisticated Sentinel 2 utility image that aligns perfectly with MGRS 100K grid tiles.
@@ -63,7 +65,7 @@ class Sentinel2Item:
     """
 
     def __init__(self, mgrs_grid:str=None, s2_tiles:List[Candidate] = None,
-                 target_resolution=(10,10), target_crs=None,
+                 target_resolution=10, target_crs=None,
                  workdir:str = None, concurrent_bands=50):
 
         self.utm_zone, self.mgrs_band, self.mgrs_grid_letters = _parse_mgrs_100k(grid_id=mgrs_grid)
@@ -71,10 +73,14 @@ class Sentinel2Item:
         self.s2_tiles = sorted(s2_tiles, key=lambda c:-c.quality_score)
         self.workdir = os.path.join(os.path.abspath(workdir), self.mgrs_grid)
         self.target_crs = CRS.from_user_input(target_crs)
-        self.target_resolution=target_resolution
+        self.target_resolution=target_resolution or None
         self.__urls__ = {}
         self.__files__ = {}
         self.__bands__ = {}
+        self.__assets__ = {}
+        self.__resolutions__ = {}
+        self._task = None
+        self._loop = None
         self._prepare_urls_()
         os.makedirs(self.workdir, exist_ok=True)
         self.semaphore = asyncio.Semaphore(concurrent_bands)
@@ -109,6 +115,11 @@ class Sentinel2Item:
                         self.__urls__[asset_band].append(asset_html_uri)
                     else:
                         self.__urls__[asset_band] = [asset_html_uri]
+                    if not asset_band in self.__resolutions__:
+                        self.__resolutions__[asset_band] = cand.assets[asset_name]['raster:bands'][0]['spatial_resolution']
+                if not asset_band in self.__assets__:
+                    self.__assets__[asset_band] = asset_name
+
     @property
     def urls(self):
         return self.__urls__
@@ -119,29 +130,63 @@ class Sentinel2Item:
 
     @property
     def bands(self):
-        return sorted(self.__urls__.keys())
+        return sorted(self.__assets__.keys())
 
     @property
-    def vrt(self):
+    def assets(self):
+        return tuple(sorted(self.__assets__.values()))
+
+
+    @property
+    def resolution(self):
+        return min(self.__resolutions__.values())
+
+    @property
+    def vrts(self):
         vrts = {}
         for band in self.bands:
-            band_file = self[band]
-            if band_file is not None:
-                out_path = band_file.replace('.tif', '.vrt')
-                with rasterio.open(band_file) as src:
-                    transform, width, height = calculate_default_transform(
-                        src.crs, self.target_crs, src.width, src.height, *src.bounds, resolution=self.target_resolution
-                    )
-
-                    nt, w, h = aligned_target(transform=transform, width=src.width, height=src.height,
-                                              resolution=self.target_resolution)
-
-
-                    with WarpedVRT(src, crs=self.target_crs, dtype=src.dtypes[0], nodata=src.nodata, transform=nt,
-                                   width=src.width, height=src.height,resampling=Resampling.nearest, count=src.count) as vrt:
-                        rio_copy(vrt, out_path, driver="VRT")
-                        vrts[band] = out_path
+            vrts[band] = self.__vrt__(band=band)
         return vrts
+
+    def __vrt__(self, band=None):
+        """
+        Create a VRT in target_crs and target resolution with same size as the ideal
+        MGRS grid
+        :param band:
+        :return:
+        """
+        if not band in self.bands:
+            raise ValueError(f'Sentinel2 band "{band}" is invalid. Valid bands are {"".join(self.bands)}')
+
+        band_file = self[band]
+
+        # compute mgrs ideal height and width from mgrs_geometry of teh first candidate
+        mgrs_poly = self.s2_tiles[0].mgrs_geometry
+        left, bottom,right, top = mgrs_poly.bounds
+        yres, xres = self.target_resolution, self.target_resolution
+        mgrs_height = math.floor((top-bottom)/yres)
+        mgrs_width = math.floor((right-left)/yres)
+
+        if band_file is not None:
+            vrt_path = band_file.replace('.tif', '.vrt')
+            with rasterio.open(band_file) as src:
+                #dst_bounds = transform_bounds(src_crs=src.crs,dst_crs=self.target_crs, *mgrs_poly.bounds)
+
+                # # compute the default transform after reprojection
+                transform, twidth, theight = calculate_default_transform(
+                    src.crs, self.target_crs, mgrs_width+2, mgrs_height+2, *mgrs_poly.bounds,resolution=self.target_resolution
+                )
+                #
+                #align nicely the transform,
+                aligned_transform, w, h = aligned_target(transform=transform, width=twidth, height=theight,
+                                          resolution=self.target_resolution)
+                # use nicely aligned transform and ideal mgrs height and width
+                with WarpedVRT(src, crs=self.target_crs, dtype=src.dtypes[0], nodata=src.nodata, transform=aligned_transform,
+                               width=w, height=h,resampling=Resampling.nearest, count=src.count) as vrt:
+
+                    rio_copy(vrt, vrt_path, driver="VRT")
+
+                    return vrt_path
 
 
 
@@ -156,9 +201,6 @@ class Sentinel2Item:
         if band_file is None:
             logger.debug(f'There is no imagery for MGRS {self.mgrs_grid} and band {band} in {self.workdir}.Consider downloading it first ')
         return band_file
-
-
-
 
 
     async def __fetch_range__(
@@ -178,7 +220,7 @@ class Sentinel2Item:
                     data = await resp.read()
                     if len(data) != expected:
                         raise IOError(f"Expected {expected}B, got {len(data)}B for {start}-{end}")
-                    return data
+                    return data, start
 
             except (aiohttp.ClientOSError,
                     aiohttp.ServerDisconnectedError,
@@ -192,8 +234,9 @@ class Sentinel2Item:
                     f"Range {start}-{end} failed ({type(e).__name__}: {e}); retry {attempt}/{max_retries} in {delay:.2f}s")
                 await asyncio.sleep(delay)
 
+
     async def __download_file__(self, session: aiohttp.ClientSession = None,
-                                url: str = None, dst: str = None, nchunks: int = 5, force=False):
+                                url: str = None, dst: str = None, chunks: int = 5, timeout_minutes=30, force=False):
 
         async with self.semaphore:
             # 1) Discover size (HEAD)
@@ -204,98 +247,83 @@ class Sentinel2Item:
                     raise ValueError("No content-length in response headers")
                 remote_content_length = int(cl)
 
-            # 1.5) early return if file exists, seems to be of identical size and force=False
-            if os.path.exists(dst):
-                if os.path.getsize(dst) == remote_content_length and not force:
-                    logger.debug(f'Reusing {dst}')
-                    return dst
+            # 2) Short-circuit if already valid (unless force)
+            if not force and os.path.exists(dst):
+                with suppress(Exception):
+                    with rasterio.open(dst) as src:
+                        if src.crs and src.width and src.height:
+                            return dst
+                # invalid or unreadable -> remove and re-download
+                with suppress(FileNotFoundError):
+                    os.remove(dst)
+                logger.info(f'{dst} will be re-downloaded!')
 
-            # 2) Launch chunk range tasks
-            offsets = compute_offsets(remote_content_length, nchunks)
-            tasks: list[asyncio.Task] = []
-            for start_offset, end_offset in offsets:
-                t = asyncio.create_task(
-                    self.__fetch_range__(session=session, url=url,
-                                         start=start_offset, end=end_offset),
-                    name=f"{start_offset}-{end_offset}"
+            # 3) Launch chunk tasks
+            offsets = compute_offsets(remote_content_length, chunks)
+            tasks = [
+                asyncio.create_task(
+                    self.__fetch_range__(session=session, url=url, start=soff, end=eoff),
+                    name=f"{soff}-{eoff}",
                 )
-                tasks.append(t)
+                for (soff, eoff) in offsets
+            ]
 
+            os.makedirs(os.path.dirname(dst) or ".", exist_ok=True)
 
-
-
-
-            folder = os.path.dirname(dst)
-            os.makedirs(folder, exist_ok=True)
-
-
-            # 3) Write chunks as they finish
-            async with aiofiles.open(dst, "wb") as local_file:
-                # # Optional: pre-size to avoid sparse edge-cases
-                # await local_file.truncate(remote_content_length)
-
-                try:
-                    pending = set(tasks)
-                    while pending:
-                        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                        for done_task in done:
-                            soff, eoff = map(int, done_task.get_name().split("-"))
-                            try:
-                                data = await done_task  # may raise
+            try:
+                # Open the file; ensure cancellation can unwind this cleanly
+                async with aiofiles.open(dst, "wb") as local_file:
+                    # Bound total time for all chunks
+                    try:
+                        async with asyncio.timeout(timeout_minutes * 60):
+                            # As each finishes, write to disk
+                            for t in asyncio.as_completed(tasks):
+                                data, soff = await t  # may raise
                                 await local_file.seek(soff)
                                 await local_file.write(data)
-                                logger.debug(f"Saved {len(data)}B to {dst} @ [{soff}-{eoff})")
+                                # optional: ensure scheduler progress
+                                await asyncio.sleep(0)
+                    except asyncio.TimeoutError:
+                        logger.debug(f"Timeout after {timeout_minutes} minutes; cancelling {len(tasks)} tasks")
+                        for t in tasks:
+                            t.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        raise
+                    except asyncio.CancelledError:
+                        # Propagate cancellation but clean up children first
+                        for t in tasks:
+                            t.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        raise
+                    except Exception:
+                        # On any other error, cancel children and re-raise
+                        for t in tasks:
+                            if not t.done():
+                                t.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        raise
 
-                            except asyncio.CancelledError:
-                                # We are cancelling: stop siblings, **no error logs** here.
-                                for t in pending:
-                                    t.cancel()
-                                await asyncio.gather(*pending, return_exceptions=True)
-                                raise
+                # 4) Verify size AFTER the file is closed
+                if not os.path.exists(dst):
+                    raise IOError(f"destination disappeared: {dst}")
+                size = os.path.getsize(dst)
+                if size != remote_content_length:
+                    with suppress(FileNotFoundError):
+                        os.remove(dst)
+                    raise IOError(f"incomplete write: expected {remote_content_length}, got {size}")
 
-                            except Exception as e:
-                                # Distinguish shutdown-induced network noise from real errors.
-                                shutting_down_noise = (
-                                        isinstance(e, RuntimeError) and "Connection closed" in str(e)
-                                )
-                                # Cancel siblings either way.
-                                for t in pending:
-                                    t.cancel()
-                                await asyncio.gather(*pending, return_exceptions=True)
+                return dst
 
-                                if shutting_down_noise:
-                                    # Convert to cancellation so upper layer handles it; no log here.
-                                    raise asyncio.CancelledError from e
-                                else:
-                                    # Real failure: report and propagate.
-                                    logger.error(f"Failed to download bytes {soff}-{eoff} because {e}")
-                                    raise
+            finally:
+                # Make sure any stray tasks are cancelled/awaited
+                pend = [t for t in tasks if not t.done()]
+                if pend:
+                    for t in pend:
+                        t.cancel()
+                    await asyncio.gather(*pend, return_exceptions=True)
 
-                finally:
-                    # Ensure all tasks are drained exactly once
-                    await asyncio.gather(*tasks, return_exceptions=True)
-
-            # 4) Verify only if we weren’t cancelled
-            assert os.path.exists(dst), f"{dst} does not exist"
-            assert os.path.getsize(dst) == remote_content_length, f"{dst} was NOT downloaded successfully"
-            return dst
-
-
-    async def __download_band__(self, band:str=None, session=None,
-                                progress=None, progress_task=None, force=False,
-                                mosaic=True):
-        """
-        Download files that will be sued to make a single band mosaic
-        :param band:
-        :param session:
-        :param progress:
-        :param progress_task:
-        :param force
-        :param: mosaic
-        :return:
-        """
-
-
+    async def __download_band__(self, band: str = None, session=None,
+                                progress=None, progress_task=None, force=False, mosaic=True):
 
         band_urls = self.urls[band]
         tasks = []
@@ -315,46 +343,54 @@ class Sentinel2Item:
                     name=new_file_name
                 )
             )
-        while tasks:
-            done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-            for done_task in done:
-                fname = done_task.get_name()
+        try:
+            while tasks:
+                done, tasks = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                for done_task in done:
+                    fname = done_task.get_name()
 
-                try:
-                    downloaded_file = await done_task  # already finished; get result or raise
-                    if not band in self.__files__:
-                        self.__files__[band] = []
-                    position = positions[downloaded_file]
-                    #self.__files__[band][position] = downloaded_file
-                    self.__files__[band].insert(position, downloaded_file)
+                    try:
+                        downloaded_file = await done_task  # already finished; get result or raise
+                        if not band in self.__files__:
+                            self.__files__[band] = []
+                        position = positions[downloaded_file]
+                        #self.__files__[band][position] = downloaded_file
+                        self.__files__[band].insert(position, downloaded_file)
 
-                    if progress is not None and progress_task is not None:
-                        progress.update(progress_task,
-                                        description=f'[red]Downloaded file {fname} band {band} in MGRS grid {self.mgrs_grid}',
-                                        advance=1)
-                except asyncio.CancelledError as ce:
-                    if tasks:
-                        for task in tasks:
-                            task.cancel()
-                        await asyncio.gather(*tasks, return_exceptions=True)
-                    raise
-                except Exception as e:
-                    logger.error(f'Failed to download {band} because {e}')
-                    raise
-        self.__files__[band] = tuple(self.__files__[band])
-        if progress is not None and progress_task is not None:
-            progress.update(
-                progress_task,
-                description=f'[red]Downloaded band {band} in MGRS-{self.mgrs_grid}'
-            )
+                        if progress is not None and progress_task is not None:
+                            progress.update(progress_task,
+                                            description=f'[red]Downloaded file {fname} band {band} in MGRS grid {self.mgrs_grid}',
+                                            advance=1)
+                    except asyncio.CancelledError as ce:
+                        if tasks:
+                            for task in tasks:
+                                task.cancel()
+                            await asyncio.gather(*tasks, return_exceptions=True)
+                        raise
+                    except Exception as e:
+                        logger.error(f'Failed to download {band} because {e}')
+                        raise
 
-        if mosaic:
-            return self.__mosaic__(band=band, progress=progress, force=force)
+            self.__files__[band] = tuple(self.__files__[band])
+            if progress is not None and progress_task is not None:
+                progress.update(
+                    progress_task,
+                    description=f'[red]Downloaded band {band} in MGRS-{self.mgrs_grid}'
+                )
+
+            if mosaic:
+                return self.__merge__(band=band, progress=progress, force=force)
+
+        except asyncio.CancelledError:
+            logger.error('JUSSI', band)
+            if tasks:
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
 
-
-
-    async def __download__(self, bands: List[str] = None, progress: Progress = None,
+    async def __download__(self, bands: List[str] = None, stop: threading.Event = None, progress: Progress = None,
                        connect_timeout=25, read_timeout=900, force=False):
         """
         Download  one or more Sentinel2 bands
@@ -414,10 +450,9 @@ class Sentinel2Item:
                             downloaded_band = await dt  # consume result or raise
                             downloaded_bands[band] = downloaded_band
                         except Exception as e:
-
-                            logger.error(f"Band {band} failed: {e}")
+                            logger.error(f"Failed to download band {band} in  {self.mgrs_grid}: {e}")
                             # Convert to cancellation so the outer handler centralizes cleanup
-                            raise asyncio.CancelledError() from e
+                            #raise asyncio.CancelledError() from e
 
             except asyncio.CancelledError:
                 # Centralized shutdown: cancel remaining bands and drain once
@@ -425,7 +460,6 @@ class Sentinel2Item:
                 for t in band_tasks:
                     t.cancel()
                 await asyncio.gather(*band_tasks, return_exceptions=True)
-                print(self.files)
                 raise
             finally:
                 # Ensure all tasks are drained exactly once
@@ -433,39 +467,101 @@ class Sentinel2Item:
 
                 if progress is not None and progress_task is not None:
                     progress.remove_task(progress_task)
-                return downloaded_bands
 
-    def __mosaic__(self, band: str = None, progress=None, force=None):
+        return downloaded_bands
 
+
+    def download(self, bands=None, stop: threading.Event = None, progress=None,
+                 connect_timeout=25, read_timeout=900, force=False):
+
+        if threading.current_thread() is threading.main_thread():
+            # if you ever call it in main thread
+            return asyncio.run(self.__download__(
+                bands=bands, stop=stop, progress=progress,
+                connect_timeout=connect_timeout, read_timeout=read_timeout, force=force
+            ))
+
+        # worker thread branch
+        loop = asyncio.new_event_loop()
+        self._loop = loop  # keep a handle so main can cancel
+        asyncio.set_event_loop(loop)
+        try:
+            self._task = loop.create_task(self.__download__(
+                bands=bands, stop=stop, progress=progress,
+                connect_timeout=connect_timeout, read_timeout=read_timeout, force=force
+            ), name=f'down{self.mgrs_grid}')
+
+            # run until task completes or is cancelled
+            return loop.run_until_complete(self._task)
+
+        except asyncio.CancelledError:
+            # task was cancelled from main
+            logger.info(f"Worker {threading.current_thread().name} is cancelling tasks")
+            try:
+                loop.run_until_complete(asyncio.gather(self._task, return_exceptions=True))
+            except Exception:
+                pass
+            raise
+        finally:
+            # 1) cancel & drain any remaining tasks in this loop
+            try:
+                pending = [t for t in asyncio.all_tasks(loop) if not t.done()]
+            except Exception:
+                pending = []
+            for t in pending: t.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+
+            # 2) shutdown async generators
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+
+            asyncio.set_event_loop(None)
+            loop.close()
+            self._loop = None
+            self._task = None
+
+
+    def __merge__(self, band: str = None, progress=None, force=None):
+        """
+        Merge multiple Sentinel2  images iwth potentially partial coverage into one without nodata
+        :param band:
+        :param progress:
+        :param force:
+        :return:
+        """
         band_file = os.path.join(self.workdir, f'{band}.tif')
-        if os.path.exists(band_file) and os.path.getsize(band_file) > 0 and not force:
-            self[band] = band_file
-            logger.debug(f'Reusing {band_file}')
-            return band_file
+        if not force:
+            try:
+                with rasterio.open(band_file) as src:
+                    if src.crs and src.width and src.height:
+                        self[band] = band_file
+                        return band_file
+            except Exception as e:
+                if os.path.exists(band_file):
+                    logger.info(f'{band_file} will be recreated!')
+                    os.remove(band_file)
+
 
         files = self.files[band]
 
-        mgrs_poly = self.s2_tiles[0].mgrs_geometry
-        xmin, ymin, xmax, ymax = mgrs_poly.bounds
         asset_name = SENTINEL2_BAND_MAP[band]
         asset_def = self.s2_tiles[0].assets[asset_name]
         no_data = asset_def['raster:bands'][0]['nodata']
-        res = asset_def['raster:bands'][0]['spatial_resolution']
-        transform = Affine.from_gdal(c=xmin,a=res, b=0, f=ymax, d=0, e=-res)
-        width = math.floor((xmax-xmin)/res)
-        height = math.floor((ymin-ymax)/-res)
+
         best = files[0]
         src_datasets = []
         vrt_datasets = []
+        progress_task = None
+
         try:
 
             with rasterio.Env(GDAL_NUM_THREADS="ALL_CPUS", GDAL_CACHEMAX=1024, OPJ_NUM_THREADS="ALL_CPUS", USE_TILE_AS_BLOCK="YES"):
                 with rasterio.open(best) as src:
                     mgrs_profile = src.profile
                     mgrs_profile.update(dict(
-                        transform=transform,
-                        width=width,
-                        height=height,
                         tiled=True,
                         compress='ZSTD',
                         bigtiff="IF_SAFER",
@@ -494,18 +590,16 @@ class Sentinel2Item:
 
                     with rasterio.open(band_file, "w", **mgrs_profile) as dst:
                         wins = {block: win for block, win in dst.block_windows()}
-                        progress_task = None
+
                         if progress is not None:
+                            w = 'image'
                             if len(files) > 1:
-                                progress_task = progress.add_task(
-                                    description=f"[red]Merging {len(files)} Sentinel2 images for band {band} in {self.mgrs_grid}",
-                                    total=len(wins)
-                                )
-                            else:
-                                progress_task = progress.add_task(
-                                    description=f"[red]Clipping band {band} in {self.mgrs_grid}",
-                                    total=len(wins)
-                                )
+                                w += 's'
+                            progress_task = progress.add_task(
+                                description=f"[red]Merging {len(files)} Sentinel2 {w} for band {band} in {self.mgrs_grid}",
+                                total=len(wins)
+                            )
+
                         for block, window in wins.items():
                             # __fill_window__(window=window,src_ds=src,vrt_datasets=vrt_datasets,no_data=no_data, dst_ds=dst)
                             bbox = bounds(window=window, transform=dst.transform)
@@ -539,14 +633,12 @@ class Sentinel2Item:
 
                             # 4) Any remaining holes -> write as nodata, should not happen
                             if holes.any():
-                                logger.warning(f'Some pixels are still empty in {self.mgrs_grid}-{window.row_off, window.col_off, window.height, window.width}')
+                                logger.warning(f'Some pixels are still empty in {self.mgrs_grid}-{band}-{window.row_off, window.col_off, window.height, window.width}')
                                 out[holes] = no_data
 
                             dst.write(out, 1, window=window)
                             if progress is not None and progress_task is not None:
-                                progress.update(progress_task,
-                                                #description=f'[red]Processed image block in  MGRS grid {self.mgrs_grid}',
-                                                advance=1)
+                                progress.update(progress_task,advance=1)
 
             self[band] = band_file
             return band_file
@@ -558,7 +650,7 @@ class Sentinel2Item:
                 progress.remove_task(progress_task)
 
 
-    def __merge__(self, band: str = None):
+    def merge(self, band: str = None):
         """
         Alternative method to __mosaic__ a bit tricky because, by default it wants to load all file/s in RAM
         :param band:
@@ -588,31 +680,4 @@ class Sentinel2Item:
               target_aligned_pixels=True,mem_limit=2.1,dst_path=band_file, dst_kwds=profile)
         self[band] = band_file
 
-
-
-
-
-    def download(self, bands: List[str] = None, progress: Progress = None,
-                       connect_timeout=25, read_timeout=900, force=False):
-        if threading.current_thread() == threading.main_thread():
-
-            return asyncio.run(
-                self.__download__(bands=bands, progress=progress, connect_timeout=connect_timeout,
-                              read_timeout=read_timeout, force=force)
-            )
-        else:
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(
-                    self.__download__(bands=bands, progress=progress, connect_timeout=connect_timeout,
-                                      read_timeout=read_timeout, force=force)
-                    )
-
-            finally:
-                try:
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-                except Exception as ee:
-                    pass
-                asyncio.set_event_loop(None)
-                loop.close()
 

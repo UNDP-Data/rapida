@@ -13,7 +13,7 @@ import rasterio
 
 from osgeo import gdal
 from osgeo_utils.gdal_calc import Calc
-from rich.progress import Progress
+from rich.progress import Progress, TimeElapsedColumn
 import geopandas as gpd
 from rapida.components.landuse.search_utils.s2item import Sentinel2Item
 from rapida.components.landuse.constants import SENTINEL2_BAND_MAP
@@ -157,12 +157,15 @@ class LanduseVariable(Variable):
         stop = Event()
         total_n_files = 0
         s2_images = {}
+
         if force or not os.path.exists(self.prediction_output_image):
 
             s2_tiles_dict = fetch_s2_tiles(stac_url=self.stac_url, bbox=project.geobounds,
                                      start_date=start_date, end_date=end_date,
-                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True,#filter_for_dev=['36NYF', '36NZF']
+                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True,#filter_for_dev=['36MWE']
                                      )
+
+
             for k, v in s2_tiles_dict.items():
                 total_n_files+= len(v) * len(SENTINEL2_BAND_MAP)
 
@@ -174,6 +177,7 @@ class LanduseVariable(Variable):
 
             failed= {}
             ndone = 0
+            downloaded = {}
             with ThreadPoolExecutor(max_workers=5, ) as tpe:
                 jobs = dict()
                 for mgrs_grid_id, candidates in s2_tiles_dict.items():
@@ -184,17 +188,18 @@ class LanduseVariable(Variable):
 
                 try:
                     for future in as_completed(jobs):
-                        gid = jobs[future]
+                        grid = jobs[future]
                         try:
-                            downloaded = future.result()
-
+                            downloaded_files = future.result()
                             ndone+=1
                             if progress is not None and download_task is not None:
                                 progress.update(download_task,advance=1)
                         except Exception as e:
-                            failed[gid] = e
+                            failed[grid] = e
                             if progress is not None and download_task is not None:
                                 progress.update(download_task, advance=1)
+                            raise
+                        downloaded[grid] = downloaded_files
                 except KeyboardInterrupt:
                     stop.set()
                     for s2i in self.s2_tiles.values():
@@ -207,12 +212,13 @@ class LanduseVariable(Variable):
                                 pass
                     # this only cancels pending (not running) futures, still good to call:
                     tpe.shutdown(wait=False, cancel_futures=True)
+                    raise
 
                 finally:
 
                     if progress is not None and download_task is not None:
                         progress.update(download_task,
-                                        description=f'[red]Downloaded Sentinel2 imagery in {ndone} MGRS grids',
+                                        #description=f'[red]Downloaded Sentinel2 imagery in {ndone} MGRS grids',
                                         advance=1)
 
             for grid, err in failed.items():
@@ -222,14 +228,16 @@ class LanduseVariable(Variable):
 
             for mgrs_grid, s2itm in self.s2_tiles.items():
                 for band, vrt in s2itm.vrts.items():
+                    if vrt is None:
+                        continue
                     if band not in s2_images:s2_images[band] = []
                     s2_images[band].append(vrt)
-
 
             vrts = []
             for band, vrt_files in s2_images.items():
                 #opts = gdal.BuildVRTOptions()
                 band_vrt = os.path.join(output_dir, f'{band}.vrt')
+
                 #band_vrt = f'/vsimem/{band}.vrt'
 
                 with gdal.BuildVRT(destName=band_vrt, srcDSOrSrcDSTab=vrt_files) as bvrt:

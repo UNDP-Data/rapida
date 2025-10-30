@@ -35,6 +35,29 @@ def expand_timerange(start_date: str, end_date: str, days: int = 7) -> tuple[str
     return expanded_start.date().isoformat(), expanded_end.date().isoformat()
 
 
+def process_item(it, mgrs_id, ref_ts, mgrs_poly, mgrs_crs):
+    props = it.get("properties", {})
+    item_id = it.get("id", "")
+    tile_info = get_tileinfo(it)
+    dt_iso = props.get("datetime")
+    if not dt_iso:
+        return None
+
+    return Candidate(
+        id=item_id,
+        time_ts=_iso_to_ts(dt_iso),
+        cloud_cover=_cloud_from_props(props),
+        assets=it.get("assets", {}),
+        grid=mgrs_id,
+        nodata_coverage=100 - tile_info["dataCoveragePercentage"],
+        tile_geometry=shape(tile_info["tileGeometry"]),
+        tile_data_geometry=shape(tile_info["tileDataGeometry"]),
+        data_coverage=tile_info["dataCoveragePercentage"],
+        ref_ts=ref_ts,
+        mgrs_geometry=mgrs_poly,
+        mgrs_crs=mgrs_crs
+    )
+
 def search( client=None, collection="sentinel-2-l1c",
             start_date=None,end_date=None, mgrs_id=None, mgrs_poly=None, crs=None, max_cloud_cover=10,
             stop:Event = None, progress:Progress=None, prune=False
@@ -90,38 +113,18 @@ def search( client=None, collection="sentinel-2-l1c",
                 "eo:cloud_cover": {"lte": cloud_cover},
             }
         )
+
         items = [itm.to_dict() for itm in search_result.items()]
+
         logger.debug(
             f'Found {len(items)} items in MGRS-{mgrs_id} between {start_date} and {end_date} and {cloud_cover}% cloud cover')
+
 
         if not items: #early exit
             start_date, end_date = expand_timerange(start_date=start_date, end_date=end_date)
             continue
 
         if stop.is_set():break
-        def process_item(it, mgrs_id, ref_ts, mgrs_poly, mgrs_crs):
-            props = it.get("properties", {})
-            item_id = it.get("id", "")
-            tile_info = get_tileinfo(it)
-            dt_iso = props.get("datetime")
-            if not dt_iso:
-                return None
-
-            return Candidate(
-                id=item_id,
-                time_ts = _iso_to_ts(dt_iso),
-                cloud_cover = _cloud_from_props(props),
-                assets = it.get("assets", {}),
-                grid = mgrs_id,
-                nodata_coverage = 100 - tile_info["dataCoveragePercentage"],
-                tile_geometry = shape(tile_info["tileGeometry"]),
-                tile_data_geometry = shape(tile_info["tileDataGeometry"]),
-                data_coverage= tile_info["dataCoveragePercentage"],
-                ref_ts = ref_ts,
-                mgrs_geometry = mgrs_poly,
-                mgrs_crs = mgrs_crs
-            )
-
 
         with ThreadPoolExecutor(max_workers=10) as executor:
             futures = [executor.submit(process_item, itm, mgrs_id, mid, mgrs_poly, crs) for itm in items]
@@ -129,12 +132,17 @@ def search( client=None, collection="sentinel-2-l1c",
                 for future in as_completed(futures):
                     cand = future.result()
                     if cand:
-                        tile_candidates.append(cand)
+                        ids = [e.id for e in tile_candidates]
+                        if cand.id in ids:
+                            logger.debug(f'Skipping duplicate tile {cand.id}')
+                        else:
+                            tile_candidates.append(cand)
             except KeyboardInterrupt:
                 for future in futures:
                     if not future.cancelled():
                         future.cancel()
                 break
+
         #sort candidates
         scandidates = sorted(tile_candidates, key=lambda c:-c.quality_score)
 
@@ -184,6 +192,7 @@ def search( client=None, collection="sentinel-2-l1c",
                 cov_poly = c.tile_data_geometry.intersection(mgrs_poly).union(cov_poly)
                 coverage = cov_poly.area/mgrs_poly.area*100
                 pruned.append(c)
+
                 if math.isclose(coverage, b=100, abs_tol=1e-2):
                     break
 

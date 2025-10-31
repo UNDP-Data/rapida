@@ -175,7 +175,7 @@ class LanduseVariable(Variable):
 
             s2_tiles_dict = fetch_s2_tiles(stac_url=self.stac_url, bbox=project.geobounds,
                                      start_date=start_date, end_date=end_date,
-                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True,#filter_for_dev=['36MWE']
+                                     max_cloud_cover=self.cloud_cover, progress=progress, prune=True,#filter_for_dev=['36MYB']
                                      )
 
 
@@ -197,7 +197,7 @@ class LanduseVariable(Variable):
                     #print(json.dumps(candidates[0].assets, indent=4))
                     s2i = Sentinel2Item(mgrs_grid=mgrs_grid_id, s2_tiles=candidates, workdir=output_dir, target_crs=project.projection)
                     self.s2_tiles[mgrs_grid_id] = s2i
-                    jobs[tpe.submit(s2i.download, bands=['B02'], progress=progress, force=force, )] = mgrs_grid_id
+                    jobs[tpe.submit(s2i.download, bands=s2i.bands, progress=progress, force=force)] = mgrs_grid_id
 
                 try:
                     for future in as_completed(jobs):
@@ -254,16 +254,17 @@ class LanduseVariable(Variable):
                 GDAL_CACHEMAX=gdal_cache_mb,  # warp cache
             )
             try:
-                for band, vrt_files in s2_images.items():
-                    #opts = gdal.BuildVRTOptions()
-                    band_vrt = os.path.join(output_dir, f'{band}.vrt')
-                    band_cog = band_vrt.replace('.vrt', '.tif')
-                    #band_vrt = f'/vsimem/{band}.vrt'
+                for band, band_vrt_files in s2_images.items():
 
-                    with env, gdal.BuildVRT(destName=band_vrt, srcDSOrSrcDSTab=vrt_files) as src_ds:
+                    #band_vrt = os.path.join(output_dir, f'{band}.vrt')
+                    band_cog = os.path.join(output_dir, f'{band}.tif')
+                    #band_cog = band_vrt.replace('.vrt', '.tif')
+                    band_vrt = f'/vsimem/{start_date}_{end_date}_{band}.vrt'
+
+                    with env, gdal.BuildVRT(destName=band_vrt, srcDSOrSrcDSTab=band_vrt_files) as src_ds:
                         src_ds.FlushCache()
                         vrts.append(band_vrt)
-                        then = datetime.datetime.now()
+
                         # rio_copy(band_vrt, band_cog, driver='COG', COMPRESS='NONE', BLOCKSIZE=1024,NUM_THREADS='ALL_CPUS',
                         #          RESAMPLING='cubic', OVERVIEW_LEVELS='NONE', callback=gdal_rich_callback,
                         #          callback_data=(progress, cp_task, stop)
@@ -278,12 +279,8 @@ class LanduseVariable(Variable):
                                            transform=transform, dtype=dtp, nodata=src_band.GetNoDataValue(), blocksize=1024, num_threads='ALL_CPUS',
                                            resampling=Resampling.cubic,overview_levels=None, compress=None) as dst:
 
-                            # [dst.write(src_ds.ReadAsArray(xoff=w.col_off, yoff=w.row_off, xsize=w.width, ysize=w.height,
-                            #                 band_list=[1],
-                            #                 # callback=gdal_callback_pre,
-                            #                 # callback_data=timeout_event
-                            #                ), 1, window=w) for _, w in dst.block_windows()]
-                            wins = {block: win for block, win in dst.block_windows()}
+
+                            wins = {blck: win for blck, win in dst.block_windows()}
                             cp_task = None
                             if progress is not None:
                                 cp_task = progress.add_task(description=f'[red]Saving {band_vrt} to {band_cog}', total=len(wins))
@@ -292,20 +289,21 @@ class LanduseVariable(Variable):
                                     raise KeyboardInterrupt
 
 
-                                src_data  = src_ds.ReadAsArray(xoff=win.col_off, yoff=win.row_off, xsize=win.width, ysize=win.height,
-                                            band_list=[1],
-                                            # callback=gdal_callback_pre,
-                                            # callback_data=timeout_event
-                                           )
+                                src_data  = src_ds.ReadAsArray(xoff=win.col_off, yoff=win.row_off,
+                                                               xsize=win.width, ysize=win.height,band_list=[1]
+                                                               )
                                 dst.write(src_data, 1, window=win)
 
                                 if progress is not None and cp_task is not None:
                                     progress.update(cp_task, advance=1)
 
-                        now = datetime.datetime.now()
-                        logger.info(f'mosaic lasted {(now-then).total_seconds()}')
+
+
                     if progress is not None and cp_task is not None:
                         progress.remove_task(cp_task)
+
+                gdal.UnlinkBatch(vrts)
+
             except KeyboardInterrupt:
                 stop.set()
                 raise

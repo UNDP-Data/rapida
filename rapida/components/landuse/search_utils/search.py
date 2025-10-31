@@ -136,21 +136,33 @@ def search( client=None, collection="sentinel-2-l1c",
                         if cand.id in ids:
                             logger.debug(f'Skipping duplicate tile {cand.id}')
                         else:
-                            tile_candidates.append(cand)
+                            if tile_candidates:
+                                last_cand = tile_candidates[-1]
+
+                                last_cand_norm = last_cand.tile_data_geometry.intersection(last_cand.mgrs_geometry)
+                                cand_norm = cand.tile_data_geometry.intersection(cand.mgrs_geometry)
+                                similarity = last_cand_norm.intersection(cand_norm).area / last_cand_norm.union(cand_norm).area * 100
+                                if similarity<50:
+                                    tile_candidates.append(cand)
+                            else:
+                                tile_candidates.append(cand)
             except KeyboardInterrupt:
                 for future in futures:
                     if not future.cancelled():
                         future.cancel()
                 break
 
+
         #sort candidates
         scandidates = sorted(tile_candidates, key=lambda c:-c.quality_score)
-
         #merge/union the polygons covering the valid pixels until the whole MGRS 100K tile is covered
-        union = unary_union([x.tile_data_geometry for x in scandidates])
-        coverage = int(floor(union.area/mgrs_poly.area*100))
+        union = unary_union([x.tile_data_geometry for x in scandidates]).intersection(scandidates[0].mgrs_geometry)
+        #union = union.intersection(scandidates[0].mgrs_geometry)
+        #coverage = int(floor(union.area/mgrs_poly.area*100))
+        coverage = union.area/mgrs_poly.area*100
+
         # exit here because the whole tile can be covered
-        if coverage>100:
+        if math.isclose(coverage, b=100, abs_tol=1e-2):
             tile_candidates = scandidates
             logger.debug(f'Found {len(tile_candidates)} suitable candidates in {mgrs_id} between {start_date} and {end_date}')
             break
@@ -195,7 +207,6 @@ def search( client=None, collection="sentinel-2-l1c",
 
                 if math.isclose(coverage, b=100, abs_tol=1e-2):
                     break
-
         return pruned
 
     return tile_candidates

@@ -306,7 +306,7 @@ class Sentinel2Item:
         # Cap ranges to limit peak memory
         chunks = max(1, min(int(chunks), 32))
         async with self.semaphore:
-            dstdir = os.path.dirname(dst) or "."
+            dstdir = os.path.dirname(dst)
             os.makedirs(dstdir, exist_ok=True)
             tmp = dst + ".part"
 
@@ -342,6 +342,7 @@ class Sentinel2Item:
             ]
 
             try:
+                logger.info(f'Downloading {dst}')
                 # 4) Write chunks to TMP (global timeout)
                 async with aiofiles.open(tmp, "wb") as f:
                     async with asyncio.timeout(timeout_minutes * 60):
@@ -454,6 +455,7 @@ class Sentinel2Item:
                 if not t.done():
                     t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            logger.info(f'removing {band_folder}')
             shutil.rmtree(band_folder)
             raise
 

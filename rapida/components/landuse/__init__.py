@@ -1,6 +1,6 @@
 import asyncio
 import datetime
-import json
+import rasterio
 import logging
 import os
 from concurrent.futures.thread import ThreadPoolExecutor
@@ -8,10 +8,11 @@ from threading import Event
 from concurrent.futures import  as_completed
 from typing import List
 
-import geopandas
-import rasterio
-
-from osgeo import gdal
+from affine import Affine
+from keras.src.applications.efficientnet import block
+from rasterio.shutil import copy as rio_copy
+from rasterio.enums import Resampling
+from osgeo import gdal, gdal_array
 from osgeo_utils.gdal_calc import Calc
 from rich.progress import Progress, TimeElapsedColumn
 import geopandas as gpd
@@ -33,6 +34,17 @@ from rapida.components.landuse.search_utils.search import fetch_s2_tiles
 
 
 logger = logging.getLogger('rapida')
+
+
+def gdal_rich_callback(complete, message, user_data):
+    progress, task, stop = user_data
+    if stop and stop.is_set():
+        logger.info(f'GDAL received timeout signal')
+        return 0
+    if progress is not None and task is not None:
+        logger.info(f'{complete}')
+        progress.update(task, completed=int(complete * 100))
+    return 1
 
 
 class LanduseComponent(Component):
@@ -151,12 +163,13 @@ class LanduseVariable(Variable):
 
         project = Project(os.getcwd())
 
-
         start_date, end_date = self.datetime_range.split('/')
         progress: Progress = kwargs.get('progress', None)
         stop = Event()
         total_n_files = 0
         s2_images = {}
+
+
 
         if force or not os.path.exists(self.prediction_output_image):
 
@@ -184,7 +197,7 @@ class LanduseVariable(Variable):
                     #print(json.dumps(candidates[0].assets, indent=4))
                     s2i = Sentinel2Item(mgrs_grid=mgrs_grid_id, s2_tiles=candidates, workdir=output_dir, target_crs=project.projection)
                     self.s2_tiles[mgrs_grid_id] = s2i
-                    jobs[tpe.submit(s2i.download, bands=s2i.bands, progress=progress, force=force, )] = mgrs_grid_id
+                    jobs[tpe.submit(s2i.download, bands=['B02'], progress=progress, force=force, )] = mgrs_grid_id
 
                 try:
                     for future in as_completed(jobs):
@@ -222,8 +235,9 @@ class LanduseVariable(Variable):
                                         advance=1)
 
             for grid, err in failed.items():
-                logger.error(f'Failed to download S2 imagery in {grid} because {err}')
-                # it is debatable if the error is to be swallowed or propagated
+                logger.error(f'Failed to download S2 imagery in {grid}, {err}')
+                # it is debatable if the error is to be swallowed or propagated but at least user should be aware of the
+                # fact the download failed in some grid/tiles
 
 
             for mgrs_grid, s2itm in self.s2_tiles.items():
@@ -234,15 +248,70 @@ class LanduseVariable(Variable):
                     s2_images[band].append(vrt)
 
             vrts = []
-            for band, vrt_files in s2_images.items():
-                #opts = gdal.BuildVRTOptions()
-                band_vrt = os.path.join(output_dir, f'{band}.vrt')
+            gdal_cache_mb = 4096
+            env = rasterio.Env(
+                GDAL_NUM_THREADS="ALL_CPUS",  # multithread warp + COG creation
+                GDAL_CACHEMAX=gdal_cache_mb,  # warp cache
+            )
+            try:
+                for band, vrt_files in s2_images.items():
+                    #opts = gdal.BuildVRTOptions()
+                    band_vrt = os.path.join(output_dir, f'{band}.vrt')
+                    band_cog = band_vrt.replace('.vrt', '.tif')
+                    #band_vrt = f'/vsimem/{band}.vrt'
 
-                #band_vrt = f'/vsimem/{band}.vrt'
+                    with env, gdal.BuildVRT(destName=band_vrt, srcDSOrSrcDSTab=vrt_files) as src_ds:
+                        src_ds.FlushCache()
+                        vrts.append(band_vrt)
+                        then = datetime.datetime.now()
+                        # rio_copy(band_vrt, band_cog, driver='COG', COMPRESS='NONE', BLOCKSIZE=1024,NUM_THREADS='ALL_CPUS',
+                        #          RESAMPLING='cubic', OVERVIEW_LEVELS='NONE', callback=gdal_rich_callback,
+                        #          callback_data=(progress, cp_task, stop)
+                        #          )
+                        src_band = src_ds.GetRasterBand(1)
 
-                with gdal.BuildVRT(destName=band_vrt, srcDSOrSrcDSTab=vrt_files) as bvrt:
-                    bvrt.FlushCache()
-                    vrts.append(band_vrt)
+                        transform = Affine.from_gdal(*src_ds.GetGeoTransform())
+                        dtp = gdal_array.GDALTypeCodeToNumericTypeCode(src_band.DataType)
+                        srs = src_ds.GetProjectionRef()
+
+                        with rasterio.open(band_cog, mode='w', driver='COG', width=src_ds.RasterXSize, height=src_ds.RasterYSize, count=1, crs=srs,
+                                           transform=transform, dtype=dtp, nodata=src_band.GetNoDataValue(), blocksize=1024, num_threads='ALL_CPUS',
+                                           resampling=Resampling.cubic,overview_levels=None, compress=None) as dst:
+
+                            # [dst.write(src_ds.ReadAsArray(xoff=w.col_off, yoff=w.row_off, xsize=w.width, ysize=w.height,
+                            #                 band_list=[1],
+                            #                 # callback=gdal_callback_pre,
+                            #                 # callback_data=timeout_event
+                            #                ), 1, window=w) for _, w in dst.block_windows()]
+                            wins = {block: win for block, win in dst.block_windows()}
+                            cp_task = None
+                            if progress is not None:
+                                cp_task = progress.add_task(description=f'[red]Saving {band_vrt} to {band_cog}', total=len(wins))
+                            for bl, win in wins.items():
+                                if stop is not None and stop.is_set():
+                                    raise KeyboardInterrupt
+
+
+                                src_data  = src_ds.ReadAsArray(xoff=win.col_off, yoff=win.row_off, xsize=win.width, ysize=win.height,
+                                            band_list=[1],
+                                            # callback=gdal_callback_pre,
+                                            # callback_data=timeout_event
+                                           )
+                                dst.write(src_data, 1, window=win)
+
+                                if progress is not None and cp_task is not None:
+                                    progress.update(cp_task, advance=1)
+
+                        now = datetime.datetime.now()
+                        logger.info(f'mosaic lasted {(now-then).total_seconds()}')
+                    if progress is not None and cp_task is not None:
+                        progress.remove_task(cp_task)
+            except KeyboardInterrupt:
+                stop.set()
+                raise
+
+
+
 
 
 

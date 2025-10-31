@@ -4,10 +4,9 @@ import shutil
 import threading
 from rasterio.shutil import copy as rio_copy
 from rasterio.windows import bounds, from_bounds
-from rasterio.warp import calculate_default_transform, aligned_target, transform_bounds
+from rasterio.warp import calculate_default_transform, aligned_target
 from osgeo import gdal
 from pyproj import CRS
-from rasterio.merge import merge
 import os.path
 import rasterio
 from rasterio.vrt import WarpedVRT

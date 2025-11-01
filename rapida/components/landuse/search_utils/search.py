@@ -2,9 +2,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
 import pystac_client
-import rasterio
 from dateutil import parser as dateparser
-from  math import floor
 from rapida.components.landuse.search_utils.mgrstiles import (_cloud_from_props, _iso_to_ts,
                                                               Candidate, get_tileinfo, midpoint_from_range
                                                               )

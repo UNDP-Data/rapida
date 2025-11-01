@@ -7,10 +7,7 @@ from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
 from concurrent.futures import  as_completed
 from typing import List
-
 from affine import Affine
-from keras.src.applications.efficientnet import block
-from rasterio.shutil import copy as rio_copy
 from rasterio.enums import Resampling
 from osgeo import gdal, gdal_array
 from osgeo_utils.gdal_calc import Calc

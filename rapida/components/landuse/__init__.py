@@ -402,7 +402,7 @@ class LanduseVariable(Variable):
 
                 return affected_local_path
 
-    def compute(self, **kwargs):
+    def compute_new(self, **kwargs):
         progress = kwargs.get('progress', None)
         variable_task = None
         if progress:
@@ -411,7 +411,7 @@ class LanduseVariable(Variable):
         source_value = self.target_band_value
 
 
-    def compute_old(self, **kwargs):
+    def compute(self, **kwargs):
         progress = kwargs.get('progress', None)
         variable_task = None
         if progress:

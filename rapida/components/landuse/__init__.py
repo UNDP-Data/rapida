@@ -143,12 +143,12 @@ class LanduseVariable(Variable):
         try:
             self.download(**kwargs)
 
-            #self.compute(**kwargs)
+            self.compute(**kwargs)
 
             if progress is not None and variable_task is not None:
                 progress.update(variable_task, description=f'[blue] Downloaded {self.component}->{self.name}')
 
-            #self.evaluate(**kwargs)
+            self.evaluate(**kwargs)
 
             if progress is not None and variable_task is not None:
                 progress.update(variable_task, description=f'[blue] Assessed {self.component}->{self.name}')
@@ -159,7 +159,7 @@ class LanduseVariable(Variable):
                 progress.remove_task(variable_task)
 
 
-    def download(self, force=False, **kwargs):
+    def download_new(self, force=False, **kwargs):
 
         project = Project(os.getcwd())
 
@@ -315,7 +315,7 @@ class LanduseVariable(Variable):
 
 
 
-    def download_old(self, force=False, **kwargs):
+    def download(self, force=False, **kwargs):
         project = Project(os.getcwd())
         progress: Progress = kwargs.get('progress', None)
 

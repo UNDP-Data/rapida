@@ -30,3 +30,5 @@ SENTINEL2_ASSET_MAP = {
     "swir16": "B11", # land use, cloud
     "swir22": "B12", # land use, cloud
 }
+
+SENTINEL2_BAND_MAP = {v:k for k,v in SENTINEL2_ASSET_MAP.items()}

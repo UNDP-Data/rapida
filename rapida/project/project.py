@@ -23,7 +23,7 @@ from rapida.session import Session
 from rapida.util import geo
 from rapida.util.countries import COUNTRY_CODES
 from rapida.util.dataset2pmtiles import dataset2pmtiles
-
+from rapida.util.get_geographic_bbox import get_geographic_bounds
 logger = logging.getLogger(__name__)
 gdal.UseExceptions()
 
@@ -299,6 +299,19 @@ class Project:
             return None
 
     @property
+    def geobounds(self):
+        return get_geographic_bounds(
+            src_ds=self.geopackage_file_path,
+            layer_name=self.polygons_layer_name
+        )
+
+    @property
+    def bounds(self):
+        info = pyogrio.read_info(self.geopackage_file_path, layer=self.polygons_layer_name)
+        return tuple(info['total_bounds'])
+
+
+    @property
     def data_folder(self):
         return os.path.join(self.path, self.data_folder_name)
 
@@ -314,6 +327,8 @@ class Project:
         return json.dumps(
             {"Name": self.name, "Path": self.path, "Valid": self.is_valid}, indent=4
         )
+
+
 
     @property
     def is_valid(self):

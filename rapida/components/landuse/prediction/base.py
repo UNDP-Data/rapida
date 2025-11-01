@@ -341,10 +341,11 @@ class PredictionBase(object):
                 bounds = rasterio.windows.bounds(window, dst_transform)
                 tile_geom = box(bounds[0], bounds[1], bounds[2], bounds[3])
 
-                if mask_union.intersects(tile_geom):
-                    tile_jobs.append((row, col))
-                    all_cols.append(col)
-                    all_rows.append(row)
+                if mask_union is not None and not mask_union.intersects(tile_geom):
+                    continue
+                tile_jobs.append((row, col))
+                all_cols.append(col)
+                all_rows.append(row)
 
         # Determine bounding box
         min_col = min(all_cols)
@@ -381,6 +382,7 @@ class PredictionBase(object):
 
             if num_workers is None:
                 num_workers = psutil.cpu_count(logical=False)
+            logger.info(f'Going to use {num_workers} workers in {len(tile_jobs)} tiles')
 
             with ProcessPoolExecutor(max_workers=num_workers) as executor:
                 job_iter = iter(tile_jobs)
@@ -396,6 +398,8 @@ class PredictionBase(object):
                                                 total=None) if progress else None
                     fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path, mask_union)
                     running_futures[fut] = (row, col, task_id)
+
+                print(len(running_futures))
 
                 while running_futures:
                     # wait for any future to complete

@@ -20,7 +20,7 @@ def _normalize_lon(lon: float) -> float:
 
 def utm_grid_zone(longitude: float) -> int:
     lon = _normalize_lon(float(longitude))
-    if math.isclose(lon, 180.0, abs_tol=1e-12):
+    if lon >= 180.0 - 1e-12:
         return 60
     return int(math.floor((lon + 180.0 - EPS) / 6.0)) + 1
 
@@ -119,16 +119,32 @@ def mgrs_100k_tiles_for_bbox(lon_min: float, lat_min: float, lon_max: float, lat
             crs_utm = _utm_crs(zone, north)
             part_utm = _project_geom(hemi_geom, crs_wgs, crs_utm)
 
-            # Build 100k grid cells and label using representative point INSIDE the in-zone part
+            # Build 100k grid cells and label using geometric center
             for cell in generate_utm_100k_grid(part_utm):
                 inter = cell.intersection(part_utm)
                 if inter.is_empty:
                     continue
-                p = inter.representative_point()
-                lon_c, lat_c = _wgs84_of_point(p.x, p.y, zone, north)
-                key = _mgrs_100k_key_for_zone(lat_c, lon_c, zone)  # force zone; band+100k from dd2mgrs
+
+                # Use the exact geometric center of the 100k cell (always inside the cell)
+                xmin, ymin, xmax, ymax = cell.bounds
+                cx = 0.5 * (xmin + xmax)
+                cy = 0.5 * (ymin + ymax)
+
+                # Convert center to WGS84 to get band/100k via your existing helper
+                lon_c, lat_c = _wgs84_of_point(cx, cy, zone, north)
+
+                # Clamp longitude strictly inside THIS zone to avoid seam jitter
+                lon_min = -180.0 + (zone - 1) * 6.0
+                lon_max = lon_min + 6.0 - 1e-9
+                if lon_c < lon_min:
+                    lon_c = lon_min + 1e-9
+                elif lon_c > lon_max:
+                    lon_c = lon_max
+
+                key = _mgrs_100k_key_for_zone(lat_c, lon_c, zone)  # still uses latlon2mgrs inside
+
                 if key not in out:
-                    out[key] = (box(*cell.bounds), crs_utm)  # store full cell polygon (UTM) + CRS
+                    out[key] = (box(*cell.bounds), crs_utm)
 
     return out
 

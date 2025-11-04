@@ -33,7 +33,7 @@ def expand_timerange(start_date: str, end_date: str, days: int = 7) -> tuple[str
     return expanded_start.date().isoformat(), expanded_end.date().isoformat()
 
 
-def process_item(it, mgrs_id, ref_ts, mgrs_poly, mgrs_crs):
+def create_candidate(it, mgrs_id, ref_ts, mgrs_poly, mgrs_crs):
     props = it.get("properties", {})
     item_id = it.get("id", "")
     tile_info = get_tileinfo(it)
@@ -88,6 +88,7 @@ def search( client=None, collection="sentinel-2-l1c",
     search_progress = None
     cloud_cover = max_cloud_cover
     tile_candidates: list[Candidate] = []
+    item_ids = []
     while True:
 
         #this is because the start tiles on every row in every UTM zone do not contain data
@@ -111,8 +112,12 @@ def search( client=None, collection="sentinel-2-l1c",
                 "eo:cloud_cover": {"lte": cloud_cover},
             }
         )
-
         items = [itm.to_dict() for itm in search_result.items()]
+        if item_ids:
+            items = [e for e in items if e.get('id') not in item_ids]
+            item_ids = item_ids.union([e.get('id') for e in items])
+        else:
+            item_ids = set([itm.get('id') for itm in items])
 
         logger.debug(
             f'Found {len(items)} items in MGRS-{mgrs_id} between {start_date} and {end_date} and {cloud_cover}% cloud cover')
@@ -125,7 +130,8 @@ def search( client=None, collection="sentinel-2-l1c",
         if stop.is_set():break
 
         with ThreadPoolExecutor(max_workers=10) as executor:
-            futures = [executor.submit(process_item, itm, mgrs_id, mid, mgrs_poly, crs) for itm in items]
+
+            futures = [executor.submit(create_candidate, itm, mgrs_id, mid, mgrs_poly, crs) for itm in items]
             try:
                 for future in as_completed(futures):
                     cand = future.result()
@@ -134,16 +140,8 @@ def search( client=None, collection="sentinel-2-l1c",
                         if cand.id in ids:
                             logger.debug(f'Skipping duplicate tile {cand.id}')
                         else:
-                            if tile_candidates:
-                                last_cand = tile_candidates[-1]
+                            tile_candidates.append(cand)
 
-                                last_cand_norm = last_cand.tile_data_geometry.intersection(last_cand.mgrs_geometry)
-                                cand_norm = cand.tile_data_geometry.intersection(cand.mgrs_geometry)
-                                similarity = last_cand_norm.intersection(cand_norm).area / last_cand_norm.union(cand_norm).area * 100
-                                if similarity<50:
-                                    tile_candidates.append(cand)
-                            else:
-                                tile_candidates.append(cand)
             except KeyboardInterrupt:
                 for future in futures:
                     if not future.cancelled():
@@ -153,17 +151,20 @@ def search( client=None, collection="sentinel-2-l1c",
 
         #sort candidates
         scandidates = sorted(tile_candidates, key=lambda c:-c.quality_score)
+
         #merge/union the polygons covering the valid pixels until the whole MGRS 100K tile is covered
-        union = unary_union([x.tile_data_geometry for x in scandidates]).intersection(scandidates[0].mgrs_geometry)
-        #union = union.intersection(scandidates[0].mgrs_geometry)
-        #coverage = int(floor(union.area/mgrs_poly.area*100))
-        coverage = union.area/mgrs_poly.area*100
+        union = unary_union([x.tile_data_geometry for x in scandidates])
+        # normalize by intersecting with ideal MGRS 100k poly
+        norm_union = union.intersection(mgrs_poly)
+        #compute coverage
+        coverage = norm_union.area/mgrs_poly.area*100
 
         # exit here because the whole tile can be covered
         if math.isclose(coverage, b=100, abs_tol=1e-2):
             tile_candidates = scandidates
             logger.debug(f'Found {len(tile_candidates)} suitable candidates in {mgrs_id} between {start_date} and {end_date}')
             break
+        if len(scandidates)==6:break
         # no suitable candidates found, enlarge the time interval by one week on both sides and try again
         start_date, end_date = expand_timerange(start_date=start_date, end_date=end_date, )
         if stop.is_set(): break
@@ -202,7 +203,6 @@ def search( client=None, collection="sentinel-2-l1c",
                 cov_poly = c.tile_data_geometry.intersection(mgrs_poly).union(cov_poly)
                 coverage = cov_poly.area/mgrs_poly.area*100
                 pruned.append(c)
-
                 if math.isclose(coverage, b=100, abs_tol=1e-2):
                     break
         return pruned
@@ -275,7 +275,6 @@ def fetch_s2_tiles(
                                     description=f'[red]Found {len(cands)} Sentinel2 {image_word} in MGRS-{gid}',
                                     advance=1)
                 except Exception as e:
-                    print(e)
                     failed[gid] = e
                     if progress is not None and total_task is not None:
                         progress.update(total_task,advance=1)
@@ -304,6 +303,7 @@ if __name__ == "__main__":
 
     from rapida.util.setup_logger import setup_logger
     from rapida.components.landuse.search_utils.s2item import Sentinel2Item
+
     # logger.setLevel(logging.DEBUG)
     logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
@@ -314,15 +314,20 @@ if __name__ == "__main__":
     UGAKEN_BBOX = 33.280908600000004, -1.154692598710874, 36.59833289999998, 2.650255597059965
 
 
+    bbox = 33, -1, 37, 2
+
+
+
     with Progress() as progress:
         bbox=UGAKEN_BBOX
+        bbox=bbox
 
-        max_cloud_cover=3
-        start_date = "2024-03-01"
-        end_date = "2024-03-30"
+        max_cloud_cover=2
+        start_date = "2025-07-01"
+        end_date = "2025-08-30"
         results = fetch_s2_tiles(bbox=bbox,stac_url=CATALOG_URL,
                                  start_date=start_date, end_date=end_date,
-                                 max_cloud_cover=max_cloud_cover, progress=progress, prune=True)
+                                 max_cloud_cover=max_cloud_cover, progress=progress,filter_for_dev=['36NWF'])
 
 
         bands = ['B01', 'B02', 'B03', 'B04', 'B05']

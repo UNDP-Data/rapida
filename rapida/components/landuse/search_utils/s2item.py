@@ -342,7 +342,6 @@ class Sentinel2Item:
             ]
 
             try:
-                logger.info(f'Downloading {dst}')
                 # 4) Write chunks to TMP (global timeout)
                 async with aiofiles.open(tmp, "wb") as f:
                     async with asyncio.timeout(timeout_minutes * 60):

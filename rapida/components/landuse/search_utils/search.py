@@ -53,7 +53,8 @@ def create_candidate(it, mgrs_id, ref_ts, mgrs_poly, mgrs_crs):
         data_coverage=tile_info["dataCoveragePercentage"],
         ref_ts=ref_ts,
         mgrs_geometry=mgrs_poly,
-        mgrs_crs=mgrs_crs
+        mgrs_crs=mgrs_crs,
+        stac_item = it
     )
 
 def search( client=None, collection="sentinel-2-l1c",
@@ -303,7 +304,8 @@ if __name__ == "__main__":
 
     from rapida.util.setup_logger import setup_logger
     from rapida.components.landuse.search_utils.s2item import Sentinel2Item
-
+    from rapida.components.landuse.prediction.landuse import LandusePrediction
+    from pystac import Item
     # logger.setLevel(logging.DEBUG)
     logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
@@ -315,7 +317,7 @@ if __name__ == "__main__":
 
 
     bbox = 33, -1, 37, 2
-
+    bands = LandusePrediction.required_bands
 
 
     with Progress() as progress:
@@ -327,11 +329,10 @@ if __name__ == "__main__":
         end_date = "2025-08-30"
         results = fetch_s2_tiles(bbox=bbox,stac_url=CATALOG_URL,
                                  start_date=start_date, end_date=end_date,
-                                 max_cloud_cover=max_cloud_cover, progress=progress,filter_for_dev=['36NWF'])
+                                 max_cloud_cover=max_cloud_cover, progress=progress,filter_for_dev=['36MZE'])
 
 
-        bands = ['B01', 'B02', 'B03', 'B04', 'B05']
-        bands = ['B03']
+
         band_files = {}
 
         for grid, candidates in results.items():
@@ -339,14 +340,14 @@ if __name__ == "__main__":
                 #logger.info(f'{grid}: {[c for c in candidates]}')
                 s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, workdir='/tmp', target_crs='ESRI:54034')
                 downloaded = s2i.download(bands=bands, progress=progress, force=False)
-                # for k, v in s2i.vrt.items():
-                #     pass
-                #     with rasterio.open(v) as vsrc:
-                #         print(k, tuple(vsrc.bounds))
-                # for bname, bfile in downloaded.items():
-                #     if not bname in band_files:
-                #         band_files[bname] = []
-                #     band_files[bname].append(bfile)
+                img_paths = [downloaded[b]  for b in bands]
+                itm = Item.from_dict(candidates[0].stac_item)
+                landuse_prediction = LandusePrediction(item=itm)
+                landuse_prediction.predict(img_paths=img_paths,
+                                           output_file_path=f'/tmp/landuse_36MZE.tif',
+
+                                           progress=progress)
+
 
 
             except KeyboardInterrupt:

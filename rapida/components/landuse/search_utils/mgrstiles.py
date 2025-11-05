@@ -29,6 +29,7 @@ class Candidate:
     tile_geometry: Polygon = None
     mgrs_geometry: Polygon = None
     mgrs_crs: pyproj.CRS = None
+    stac_item: dict = None
 
     @property
     def quality_score(self) -> float:

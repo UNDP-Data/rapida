@@ -1,9 +1,8 @@
 import logging
-
+from rasterio.windows import Window
 logger = logging.getLogger(__name__)
 
-
-def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
+def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None, return_win=False ):
     """
     Generate reading block for gdal ReadAsArray
     """
@@ -17,4 +16,7 @@ def gen_blocks(blockxsize=None, blockysize=None, width=None, height=None ):
         col_size = col_end - col_start
         for row_start, row_end in zip(hi[:-1], hi[1:]):
             row_size = row_end - row_start
-            yield col_start, row_start, col_size, row_size
+            if return_win:
+                yield Window(col_start, row_start, col_size, row_size)
+            else:
+                yield col_start, row_start, col_size, row_size

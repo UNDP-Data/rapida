@@ -239,8 +239,6 @@ class LanduseVariable(Variable):
 
             for mgrs_grid, s2itm in self.s2_tiles.items():
                 for band, vrt in s2itm.vrts.items():
-                    if vrt is None:
-                        continue
                     if band not in s2_images:s2_images[band] = []
                     s2_images[band].append(vrt)
 

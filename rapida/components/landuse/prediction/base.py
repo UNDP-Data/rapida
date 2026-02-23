@@ -18,7 +18,9 @@ import geopandas as gpd
 from shapely.geometry import box
 from rich.progress import Progress
 from rapida.util.setup_logger import setup_logger
-
+import zarr
+from concurrent.futures import as_completed
+from rapida.util.gen_blocks import gen_blocks
 
 logger = setup_logger('rapida')
 
@@ -283,6 +285,99 @@ class PredictionBase(object):
         """
         return dst
 
+
+    def _predict_chunk(self, dst_arr=None, root_group=None, win=None):
+        col_start, row_start, col_size, row_size = win
+        raw_data = np.empty(shape=(row_size, col_size, len(self.required_bands)), dtype='u2')
+
+        #logger.info(f'window: {win} in pid {os.getpid()}')
+        for bi, band in enumerate(self.required_bands):
+            src = root_group[band][row_start:row_start+row_size, col_start:col_start+col_size]
+            #logger.info(f'{src.shape, raw_data[:row_size, :col_size, bi].shape}, {band}')
+            raw_data[:row_size, :col_size, bi] = self.harmonize_to_old(data=src)
+
+        predicted_data = self.run_model(raw_data)
+
+        #logger.info(f'{raw_data.shape} - {predicted_data.shape}')
+        dst_arr[row_start:row_start+row_size, col_start:col_start+col_size] = predicted_data
+
+    def predict_zarr(self,
+                     img_paths: List[str],
+                     output_file_path: str,
+                     progress: Optional[Progress] = None,
+                     stop=None,
+                     force=False,
+                     cpus=8
+                     ) -> str:
+
+
+        predict_task = None
+
+        root_path, first_band_name = os.path.split(img_paths[0])
+        prediction_path  = os.path.join(root_path, 'landcover')
+
+
+        root = zarr.open_group(store=root_path, mode='a', zarr_version=3)
+        first_band = root[first_band_name]
+        blockheight, blockwidth = first_band.chunks
+
+
+        height, width = first_band.shape
+        COMP = zarr.codecs.BloscCodec(
+            cname="zstd", clevel=5, shuffle=zarr.codecs.blosc.BloscShuffle.shuffle, typesize=2, blocksize=0
+        )
+
+        lcarr = root.require_array(
+            name = 'landcover',
+            shape = (height, width),
+            chunks = (blockheight, blockwidth),
+            dtype = 'uint8',
+            fill_value = 9,
+            compressors = [COMP],
+            overwrite = force,
+            dimension_names = ["Y", "X"],
+
+        )
+
+
+        wins = [win for win in
+                gen_blocks(blockxsize=blockwidth, blockysize=blockheight, width=width, height=height,
+                           return_win=False)]
+        if progress is not None:
+            predict_task = progress.add_task(f"[cyan]Starting {self.component_name} prediction", total=len(wins))
+        failed = {}
+        if wins:
+
+            with ProcessPoolExecutor(max_workers=cpus) as exec:
+                jobs = {}
+                for w in wins:
+                    kwargs = dict(dst_arr=lcarr, win=w, root_group=root)
+                    jobs[exec.submit(self._predict_chunk, **kwargs)] = w
+                try:
+                    for future in as_completed(jobs):
+                        w = jobs[future]
+                        try:
+                            _ = future.result()
+                            if progress is not None and predict_task is not None:
+                                progress.update(predict_task, advance=1)
+                        except Exception as e:
+                            failed[w] = e
+                            if progress is not None and predict_task is not None:
+                                progress.update(predict_task, advance=1)
+                except KeyboardInterrupt:
+                    stop.set()
+                    for future in jobs:
+                        if not future.cancelled():
+                            future.cancel()
+
+        if failed:
+            for window, e in failed.items():
+                logger.error(
+                    f'{type(e)}: {e} encountered when predicting chunk {window} in {self.item.to_dict()['properties']['grid:code']}')
+        if progress is not None and predict_task is not None:
+            progress.remove_task(predict_task)
+        return prediction_path
+
     def predict(self,
                 img_paths: List[str],
                 output_file_path: str,
@@ -399,7 +494,7 @@ class PredictionBase(object):
                     fut = executor.submit(self.process_tile, row, col, img_paths, min_resolution_path, mask_union)
                     running_futures[fut] = (row, col, task_id)
 
-                print(len(running_futures))
+
 
                 while running_futures:
                     # wait for any future to complete

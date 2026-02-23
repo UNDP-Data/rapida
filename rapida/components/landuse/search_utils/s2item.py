@@ -2,9 +2,16 @@ import asyncio
 import datetime
 import shutil
 import threading
+from concurrent.futures.process import ProcessPoolExecutor
+
 from rasterio.shutil import copy as rio_copy
 from rasterio.windows import bounds, from_bounds
 from rasterio.warp import calculate_default_transform, aligned_target
+
+
+from rapida.util.gen_blocks import gen_blocks
+
+
 from osgeo import gdal
 from pyproj import CRS
 import os.path
@@ -20,9 +27,10 @@ from rapida.components.landuse.constants import SENTINEL2_ASSET_MAP, SENTINEL2_B
 from rapida.components.landuse.search_utils.mgrstiles import Candidate
 from rapida.components.landuse.search_utils.mgrsconv import _parse_mgrs_100k
 from typing import Callable, Optional, Union
+import zarr
 
-
-
+from concurrent.futures import as_completed
+import numpy as np
 from typing import List, Tuple
 import math
 import logging
@@ -50,6 +58,7 @@ async def _cleanup_invalid_file(src):
             os.remove(src)
 
 
+
 def compute_offsets(remote_size: int, chunks: int) -> List[Tuple[int, int]]:
     """
     Split [0, remote_size) into <= nchunks contiguous, gap-free, non-overlapping ranges.
@@ -75,7 +84,12 @@ def compute_offsets(remote_size: int, chunks: int) -> List[Tuple[int, int]]:
     # assert all(offsets[i][1] == offsets[i+1][0] for i in range(len(offsets)-1))
     return offsets
 
-
+def _chunk_windows(H, W, ch, cw):
+    for y0 in range(0, H, ch):
+        for x0 in range(0, W, cw):
+            y1 = min(y0 + ch, H)
+            x1 = min(x0 + cw, W)
+            yield y0, y1, x0, x1
 
 class Sentinel2Item:
     """
@@ -85,6 +99,9 @@ class Sentinel2Item:
     Sentinel2Item class takes several S2 images and combines spatially disjoint tiles into one ideal MGRS 100K tile
     perfectly aligned with 100K MGRS grid
     """
+
+    _prediction_bands = 'B02', 'B03', 'B04', 'B05', 'B06', 'B07', 'B08', 'B11', 'B12'
+    _cloud_bands = 'B01', 'B02', 'B04', 'B05', 'B08', 'B8A', 'B09', 'B10', 'B11', 'B12'
 
     def __init__(self, mgrs_grid:str=None, s2_tiles:List[Candidate] = None,
                  target_resolution=10, target_crs=None,
@@ -103,9 +120,11 @@ class Sentinel2Item:
         self.__resolutions__ = {}
         self._task = None
         self._loop = None
+        self.cloud_cover = 0
         self._prepare_urls_()
-        os.makedirs(self.workdir, exist_ok=True)
         self.semaphore = asyncio.Semaphore(concurrent_bands)
+        os.makedirs(self.workdir, exist_ok=True)
+
 
     def _s3_to_http(self, url):
         """
@@ -129,8 +148,14 @@ class Sentinel2Item:
 
     def _prepare_urls_(self):
         if not self.__urls__:
+            for cand in self.s2_tiles:
+                if self.cloud_cover < cand.cloud_cover:
+                    self.cloud_cover = cand.cloud_cover
+
             for asset_name, asset_band in SENTINEL2_ASSET_MAP.items():
                 for cand in self.s2_tiles:
+                    # skip cloud bands 
+                    if cand.cloud_cover == 0 and (asset_band in self._cloud_bands and asset_band not in self._prediction_bands):continue # skip cl
                     asset_s3_uri = cand.assets[asset_name]['href']
                     asset_html_uri = self._s3_to_http(asset_s3_uri)
                     if asset_band in self.__urls__:
@@ -156,7 +181,8 @@ class Sentinel2Item:
 
     @property
     def assets(self):
-        return tuple(sorted(self.__assets__.values()))
+        #return tuple(sorted(self.__assets__.values()))
+        return sorted(self.__assets__.values())
 
 
     @property
@@ -167,7 +193,8 @@ class Sentinel2Item:
     def vrts(self):
         vrts = {}
         for band in self.bands:
-            vrts[band] = self.__vrt__(band=band)
+            if self[band]:
+                vrts[band] = self.__vrt__(band=band)
         return vrts
 
     def __vrt__(self, band=None):
@@ -392,7 +419,7 @@ class Sentinel2Item:
 
 
     async def __download_band__(self, band: str = None, session=None,
-                                progress=None, progress_task=None, force=False, mosaic=True,
+                                progress=None, progress_task=None, force=False, merge=True,
                                 stop: Optional[threading.Event] = None):
         """
         Download a S2 image band from one or more files
@@ -401,7 +428,7 @@ class Sentinel2Item:
         :param progress:
         :param progress_task:
         :param force:
-        :param mosaic:
+        :param merge:
         :param stop:
         :return:
         """
@@ -444,8 +471,10 @@ class Sentinel2Item:
                                 progress_task,
                                 description=f'[red]Downloaded band {band} in MGRS-{self.mgrs_grid}'
                             )
-            if mosaic:
-                return self.__merge__(band=band, progress=progress, force=force)
+            if merge:
+                #return self.__merge__(band=band, progress=progress, force=force)
+                return self.__merge_zarr__mp(band=band, progress=progress, force=force)
+
             return downloaded
         except Exception as e:
             # cancel anything still running
@@ -529,6 +558,377 @@ class Sentinel2Item:
         return downloaded_bands
 
 
+    def __fill_zarr__(self, dst_arr=None, window=None, sources=None, vrt_opts=None ):
+        try:
+            others = [WarpedVRT(rasterio.open(p), **vrt_opts) for p in sources]
+            nodata = vrt_opts['nodata']
+            out = others[0].read(1, window=window)
+            rs, cs = window.toranges()
+            sr, er = rs
+            sc, ec = cs
+
+            holes = out == nodata
+
+            if not holes.any():
+
+                dst_arr[sr:er, sc:ec] = out
+
+                return
+
+            for v in others[1:]:
+                varr = v.read(1, window=window)
+                valid = varr != nodata
+                take = holes & valid
+
+                if take.any():
+                    out[take] = varr[take]
+                    holes[take] = False
+
+            if holes.any():
+                # logger.warning(
+                #     f'Some pixels are still empty in {self.mgrs_grid}-{band}-{(window.row_off, window.col_off, window.height, window.width)}')
+                out[holes] = nodata
+
+            dst_arr[sr:er, sc:ec] = out
+
+        except Exception as e:
+            raise
+        finally:
+            for o in others:
+                o.close()
+
+
+
+    def __merge_zarr__mp(self, band: str = None, stop=None, progress=None, force=None):
+
+        # band_file = os.path.join(self.workdir, f'{self.mgrs_grid}.zarr/{band}')
+        # if not force:
+        #     try:
+        #
+        #             src = zarr.open_array(store=band_file, mode='r', zarr_version=3)
+        #             src.store.close()
+        #             self[band] = band_file
+        #             return band_file
+        #     except Exception as e:
+        #         if os.path.exists(band_file):
+        #             logger.info(f'{e.__class__}: {e} {band_file} will be recreated!')
+        #             #os.remove(band_file)
+        #             return
+
+        root_store = os.path.join(self.workdir, f"{self.mgrs_grid}.zarr")
+
+        mode = "w+" if force else "a"
+        root = zarr.open_group(store=root_store, mode=mode, zarr_version=3)
+        band_path = os.path.join(root_store, band)
+        # Short-circuit if band already present and not forcing
+        if not force and band in root:
+            self[band] = band_path
+            return band_path
+
+        files = self.files[band]
+        asset_name = SENTINEL2_BAND_MAP[band]
+        asset_def = self.s2_tiles[0].assets[asset_name]
+        no_data = asset_def['raster:bands'][0]['nodata']
+
+        # ---- Match GDAL: BLOSC(zstd, clevel=5, shuffle) + bytes(little) ----
+        #BYTES = zarr.codecs.BytesCodec(endian='little')
+        COMP = zarr.codecs.BloscCodec(
+            cname="zstd", clevel=5, shuffle=zarr.codecs.blosc.BloscShuffle.shuffle, typesize=2, blocksize=0
+        )
+
+        best = files[0]
+        progress_task = None
+
+
+
+        with rasterio.Env(GDAL_NUM_THREADS="ALL_CPUS", GDAL_CACHEMAX=1024,
+                          OPJ_NUM_THREADS="ALL_CPUS", USE_TILE_AS_BLOCK="YES"):
+            with rasterio.open(best) as src:
+
+                height, width = src.height, src.width
+
+                left, bottom, right, top = src.bounds
+                # # compute the default transform after reprojection, add 2  extra pixels for some overlap
+                transform, twidth, theight = calculate_default_transform(
+                    src_crs=src.crs, dst_crs=self.target_crs, width=width, height=height, left=left, bottom=bottom,
+                    right=right, top=top, resolution=self.target_resolution
+                )
+                # align nicely the transform to pixel, the extra pixels (2) ensure the image is large enough
+                aligned_transform, aligned_width, aligned_height = aligned_target(transform=transform, width=twidth, height=theight,
+                                                         resolution=self.target_resolution)
+                blockheight, blockwidth = aligned_height // 10, aligned_width // 10
+
+                dtype = src.dtypes[0]
+                nodata = src.nodata if src.nodata is not None else no_data
+
+
+            vrt_opts = dict(
+                crs=self.target_crs, transform=aligned_transform,
+                width=aligned_width, height=aligned_height,
+                resampling=Resampling.nearest,  # same as your code
+                nodata=nodata
+            )
+
+            # 2) Open remaining sources as WarpedVRTs to align to the target grid
+            #others = [WarpedVRT(rasterio.open(p), **vrt_opts) for p in files]
+            arr = root.require_array(
+                name=band,
+                shape=(aligned_height, aligned_width),
+                chunks=(blockheight, blockwidth),
+                dtype=dtype,
+                fill_value=nodata,
+                compressors=[COMP],
+                overwrite=force,
+                dimension_names=["Y", "X"],
+            )
+
+            auth = self.target_crs.to_authority()
+            url = f"http://www.opengis.net/def/crs/{auth[0]}/0/{auth[1]}" if auth and auth[0] == "EPSG" else None
+            projjson = self.target_crs.to_json_dict()
+            _CRS = {"wkt": self.target_crs.to_wkt(), "projjson": projjson}
+            if url: _CRS["url"] = url
+            # Store geo attrs (CF-like)
+            # (Strings for portability; consumers like rioxarray can rehydrate)
+            # ---- write per-band **minimal** attrs (no CRS duplication here)
+            # Make sure these are set unconditionally on the main array
+            arr.attrs.update({
+                "AREA_OR_POINT": "Area",
+                "COLOR_INTERPRETATION": "Gray",
+                "_CRS": _CRS,
+                "_FillValue": nodata,
+
+            })
+
+            # If it already exists, we don't touch it again.
+            if 'Y' not in root and 'X' not in root:
+                # ---- Coordinate arrays at root: /X and /Y ----
+                # (float64, single-chunk = full length, fill_value NaN, no compression)
+                x0, dx, rx, y0, ry, dy = aligned_transform.to_gdal()
+                assert rx == 0.0 and ry == 0.0, "Expected no rotation."
+
+                x = x0 + dx * (np.arange(aligned_width) + 0.5)
+                y = y0 + dy * (np.arange(aligned_height) + 0.5)  # dy < 0
+
+                xa = root.require_array(
+                    "X", shape=(aligned_width,), chunks=(aligned_width,),
+                    dtype="float64", fill_value=np.nan, overwrite=False, dimension_names=["X"]
+                )
+                ya = root.require_array(
+                    "Y", shape=(aligned_height,), chunks=(aligned_height,),
+                    dtype="float64", fill_value=np.nan, overwrite=False, dimension_names=["Y"]
+                )
+
+                # Only fill if first creation (avoid re-writing on append)
+                if xa.shape[0] != 0 and (xa[:] != x).any():
+                    xa[:] = x
+                if ya.shape[0] != 0 and (ya[:] != y).any():
+                    ya[:] = y
+
+
+            wins = [win for win in gen_blocks(blockxsize=blockwidth, blockysize=blockheight, width=aligned_width, height=aligned_height, return_win=True)]
+            failed = {}
+            if wins:
+
+                with ProcessPoolExecutor(max_workers=10) as exec:
+                    jobs = {}
+                    for w in wins:
+                        kwargs = dict(dst_arr=arr,window=w,sources=files, vrt_opts=vrt_opts)
+                        jobs[exec.submit(self.__fill_zarr__, **kwargs)] = w
+                    if progress is not None:
+                        w = 'image' + ('s' if len(files) > 1 else '')
+                        progress_task = progress.add_task(
+                            description=f"[red]Merging {len(files)} Sentinel2 {w} for band {band} in {self.mgrs_grid}",
+                            total=len(wins)
+                        )
+                    try:
+                        for future in as_completed(jobs):
+                            w = jobs[future]
+                            try:
+                                _ = future.result()
+                                # tiles at edge are smaller and only one of them holds data that extends into the neighbour zone
+                                # so the ones that have no imagery (no candidates were foud) are discarded
+                                if progress and progress_task:
+                                    progress.update(progress_task, advance=1)
+                            except Exception as e:
+                                failed[w] = e
+                                if progress is not None and progress_task is not None:
+                                    progress.update(progress_task, advance=1)
+                    except KeyboardInterrupt:
+                        stop.set()
+                        for future in jobs:
+                            if not future.cancelled():
+                                future.cancel()
+        if failed:
+            for window, e in failed.items():
+                logger.error(f'{type(e)}: {e} encountered when merging {self.mgrs_grid}-{band}-{(window.row_off, window.col_off, window.height, window.width)}')
+
+        self[band] = band_path
+        return band_path
+
+
+
+    def __merge_zarr__(self, band: str = None, stop=None, progress=None, force=None):
+        try:
+
+            band_file = os.path.join(self.workdir, f'{self.mgrs_grid}.zarr')
+            mode = 'w+' if force else 'a'
+            root = zarr.open_group(store=band_file, mode=mode, zarr_version=3)
+
+            files = self.files[band]
+            asset_name = SENTINEL2_BAND_MAP[band]
+            asset_def = self.s2_tiles[0].assets[asset_name]
+            no_data = asset_def['raster:bands'][0]['nodata']
+
+            # ---- Match GDAL: BLOSC(zstd, clevel=5, shuffle) + bytes(little) ----
+            BYTES = zarr.codecs.BytesCodec(endian='little')
+            COMP = zarr.codecs.BloscCodec(
+                cname="zstd", clevel=5, shuffle=zarr.codecs.blosc.BloscShuffle.shuffle, typesize=2, blocksize=0
+            )
+
+            best = files[0]
+            progress_task = None
+
+
+
+            with rasterio.Env(GDAL_NUM_THREADS="ALL_CPUS", GDAL_CACHEMAX=1024,
+                              OPJ_NUM_THREADS="ALL_CPUS", USE_TILE_AS_BLOCK="YES"):
+                with rasterio.open(best) as src:
+
+                    height, width = src.height, src.width
+
+                    left, bottom, right, top = src.bounds
+                    # # compute the default transform after reprojection, add 2  extra pixels for some overlap
+                    transform, twidth, theight = calculate_default_transform(
+                        src_crs=src.crs, dst_crs=self.target_crs, width=width, height=height, left=left, bottom=bottom,
+                        right=right, top=top, resolution=self.target_resolution
+                    )
+                    # align nicely the transform to pixel, the extra pixels (2) ensure the image is large enough
+                    aligned_transform, aligned_width, aligned_height = aligned_target(transform=transform, width=twidth, height=theight,
+                                                             resolution=self.target_resolution)
+                    blockheight, blockwidth = aligned_height // 10, aligned_width // 10
+
+                    dtype = src.dtypes[0]
+                    nodata = src.nodata if src.nodata is not None else no_data
+
+
+                vrt_opts = dict(
+                    crs=self.target_crs, transform=aligned_transform,
+                    width=aligned_width, height=aligned_height,
+                    resampling=Resampling.nearest,  # same as your code
+                    nodata=nodata
+                )
+
+                # 2) Open remaining sources as WarpedVRTs to align to the target grid
+                others = [WarpedVRT(rasterio.open(p), **vrt_opts) for p in files]
+                arr = root.require_array(
+                    name=band,
+                    shape=(aligned_height, aligned_width),
+                    chunks=(blockheight, blockwidth),
+                    dtype=dtype,
+                    fill_value=nodata,
+                    compressors=[COMP],
+                    overwrite=force,
+                    dimension_names=["Y", "X"],
+                )
+
+                auth = self.target_crs.to_authority()
+                url = f"http://www.opengis.net/def/crs/{auth[0]}/0/{auth[1]}" if auth and auth[0] == "EPSG" else None
+                projjson = self.target_crs.to_json_dict()
+                _CRS = {"wkt": self.target_crs.to_wkt(), "projjson": projjson}
+                if url: _CRS["url"] = url
+                # Store geo attrs (CF-like)
+                # (Strings for portability; consumers like rioxarray can rehydrate)
+                # ---- write per-band **minimal** attrs (no CRS duplication here)
+                # Make sure these are set unconditionally on the main array
+                arr.attrs.update({
+                    "AREA_OR_POINT": "Area",
+                    "COLOR_INTERPRETATION": "Gray",
+                    "_CRS": _CRS,
+                    "_FillValue": nodata,
+
+                })
+
+                # If it already exists, we don't touch it again.
+                if 'Y' not in root and 'X' not in root:
+                    # ---- Coordinate arrays at root: /X and /Y ----
+                    # (float64, single-chunk = full length, fill_value NaN, no compression)
+                    x0, dx, rx, y0, ry, dy = aligned_transform.to_gdal()
+                    assert rx == 0.0 and ry == 0.0, "Expected no rotation."
+
+                    x = x0 + dx * (np.arange(aligned_width) + 0.5)
+                    y = y0 + dy * (np.arange(aligned_height) + 0.5)  # dy < 0
+
+                    xa = root.require_array(
+                        "X", shape=(aligned_width,), chunks=(aligned_width,),
+                        dtype="float64", fill_value=np.nan, overwrite=False, dimension_names=["X"]
+                    )
+                    ya = root.require_array(
+                        "Y", shape=(aligned_height,), chunks=(aligned_height,),
+                        dtype="float64", fill_value=np.nan, overwrite=False, dimension_names=["Y"]
+                    )
+
+                    # Only fill if first creation (avoid re-writing on append)
+                    if xa.shape[0] != 0 and (xa[:] != x).any():
+                        xa[:] = x
+                    if ya.shape[0] != 0 and (ya[:] != y).any():
+                        ya[:] = y
+
+
+                wins = [win for win in gen_blocks(blockxsize=blockwidth, blockysize=blockheight, width=aligned_width, height=aligned_height, return_win=True)]
+
+
+                if progress is not None:
+                    w = 'image' + ('s' if len(files) > 1 else '')
+                    progress_task = progress.add_task(
+                        description=f"[red]Merging {len(files)} Sentinel2 {w} for band {band} in {self.mgrs_grid}",
+                        total=len(wins)
+                    )
+
+
+                for window in wins:
+
+                    if stop is not None and stop.is_set():
+                        raise KeyboardInterrupt
+                    out = others[0].read(1, window=window)
+
+                    rs, cs = window.toranges()
+                    sr, er = rs
+                    sc, ec = cs
+
+                    holes = out == nodata
+
+                    if not holes.any():
+                        #dst.write(out, 1, window=window)
+
+                        arr[sr:er, sc:ec] = out
+                        if progress and progress_task:
+                            progress.update(progress_task, advance=1)
+                        continue
+
+                    for v in others[1:]:
+                        varr = v.read(1, window=window)
+                        valid = varr != nodata
+                        take = holes & valid
+
+                        if take.any():
+                            out[take] = varr[take]
+                            holes[take] = False
+
+                    if holes.any():
+                        # logger.warning(
+                        #     f'Some pixels are still empty in {self.mgrs_grid}-{band}-{(window.row_off, window.col_off, window.height, window.width)}')
+                        out[holes] = nodata
+
+                    #dst.write(out, 1, window=window)
+                    arr[sr:er, sc:ec] = out
+                    if progress and progress_task:
+                        progress.update(progress_task, advance=1)
+
+            self[band] = band_file
+            return band_file
+
+        except Exception as e:
+            logger.error(f'{type(e)}: {e} ')
 
     def __merge__(self, band: str = None, stop=None, progress=None, force=None):
         band_file = os.path.join(self.workdir, f'{band}.tif')
@@ -647,7 +1047,7 @@ class Sentinel2Item:
         try:
             self._task = loop.create_task(self.__download__(
                 bands=bands, stop=stop, progress=progress,
-                connect_timeout=connect_timeout, read_timeout=read_timeout, force=force
+                connect_timeout=connect_timeout, read_timeout=read_timeout, force=force,
             ), name=f'down{self.mgrs_grid}')
 
             # run until task completes or is cancelled

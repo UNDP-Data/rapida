@@ -244,8 +244,10 @@ class SentinelItem(object):
             target_path = url_to_target_mapping.get(url)
             return target_path
 
+        loop = asyncio.new_event_loop()
         try:
-            loop = asyncio.get_event_loop()
+
+
             loop.run_until_complete(
                 download_remote_files(
                     file_urls=file_urls,
@@ -268,7 +270,8 @@ class SentinelItem(object):
         except Exception as e:
             logger.error(f"Failed to download assets for item {self.id}: {e}")
             raise
-
+        finally:
+            loop.close()
 
     def predict(self, progress=None, **kwargs)->str:
         """

@@ -1,4 +1,6 @@
 import math
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import timedelta, datetime
 import pystac_client
@@ -301,11 +303,15 @@ def fetch_s2_tiles(
 
 
 if __name__ == "__main__":
-
+    stop = threading.Event()
     from rapida.util.setup_logger import setup_logger
     from rapida.components.landuse.search_utils.s2item import Sentinel2Item
     from rapida.components.landuse.prediction.landuse import LandusePrediction
+    from rapida.components.landuse.constants import DYNAMIC_WORLD_COLORMAP
+
     from pystac import Item
+    import zarr
+    import json
     # logger.setLevel(logging.DEBUG)
     logger = setup_logger(level=logging.INFO)
     CATALOG_URL = "https://earth-search.aws.element84.com/v1"
@@ -314,22 +320,22 @@ if __name__ == "__main__":
     NIGERIA_BBOX = [6.0, 7.0, 8.0, 9.0]
     CHINA_BBOX = [100.0, 30.0, 110.0, 40.0]
     UGAKEN_BBOX = 33.280908600000004, -1.154692598710874, 36.59833289999998, 2.650255597059965
-
+    THAILAND_BBOX = 98, 5.5, 102.5, 10
 
     bbox = 33, -1, 37, 2
     bands = LandusePrediction.required_bands
-
+    #bands = ['B03']
 
     with Progress() as progress:
         bbox=UGAKEN_BBOX
-        bbox=bbox
+        bbox=THAILAND_BBOX
 
-        max_cloud_cover=2
+        max_cloud_cover=5
         start_date = "2025-07-01"
-        end_date = "2025-08-30"
+        end_date = "2025-11-30"
         results = fetch_s2_tiles(bbox=bbox,stac_url=CATALOG_URL,
                                  start_date=start_date, end_date=end_date,
-                                 max_cloud_cover=max_cloud_cover, progress=progress,filter_for_dev=['36MZE'])
+                                 max_cloud_cover=max_cloud_cover, progress=progress, filter_for_dev=['47NQH']) #filter_for_dev=['36MZE'])
 
 
 
@@ -337,20 +343,37 @@ if __name__ == "__main__":
 
         for grid, candidates in results.items():
             try:
-                #logger.info(f'{grid}: {[c for c in candidates]}')
+                logger.info(f'{grid}: {[c for c in candidates]}')
                 s2i =  Sentinel2Item(mgrs_grid=grid, s2_tiles=candidates, workdir='/tmp', target_crs='ESRI:54034')
-                downloaded = s2i.download(bands=bands, progress=progress, force=False)
+                # print(s2i.bands)
+                # print(set(s2i._prediction_bands).union(s2i._cloud_bands))
+                # print(len(set(s2i._prediction_bands).union(s2i._cloud_bands)), len(s2i.bands))
+                # print(s2i.assets)
+                # print(s2i.urls)
+                # print(s2i.files)
+                downloaded = s2i.download(bands=bands, progress=progress, force=False, stop=stop)
+                #
+                # #a = zarr.open_array("/tmp/36MZE/36MZE.zarr/B03", mode="r", zarr_version=3)
+                #
+                # # for band, vrt in s2i.vrts.items():
+                # #     print(band, vrt)
                 img_paths = [downloaded[b]  for b in bands]
                 itm = Item.from_dict(candidates[0].stac_item)
+
                 landuse_prediction = LandusePrediction(item=itm)
-                landuse_prediction.predict(img_paths=img_paths,
-                                           output_file_path=f'/tmp/landuse_36MZE.tif',
+                #start = time.perf_counter()
+                landuse_prediction.predict_zarr(img_paths=img_paths,
+                                           output_file_path=f'/tmp/landuse_36MZE.zarr',
 
-                                           progress=progress)
-
-
+                                           progress=progress, stop=stop, force=False)
+                # landuse_colormap = {k: landuse_prediction._hex_to_rgb(v['color']) for k, v in DYNAMIC_WORLD_COLORMAP.items()}
+                # print(landuse_colormap)
+                # end = time.perf_counter()
+                #
+                # logger.info(f"Prediction ⏱️ : {end - start:.3f} s")
 
             except KeyboardInterrupt:
+                stop.set()
                 pass
 
 

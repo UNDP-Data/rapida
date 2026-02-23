@@ -61,55 +61,56 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
         progress.remove_task(translate_task)
 
         progress.update(task, advance=1, description="[green]Downloaded admin data", refresh=True)
-        with gdal.OpenEx(destination_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as ds:
-            layer = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
-            iso3_field_index = layer.GetLayerDefn().GetFieldIndex("iso3")
+        with gdal.OpenEx(destination_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as ds:
+            layer_name = dst_layer_name or f'admin{admin_level}'
+            layer = ds.GetLayerByName(layer_name)
+            defn = layer.GetLayerDefn()
 
-            if iso3_field_index >=0:
-                countries = set([f.GetField("iso3") for f in layer])
-                if len(countries) == 0:
-                    raise Exception(f"No countries were found in {bbox}")
-            else:
-                raise Exception(f'{url} does not contain iso3 field!')
+            # 1. Dynamically find the source name field (admX_name OR adminX_name)
+            potential_names = [f"adm{admin_level}_name", f"admin{admin_level}_name"]
+            source_name_field = next((f for f in potential_names if defn.GetFieldIndex(f) >= 0), None)
 
-            h3id_field_index = layer.GetLayerDefn().GetFieldIndex("h3id")
-            if h3id_field_index < 0:
-                h3id_field = ogr.FieldDefn("h3id", ogr.OFTInteger64)
-                layer.CreateField(h3id_field)
-                for feature in layer:
-                    geom = feature.GetGeometryRef()
+            if not source_name_field:
+                raise Exception(f"Could not find a name field for level {admin_level}")
+
+            # 2. Prepare destination fields
+            if defn.GetFieldIndex("h3id") < 0:
+                layer.CreateField(ogr.FieldDefn("h3id", ogr.OFTInteger64))
+            if defn.GetFieldIndex("name") < 0:
+                layer.CreateField(ogr.FieldDefn("name", ogr.OFTString))
+
+            # 3. Single Pass Processing
+            fids_to_delete = []
+            layer.ResetReading()
+
+            for feature in layer:
+                fid = feature.GetFID()
+
+                # Check Disputed Areas
+                iso3 = feature.GetField("iso3")
+                if not keep_disputed_areas and (iso3 not in COUNTRY_CODES):
+                    fids_to_delete.append(fid)
+                    feature = None  # Release pointer immediately
+                    continue
+
+                # Update Name column
+                feature.SetField("name", feature.GetField(source_name_field))
+
+                # Update H3ID
+                geom = feature.GetGeometryRef()
+                if geom and not geom.IsEmpty():
                     centroid = geom.Centroid()
-                    h3id = h3.latlng_to_cell(lat=centroid.GetY(), lng=centroid.GetX(),
-                                      res=h3id_precision)
-                    feature.SetField("h3id", h3id)
-                    layer.SetFeature(feature)
-            name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
-            source_name_field = f"admin{admin_level}_name"
-            source_name_index = layer.GetLayerDefn().GetFieldIndex(source_name_field)
+                    # Note: Centroid() returns a GEOMETRY object, use GetX/Y
+                    h3_val = h3.latlng_to_cell(centroid.GetY(), centroid.GetX(), h3id_precision)
+                    feature.SetField("h3id", h3_val)
 
-            if source_name_index < 0:
-                raise Exception(f"Source {url} does not contain expected name field: {source_name_field}")
+                # Save and release
+                layer.SetFeature(feature)
+                feature = None  # <--- THIS PREVENTS THE SEGFAULT
 
-            if name_field_index < 0:
-                name_field = ogr.FieldDefn("name", ogr.OFTString)
-                layer.CreateField(name_field)
-                name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
-                if name_field_index < 0:
-                    raise Exception("Error: 'name' field was not created!")
-                layer.ResetReading()
-                for feature in layer:
-                    fid = feature.GetFID()
-                    name_value = feature.GetField(source_name_field)
-                    feature.SetField("name", name_value)
-                    if layer.SetFeature(feature) != 0:
-                        raise Exception(f"Failed to update feature {fid} with name '{name_value}'")
-
-            if not keep_disputed_areas:
-                layer.ResetReading()
-                for feature in layer:
-                    iso3_country_code = feature.GetField("iso3")
-                    if iso3_country_code not in COUNTRY_CODES:
-                        layer.DeleteFeature(feature.GetFID())
+            # 4. Finalize deletions after the loop is finished
+            for fid in fids_to_delete:
+                layer.DeleteFeature(fid)
 
             ds.FlushCache()
         progress.update(task, advance=1, description="[green]Download Completed", refresh=True)

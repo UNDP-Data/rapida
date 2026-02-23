@@ -37,7 +37,7 @@ dependencies = [
     "rich",
     "morecantile",
     "mapbox_vector_tile",
-    "aiopmtiles @ https://github.com/developmentseed/aiopmtiles/archive/refs/heads/main.zip",
+    #"aiopmtiles @ https://github.com/developmentseed/aiopmtiles/archive/refs/heads/main.zip",
     "sympy",
     "pydantic",
     "pmtiles",

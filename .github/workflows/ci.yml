@@ -45,7 +45,7 @@ jobs:
           docker run --rm \
             --entrypoint /bin/bash \
             ${{ steps.meta.outputs.tags }} \
-            -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
+            -c "pip install .[dev] && python -m pytest tests"
 
   build-acr:
     name: (ACR) Build Docker Image

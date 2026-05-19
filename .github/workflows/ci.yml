@@ -44,8 +44,10 @@ jobs:
         run: |
           docker run --rm \
             --entrypoint /bin/bash \
+            -v ${{ github.workspace }}:/ci-workspace \
+            -w /ci-workspace \
             ${{ steps.meta.outputs.tags }} \
-            -c "pipenv run pip install .[dev] && pipenv run python -m pytest tests"
+            -c "uv pip install .[dev] && pytest tests"
 
   build-acr:
     name: (ACR) Build Docker Image

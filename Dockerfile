@@ -63,6 +63,6 @@ RUN apt-get update && \
 
 WORKDIR /rapida
 USER 1000
-
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # The default command (can be overridden by rapida-jupyter later)
 CMD ["rapida"]

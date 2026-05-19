@@ -44,6 +44,8 @@ jobs:
         run: |
           docker run --rm \
             --entrypoint /bin/bash \
+            -v ${{ github.workspace }}:/ci-workspace \
+            -w /ci-workspace \
             ${{ steps.meta.outputs.tags }} \
             -c "uv pip install .[dev] && pytest tests"
 

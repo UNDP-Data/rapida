@@ -10,6 +10,11 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   REGISTRY_IMAGE: ${{ github.repository }}
 
+# --- REQUIRED FOR GHCR AUTHENTICATION ---
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   test:
     name: Test

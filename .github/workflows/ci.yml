@@ -18,6 +18,7 @@ permissions:
 jobs:
   test:
     name: Test
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +45,7 @@ jobs:
     name: Auto-Increment Version
     # ONLY run this when code is merged/pushed directly to main
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test]
+    #needs: [test]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,8 +121,7 @@ jobs:
             push-by-digest=true
             name-canonical=true
             push=true
-            name=ghcr.io/${{ env.IMAGE_NAME }}
-            name=${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
+            name=ghcr.io/${{ env.IMAGE_NAME }}\,${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
           build-args: |
             RAPIDA_VERSION=${{ needs.create-tag.outputs.version }}
 

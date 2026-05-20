@@ -109,8 +109,14 @@ jobs:
           target: prod
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          # ALL ON ONE LINE with an escaped comma (\,) between the registries
-          outputs: type=image,name=ghcr.io/${{ env.IMAGE_NAME }}\,${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          #
+          outputs: |
+            type=image
+            push-by-digest=true
+            name-canonical=true
+            push=true
+            name=ghcr.io/${{ env.IMAGE_NAME }}
+            name=${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
           build-args: |
             RAPIDA_VERSION=${{ needs.create-tag.outputs.version }}
 
@@ -171,6 +177,16 @@ jobs:
       - name: Create manifest lists
         working-directory: ${{ runner.temp }}/digests
         run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf "ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s " *) \
+          # 1. Filter the metadata JSON to separate the tags by registry
+          GHCR_TAGS=$(jq -cr '.tags | map(select(test("ghcr.io"))) | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          ACR_TAGS=$(jq -cr '.tags | map(select(test("${{ secrets.ACR_ENDPOINT }}"))) | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          
+          # 2. Build and push the GHCR manifest
+          echo "Creating manifest for GHCR..."
+          docker buildx imagetools create $GHCR_TAGS \
+            $(printf "ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s " *)
+          
+          # 3. Build and push the ACR manifest
+          echo "Creating manifest for ACR..."
+          docker buildx imagetools create $ACR_TAGS \
             $(printf "${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}@sha256:%s " *)

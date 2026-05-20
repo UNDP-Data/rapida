@@ -22,9 +22,13 @@ jobs:
           target: prod
           load: true
           tags: rapida:test
+          # --- TURN ON GITHUB ACTIONS CACHING ---
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       - name: Run tests
         run: |
           docker run --rm --entrypoint /bin/bash \
+            -u root \
             -e SETUPTOOLS_SCM_PRETEND_VERSION="0.0.0.dev0" \
             -v ${{ github.workspace }}:/ci-workspace -w /ci-workspace \
             rapida:test \

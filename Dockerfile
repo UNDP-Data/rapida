@@ -36,7 +36,11 @@ RUN uv venv && \
 # 3. Copy the rest of your local files (the `rapida` folder, README, etc.)
 COPY . .
 
-# 4. Install the app itself (the dot means "install from the current directory")
+# 4. Inject Dynamic Versioning from CI
+ARG RAPIDA_VERSION="0.0.0.dev0"
+ENV SETUPTOOLS_SCM_PRETEND_VERSION=${RAPIDA_VERSION}
+
+# 5. Install the app itself (the dot means "install from the current directory")
 RUN uv pip install --no-cache .
 
 # ==========================================
@@ -62,6 +66,11 @@ RUN apt-get update && \
     apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /rapida
+
+# Expose the version to the runtime environment
+ARG RAPIDA_VERSION="0.0.0.dev0"
+ENV RAPIDA_VERSION=${RAPIDA_VERSION}
+
 USER 1000
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/uv
 # The default command (can be overridden by rapida-jupyter later)

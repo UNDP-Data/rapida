@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=61.0", "setuptools_scm[toml]>=8"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "rapida"
-version = "0.0.1"
+dynamic = ["version"]
 description = "python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc"
 requires-python = ">=3.10"
 authors = [
@@ -71,30 +75,9 @@ Repository = "https://github.com:UNDP-Data/rapida.git"
 Issues = "https://github.com/UNDP-Data/rapida/issues"
 #Changelog = "https://github.com/UNDP-Data/rapida/blob/master/CHANGELOG.md"
 
-[tool.hatch.build.targets.wheel]
-packages = ["rapida"]
+# Configure setuptools to find your package
+[tool.setuptools.packages.find]
+include = ["rapida*"]
 
-[tool.hatch.build.targets.sdist]
-exclude = [
-    ".devcontainer",
-    ".github",
-    ".dockerignore",
-    "docker-compose.yml",
-    "Dockerfile",
-    ".gitignore",
-    ".pre-commit-config.yaml",
-    "tests",
-    "Makefile",
-    'Pipfile',
-    'Pipfile.lock'
-]
-
-[tool.hatch.metadata]
-allow-direct-references = true
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
-
-#[tool.hatchling.dependencies]
-#GDAL = ">=3.6.0, <4.0.0"  # Specify the GDAL version range
+# Initialize SCM to calculate versions from Git tags
+[tool.setuptools_scm]

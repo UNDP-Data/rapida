@@ -109,9 +109,8 @@ jobs:
           target: prod
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
-          outputs: |
-            type=image,push-by-digest=true,name-canonical=true,push=true
-            name=ghcr.io/${{ env.IMAGE_NAME }},${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
+          # ALL ON ONE LINE with an escaped comma (\,) between the registries
+          outputs: type=image,name=ghcr.io/${{ env.IMAGE_NAME }}\,${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             RAPIDA_VERSION=${{ needs.create-tag.outputs.version }}
 

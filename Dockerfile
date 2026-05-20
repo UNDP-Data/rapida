@@ -37,7 +37,7 @@ RUN uv venv && \
 COPY . .
 
 # 4. Inject Dynamic Versioning from CI
-ARG RAPIDA_VERSION="dev"
+ARG RAPIDA_VERSION="0.0.0.dev0"
 ENV SETUPTOOLS_SCM_PRETEND_VERSION=${RAPIDA_VERSION}
 
 # 5. Install the app itself (the dot means "install from the current directory")
@@ -68,7 +68,7 @@ RUN apt-get update && \
 WORKDIR /rapida
 
 # Expose the version to the runtime environment
-ARG RAPIDA_VERSION="dev"
+ARG RAPIDA_VERSION="0.0.0.dev0"
 ENV RAPIDA_VERSION=${RAPIDA_VERSION}
 
 USER 1000

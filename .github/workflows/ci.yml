@@ -1,11 +1,9 @@
-name: Build docker image
+name: Build and Release rapida
 
 on:
   push:
     branches:
       - "main"
-    tags:
-      - "v*"
   pull_request:
 
 env:
@@ -16,287 +14,156 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
         with:
           context: .
-          file: Dockerfile
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
           target: prod
           load: true
-
-      - name: Run tests in container
+          tags: rapida:test
+      - name: Run tests
         run: |
-          docker run --rm \
-            --entrypoint /bin/bash \
-            -v ${{ github.workspace }}:/ci-workspace \
-            -w /ci-workspace \
-            ${{ steps.meta.outputs.tags }} \
+          docker run --rm --entrypoint /bin/bash \
+            -v ${{ github.workspace }}:/ci-workspace -w /ci-workspace \
+            rapida:test \
             -c "uv pip install .[dev] && pytest tests"
 
-  build-acr:
-    name: (ACR) Build Docker Image
-    runs-on: ${{ matrix.runner }}
-    environment:
-      name: azure container registry
-    strategy:
-      matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-22.04-arm
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Prepare
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-          echo "REGISTRY_IMAGE_LOWER=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-
-      - name: Log into ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.ACR_ENDPOINT }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
-
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,name=${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }},push=true
-          provenance: false
-          sbom: false
-
-      - name: Export digest
-        run: |
-          mkdir -p ${{ runner.temp }}/digests-acr
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests-acr/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-acr-${{ env.PLATFORM_PAIR }}
-          path: ${{ runner.temp }}/digests-acr/*
-          if-no-files-found: error
-          retention-days: 1
-
-  deploy-acr:
-    name: (ACR) Merge and deploy to Azure Container Registry
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
-    needs: [build-acr, test]
+  create-tag:
+    name: Auto-Increment Version
+    # ONLY run this when code is merged/pushed directly to main
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test]
     runs-on: ubuntu-latest
-    environment:
-      name: azure container registry
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests-acr
-          pattern: digests-acr-*
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Prepare
-        run: |
-          echo "REGISTRY_IMAGE_LOWER=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-
-      - name: Log into ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ secrets.ACR_ENDPOINT }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
-
-      - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests-acr
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ secrets.ACR_ENDPOINT }}/${{ env.REGISTRY_IMAGE_LOWER }}:${{ steps.meta.outputs.version }}
-
-  build-github:
-    name: (GHCR) Build Docker Image
-    runs-on: ${{ matrix.runner }}
-    environment:
-      name: github container registry
-    env:
-      REGISTRY: ghcr.io
-    strategy:
-      matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-22.04-arm
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Prepare
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-          echo "REGISTRY_IMAGE_LOWER=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          driver: docker-container
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: Dockerfile
-          push: true
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          target: prod
-          outputs: type=image,push-by-digest=true,name-canonical=true,name=${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }},push=true
-          provenance: false
-          sbom: false
-
-      - name: Export digest
-        run: |
-          mkdir -p ${{ runner.temp }}/digests-ghcr
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests-ghcr/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: digests-ghcr-${{ env.PLATFORM_PAIR }}
-          path: ${{ runner.temp }}/digests-ghcr/*
-          if-no-files-found: error
-          retention-days: 1
-
-  deploy-github:
-    name: (GHCR) Merge and deploy to GitHub container registry
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')}}
-    needs: [build-github, test]
-    runs-on: ubuntu-latest
-    environment:
-      name: github container registry
-    env:
-      REGISTRY: ghcr.io
     permissions:
       contents: write
-      packages: write
+    outputs:
+      version: ${{ steps.tagger.outputs.new_tag }}
     steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - name: Bump version and push tag
+        id: tagger
+        uses: mathieudutour/github-tag-action@v6.2
         with:
-          path: ${{ runner.temp }}/digests-ghcr
-          pattern: digests-ghcr-*
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          default_bump: patch
+
+  build-multi-arch:
+    name: Build & Push
+    needs: [create-tag]
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        platform: [linux/amd64, linux/arm64]
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare Variables
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+          echo "IMAGE_NAME=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_ENDPOINT }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ env.IMAGE_NAME }}
+            ${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ needs.create-tag.outputs.version }}
+            type=raw,value=latest
+
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          target: prod
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: |
+            type=image,push-by-digest=true,name-canonical=true,push=true
+            name=ghcr.io/${{ env.IMAGE_NAME }},${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
+          build-args: |
+            RAPIDA_VERSION=${{ needs.create-tag.outputs.version }}
+
+      - name: Export digest
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          retention-days: 1
+
+  deploy-manifests:
+    name: Merge Manifests
+    needs: [create-tag, build-multi-arch]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
           merge-multiple: true
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Prepare
+      - name: Prepare Variables
         run: |
-          echo "REGISTRY_IMAGE_LOWER=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+          echo "IMAGE_NAME=$(echo '${{ env.REGISTRY_IMAGE }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.ACR_ENDPOINT }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
 
       - name: Docker meta
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}
+          images: |
+            ghcr.io/${{ env.IMAGE_NAME }}
+            ${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=${{ needs.create-tag.outputs.version }}
+            type=raw,value=latest
 
-      - name: Log in to the Container registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests-ghcr
+      - name: Create manifest lists
+        working-directory: ${{ runner.temp }}/digests
         run: |
           docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.REGISTRY }}/${{ env.REGISTRY_IMAGE_LOWER }}:${{ steps.meta.outputs.version }}
+            $(printf "ghcr.io/${{ env.IMAGE_NAME }}@sha256:%s " *) \
+            $(printf "${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}@sha256:%s " *)

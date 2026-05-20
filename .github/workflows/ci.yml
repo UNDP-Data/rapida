@@ -57,6 +57,7 @@ jobs:
   build-multi-arch:
     name: Build & Push
     needs: [create-tag]
+    environment: azure container registry
     runs-on: ${{ matrix.runner }}
     strategy:
       matrix:
@@ -130,6 +131,7 @@ jobs:
   deploy-manifests:
     name: Merge Manifests
     needs: [create-tag, build-multi-arch]
+    environment: azure container registry
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4

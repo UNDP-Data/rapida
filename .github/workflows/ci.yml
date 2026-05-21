@@ -41,6 +41,7 @@ jobs:
             rapida:test \
             -c "uv pip install .[dev] && pytest tests"
 
+
   create-tag:
     name: Auto-Increment Version
     # ONLY run this when code is merged/pushed directly to main
@@ -189,3 +190,21 @@ jobs:
           echo "Creating manifest for ACR..."
           docker buildx imagetools create $ACR_TAGS \
             $(printf "${{ secrets.ACR_ENDPOINT }}/${{ env.IMAGE_NAME }}@sha256:%s " *)
+
+
+  create-release:
+    name: Create GitHub Release
+    # Wait for the Docker images to be fully published first!
+    needs: [ create-tag, deploy-manifests ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Generate Release Notes
+        uses: softprops/action-gh-release@v2
+        with:
+          # Use the exact version tag created earlier in the pipeline
+          tag_name: ${{ needs.create-tag.outputs.version }}
+          # This tells GitHub to auto-generate the markdown changelog
+          generate_release_notes: true

@@ -36,7 +36,7 @@ def validate_layers(ctx, param, value):
             invalid_layers.append(layer)
 
     if len(invalid_layers) > 0:
-        raise click.BadParameter(f"Invalid layer{'s' if len(invalid_layers) > 1 else ''}: {', '.join(invalid_layers)}. Valid options: {", ".join(layer_names)}")
+        raise click.BadParameter(f"Invalid layer{'s' if len(invalid_layers) > 1 else ''}: {', '.join(invalid_layers)}. Valid options: {', '.join(layer_names)}")
 
     return value
 

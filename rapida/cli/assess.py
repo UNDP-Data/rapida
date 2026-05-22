@@ -243,7 +243,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
                     return
             else:
                 if all:
-                    logger.warning(f"--all option is ignored and to process {", ".join(components)}")
+                    logger.warning(f"--all option is ignored and to process {', '.join(components)}")
 
             for component_name in target_components:
                 if not component_name in all_components:

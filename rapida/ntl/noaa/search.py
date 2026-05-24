@@ -447,7 +447,7 @@ class VIIRSNavigator:
             look = self.orb.get_observer_look(p.max_elev_time, midlon, midlat, 0)
             elevation = look[1]
             if elevation < self.MIN_ELEVATION_ANGLE:
-                logger.debug(f'Skipping {p} because of low elevation angle {elevation:0f}')
+                logger.info(f'Skipping {p} because of low elevation angle {elevation:0f}')
                 continue
             granule = self.pass2granule(p=p,midlon=midlon, midlat=midlat, elevation=elevation, )
 

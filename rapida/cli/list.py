@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
               default=False,
               help="Set log level to debug"
               )
-def list(debug=False):
+def list_project(debug=False):
     setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():

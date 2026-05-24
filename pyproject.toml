@@ -56,7 +56,8 @@ dependencies = [
     "psutil",
     "s2cloudless",
     "country-converter",
-    "ratelimit"
+    "ratelimit",
+    "obstore>=0.9.5",
 ]
 
 [project.optional-dependencies]

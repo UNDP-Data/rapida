@@ -27,6 +27,7 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 @click.group(cls=RapidaCommandGroup, context_settings=dict(help_option_names=['-h', '--help']))
+
 @click.pass_context
 def cli(ctx):
     """UNDP Crisis Bureau Rapida tool.

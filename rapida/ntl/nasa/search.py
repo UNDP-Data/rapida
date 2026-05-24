@@ -1,4 +1,4 @@
-from rapida.ntl.science.const import (
+from rapida.ntl.nasa.const import (
     STREAM2CATALOG,
     COLLECTIONS,
     CMR_STAC_ROOT,

@@ -1,3 +1,4 @@
+from rapida.cli.aclick import RapidaCommandGroup
 from rapida.cli.population import population
 from rapida.util.setup_logger import setup_logger
 from rapida.cli.admin import admin
@@ -11,6 +12,7 @@ from rapida.cli.upload import upload
 from rapida.cli.download import download
 from rapida.cli.publish import publish
 from rapida.cli.h3id import addh3id
+from rapida.cli.ntl import ntl
 
 
 import click
@@ -22,9 +24,6 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 
-class RapidaCommandGroup(click.Group):
-    def list_commands(self, ctx):
-        return self.commands.keys()
 
 
 @click.group(cls=RapidaCommandGroup, context_settings=dict(help_option_names=['-h', '--help']))
@@ -50,7 +49,7 @@ cli.add_command(publish)
 cli.add_command(delete)
 cli.add_command(addh3id)
 cli.add_command(population)
-
+cli.add_command(ntl)
 
 if __name__ == '__main__':
     cli()

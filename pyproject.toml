@@ -58,6 +58,10 @@ dependencies = [
     "country-converter",
     "ratelimit",
     "obstore>=0.9.5",
+    "pyorbital>=1.12.1",
+    "h5py>=3.16.0",
+    "fsspec>=2026.4.0",
+    "satpy>=0.59.0",
 ]
 
 [project.optional-dependencies]

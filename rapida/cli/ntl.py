@@ -81,7 +81,7 @@ def search():
 
 @click.pass_context
 async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=None, satellites:list[str] = [], cmask:bool=None  ):
-    logger.info(f'searching for operational NOAA NTL data {cmask}')
+
     progress = ctx.obj.get('progress')
     table = Table(title=f"VIIRS satellites granules for the night of  {target_date.date()} covering {bbox}",
                   title_style="bold yellow")
@@ -94,6 +94,7 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=Non
     if cmask:
         table.add_column("Cloud coverage in bbox (%)", justify="center", style="white")
     table.add_column("Score (%)", justify="center", style="white")
+    table.add_column("BBOX intersection (%)", justify="center", style="white")
 
     granules = await async_search_granules(
         satellites=satellites, target_date=target_date, bbox=bbox,
@@ -101,9 +102,9 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=Non
     if granules:
         for i, granule in enumerate(granules, start=1):
             if cmask:
-                values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.cloud_cover}', f'{granule.rank}'
+                values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.cloud_cover}', f'{granule.rank}', f'{granule.pint}'
             else:
-                values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.rank}'
+                values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.rank}', f'{granule.pint}'
             table.add_row(*values)
 
     if table.row_count == 0:

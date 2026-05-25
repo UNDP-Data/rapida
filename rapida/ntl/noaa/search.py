@@ -50,7 +50,7 @@ class Granule:
     offset:int
     elevation:float
     cloud_cover = None
-
+    pint:float = None
     @property
     def id(self):
         return f"{self.start_time:%Y%m%d%H%M%S}{self.start_time.microsecond // 100000}" #
@@ -458,13 +458,16 @@ class VIIRSNavigator:
             granules=granules,satellite=self.satellite, bbox=bbox, progress=progress
         )
 
+
         for current_granule, found in geom_granules.items():
+
             if not found:
                 continue
             # Safely get the first source/entry
             (source, entries), = found.items()
-            file_path, _ = entries[0]
 
+            file_path, file_size, p = entries[0]
+            current_granule.pint = p
             _, file_name = os.path.split(file_path)
             if f's{current_granule.timestamp}' not in file_name:
                 m = PRODUCTS_RE['CM'].match(file_name)

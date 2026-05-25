@@ -294,7 +294,7 @@ def validate_src_file(src_file: str, target_layers = None):
             if not layer in layer_names:
                 invalid_layers.append(layer)
         if len(invalid_layers) > 0:
-            raise RuntimeError(f"Invalid layers: {", ".join(invalid_layers)}")
+            raise RuntimeError(f"Invalid layers: {',' .join(invalid_layers)}")
 
         logger.info(f'Ingesting {len(target_layers)} vector layers into one multilayer PMtiles file')
 

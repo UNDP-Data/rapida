@@ -26,7 +26,9 @@ def store(key:str=None, url:str=None, tile:str=None, cache_path=CACHE_PATH):
         if record is None:
             record = {tile:url}, time.time()
         else:
-            record[0].update({tile:url})
+            tiles, creation_time = record
+            if not tile in tiles:
+                record[0].update({tile:url})
         cache[key] = record
 
 
@@ -36,14 +38,20 @@ def store(key:str=None, url:str=None, tile:str=None, cache_path=CACHE_PATH):
 def get_urls(key:str=None, tile:str=None, cache_path=CACHE_PATH):
     with shelve.open(cache_path) as cache:
         record = cache.get(key, None)
+
         if record is None:
             return
-        for tiles, creation_time in record:
-            # Invalidate purely on read
-            if time.time() - creation_time > MAX_AGE_SECONDS:
-                del cache[key]
-                return  # Expired
-            if tile and tile in tiles:
-                return tiles[tile]
-            return tiles
+        # 1. Directly unpack the tuple
+        tiles, creation_time = record
+
+        # 2. Check for expiration
+        if time.time() - creation_time > MAX_AGE_SECONDS:
+            del cache[key]
+            return  # Expired
+
+        # 3. Handle the tile request
+        if tile and tile in tiles:
+            return tiles[tile],
+
+        return tuple(tiles.values())
 

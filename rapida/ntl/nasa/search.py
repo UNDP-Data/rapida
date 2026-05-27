@@ -86,7 +86,7 @@ def stac_search(stream:str, processing_level:str, dt:datetime, bbox:tuple[float]
                     dt = datetime.strptime(f'{meta["year"]}{meta["doy"]}', '%Y%j')
                     tile = meta['tile']
                     timestamp = dt.strftime(timestamp_format(product_id=product))
-                    key = f'product_{asset_key}'
+                    key = f'{product}_{timestamp}'
                     cache.store(key=key, url=url, tile=tile)
                     urls.append((product,timestamp, tile, url))
 

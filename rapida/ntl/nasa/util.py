@@ -23,8 +23,8 @@ def get_intersecting_tiles(bbox: tuple[float, float, float, float]) -> list[tupl
     return tiles
 
 TIMESTAMP_FORMATS = {
-    "A1": "%Y%j",  # Daily: Year + Julian Day (e.g., 2026134)
-    "A2": "%Y%j",  # Daily: Year + Julian Day (e.g., 2026134)
+    "A1": "%Y%m%d",  # Daily: Year + Julian Day (e.g., 2026134)
+    "A2": "%Y%m%d",  # Daily: Year + Julian Day (e.g., 2026134)
     "A3": "%Y%m",  # Monthly: Year + Month (e.g., 202605)
     "A4": "%Y"     # Yearly: Year only (e.g., 2026)
 }

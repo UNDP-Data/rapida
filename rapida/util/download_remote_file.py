@@ -230,7 +230,10 @@ async def download_remote_files(
         dst_folder: str,
         progress=None,
         target_path_func=None,
-        force=False, connect_timeout=250, data_read_timeout=9000
+        headers:dict[str:str] = None,
+        force=False,
+        connect_timeout=250,
+        data_read_timeout=9000
 ):
     """
     Download remote files from a list of URLs.
@@ -241,8 +244,9 @@ async def download_remote_files(
     :param target_path_func: A function that takes a URL as an argument and returns a path to save the file to.
     """
     try:
+
         timeout = aiohttp.ClientTimeout(connect=connect_timeout, sock_connect=data_read_timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as client_session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as client_session:
             tasks = []
             os.makedirs(dst_folder, exist_ok=True)
             for file_url in file_urls:
@@ -254,7 +258,7 @@ async def download_remote_files(
                     file_name = os.path.basename(target_path)
                 else:
                     file_name = os.path.basename(file_url)
-                    target_path = os.path.join(dst_folder, file_name)
+                target_path = os.path.join(dst_folder, file_name)
 
                 tasks.append(
                     asyncio.create_task(

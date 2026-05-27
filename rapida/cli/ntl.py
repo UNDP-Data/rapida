@@ -1,9 +1,10 @@
 import logging
 import numbers
+import os.path
 from datetime import date
 import click
 from rapida.cli import RapidaCommandGroup
-from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES
+from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN
 from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
@@ -173,12 +174,8 @@ def download():
 
 
 @download.command(name='nasa', short_help=f'Download NTL products from NASA')
-#
-# @click.option('-b', '--bbox',
-#               required=True,
-#               type=BboxParamType(),
-#               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
-#               )
+
+
 @click.option( "-t", "--timestamp", "timestamp",
                type=str,
                required=True,
@@ -192,11 +189,15 @@ def download():
                 help=f'The product to download.'
 
     )
+@click.option('--tile',
+              required=False,
+              type=str,
+              help='A specific tile number conforming to NASA BalckMarble 10x10 degrres tile numbering. Ex: h21v03 '
+              )
 
 @click.option(
-    "--dest-dir",
-    "-d",           # Short option
-    "dest_dir",     # Function argument name
+    "--dst-dir",
+    "dst_dir",     # Function argument name
     type=click.Path(
         exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
         file_okay=False,   # Strictly enforce that this is a directory, not a file
@@ -210,12 +211,27 @@ def download():
 
 
 @click.pass_context
-async def download_nasa(ctx, bbox:tuple[numbers.Number]=None, timestamp:str = None, product:str=None, dest_dir:str=None):
+async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=None, dst_dir:str=None):
     progress = ctx.obj.get('progress')
 
-    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product, dst_dir=dest_dir,progress=progress)
+    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product, tile=tile, dst_dir=dst_dir,progress=progress)
 
+    if downloaded_files:
+        table = Table(title=f"Downloaded files for {product.upper()} {timestamp} ", title_style="bold yellow")
 
+        table.add_column("Path", style="red", justify='center')
+        table.add_column("Timestamp", style="red", justify='center')
+        table.add_column("Tile", style="red", justify='center')
+        table.add_column("Size", style="green", justify='center')
+        for local_file_path in downloaded_files:
+            _, file_name = os.path.split(local_file_path)
+            file_size = os.path.getsize(local_file_path)
+            m = NTL_FILENAME_PATTERN.match(file_name)
+            meta = m.groupdict()
+            tile = meta['tile']
+            table.add_row(local_file_path, timestamp, tile, f'{file_size}')
+
+        progress.console.print(table)
 
 
 @download.command(name='noaa', short_help=f'Download operational NTL data from NOAA')

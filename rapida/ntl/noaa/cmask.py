@@ -11,11 +11,15 @@ import concurrent
 import numpy as np
 from rich.progress import Progress
 from osgeo import gdal
-
+from shapely.ops import transform
 
 gdal.UseExceptions()
 logger = logging.getLogger(__name__)
 
+def shift_to_360(lon, lat, z=None):
+    """Transforms standard -180/180 coordinates to a 0-360 system."""
+    shifted_lon = lon + 360.0 if lon < 0 else lon
+    return (shifted_lon, lat) if z is None else (shifted_lon, lat, z)
 
 def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
     fs = fsspec.filesystem("http")
@@ -27,13 +31,23 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
             # Now it reads at HTTP speeds without the boto3 overhead
             bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
             bbox_poly = box(*bbox, ccw=True)
-            #if not bbox_poly.within(bounds_poly):
-            if not bbox_poly.intersects(bounds_poly):
-                return False
-            intersection_poly = bbox_poly.intersection(bounds_poly)
-            perc_intersection = round(intersection_poly.area/bbox_poly.area * 100
-                                      )
+            # 2. The Kiribati Ghost Detection
+            minx, miny, maxx, maxy = bounds_poly.bounds
+            is_idl_crosser = (maxx - minx) > 300
 
+            if is_idl_crosser:
+                # Transform both geometries to 0-360 space to fix the tear
+                working_bounds = transform(shift_to_360, bounds_poly)
+                working_bbox = transform(shift_to_360, bbox_poly)
+            else:
+                # Use standard geometries
+                working_bounds = bounds_poly
+                working_bbox = bbox_poly
+            #if not bbox_poly.within(bounds_poly):
+            if not working_bbox.intersects(working_bounds):
+                return False
+            intersection_poly = working_bbox.intersection(working_bounds)
+            perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
             # with open("/tmp/bbox.geojson", "w") as ff:
             #     ff.write(to_geojson(bbox_poly))
             # n = filename.split('_')[3]

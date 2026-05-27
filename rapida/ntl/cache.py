@@ -35,7 +35,7 @@ def store(key:str=None, url:str=None, tile:str=None, cache_path=CACHE_PATH):
 
 
 
-def get_urls(key:str=None, tile:str=None, cache_path=CACHE_PATH):
+def fetch(key:str=None, tile:str=None, cache_path=CACHE_PATH):
     with shelve.open(cache_path) as cache:
         record = cache.get(key, None)
 

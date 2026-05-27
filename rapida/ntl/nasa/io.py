@@ -12,7 +12,7 @@ async def download(timestamp: str = None, product: str = None, tile:str=None, ds
 
 
     key = f'{product.upper()}_{timestamp}'
-    urls = cache.get_urls(key=key, tile=tile)
+    urls = cache.fetch(key=key, tile=tile)
     if not urls:
         logger.info(f'Failed to locate information in {cache.CACHE_PATH} for {product}-{timestamp}-{tile or ""} \n' \
                        f'Consider searching first.')
@@ -23,11 +23,8 @@ async def download(timestamp: str = None, product: str = None, tile:str=None, ds
     headers = {"Authorization": f"Bearer {ea_token}"}
 
 
+    semaphore = asyncio.Semaphore(5)
 
-    async with asyncio.Semaphore(5) as semaphore:
-        # async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
-        #     pass
-
-        return await download_remote_files(
-            file_urls=urls,dst_folder=dst_dir, progress=progress, headers=headers
-        )
+    return await download_remote_files(
+        file_urls=urls,dst_folder=dst_dir, progress=progress, headers=headers
+    )

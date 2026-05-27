@@ -77,6 +77,20 @@ PRODUCTS = set([item for stream in COLLECTIONS.values() for level, prod_list in 
 PRODUCT_NAMES = [p.rsplit('_', 1)[0] if p.count('_') == 2 else p.split('_')[0] for p in PRODUCTS]
 
 
+API_SOURCES = {
+    OPERATIONAL: 'https://nrt3.modaps.eosdis.nasa.gov/archive/allData/5200', #NRT lance
+    ARCHIVE: 'https://ladsweb.modaps.eosdis.nasa.gov/archive/allData/5200' #LADDS
+}
+API_CONTENT = {
+    OPERATIONAL: 'https://nrt3.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5200',
+    ARCHIVE: 'https://ladsweb.modaps.eosdis.nasa.gov/api/v2/content/details/allData/5200'
+}
+API_PRODUCTS = {catalog: {level: sorted({prod.rsplit('_', 1)[0] for prod in products}) for level, products in levels.items()} for catalog, levels in COLLECTIONS.items()}
+
+ROUTES = 'STAC', 'API'
+
+
+
 def generate_collections(catalogs=CATALOGS, product_filter=PRODUCT ):
     collections = {}
     for catalog_name in catalogs:
@@ -106,13 +120,15 @@ def processing_levels(collections=COLLECTIONS):
 
 if __name__ == '__main__':
 
-    COLLECTIONS = generate_collections()
-    print(json.dumps(COLLECTIONS, indent=4))
+    #COLLECTIONS = generate_collections()
+    #print(json.dumps(COLLECTIONS, indent=4))
 
     # SOURCES = tuple(COLLECTIONS)
     #
-    #levels = sorted({level for stream in COLLECTIONS.values() for level in stream})
+    levels = {level for stream, prods in COLLECTIONS.items() for level in stream}
+
+
     # print(PROCESSING_LEVELS)
-    # print(levels)
+    print(cleaned_dict)
 
     #print(PRODUCTS)

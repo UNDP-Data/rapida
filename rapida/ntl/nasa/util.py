@@ -18,7 +18,7 @@ def get_intersecting_tiles(bbox: tuple[float, float, float, float]) -> list[tupl
     tiles = []
     for v in range(max(0, v_min), min(18, v_max + 1)):
         for h in range(max(0, h_min), min(36, h_max + 1)):
-            tiles.append((h, v))
+            tiles.append(f'h{h:02d}v{v:02d}')
 
     return tiles
 

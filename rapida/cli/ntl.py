@@ -1,10 +1,13 @@
 import logging
 import numbers
 import os.path
-from datetime import date
+from datetime import datetime
+
 import click
+
+
 from rapida.cli import RapidaCommandGroup
-from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN
+from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN, ROUTES
 from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
@@ -84,7 +87,7 @@ def search():
 
 
 @click.pass_context
-async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=None, satellites:list[str] = [], cmask:bool=None  ):
+async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:datetime=None, satellites:list[str] = [], cmask:bool=None  ):
 
     progress = ctx.obj.get('progress')
     table = Table(title=f"VIIRS satellites granules for the night of  {target_date.date()} covering {bbox}",
@@ -147,13 +150,22 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=Non
             )
     )
 
+@click.option(
+        '-r', '--route',
+        type=click.Choice(ROUTES, case_sensitive=False),
+        default='API',
+        required=True,
+        help=f"Route to use when searching for data. Options are STAC for CMR STAC or API for NASA blackmarble API"
+
+    )
+
 @click.pass_context
-def search_nasa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:date=None, stream:str = None, processing_level:str=None):
+def search_nasa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
 
     progress = ctx.obj.get('progress')
 
     urls = nasa_search(processing_level=processing_level, nominal_date=nominal_date,
-                       bbox=bbox, stream=stream, progress=progress)
+                       bbox=bbox, stream=stream, route=route, progress=progress)
 
     if urls:
         table = Table(title=f" {processing_level} VIIRS satellites tiles for the night of  {nominal_date.date()}-{nominal_date.strftime('%Y%j')} covering {bbox}",

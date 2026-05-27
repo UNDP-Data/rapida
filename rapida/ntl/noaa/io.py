@@ -1,6 +1,6 @@
 import obstore
-from sympy.physics.units import percent
-
+import os
+import asyncio
 from rapida.ntl.noaa.const import PRODUCTS, PRODUCT_NAMES, VIIRS_URLS,PUBLIC_CONFIG,SOURCE_NAMES
 from datetime import datetime, timedelta
 from typing import Iterable
@@ -8,6 +8,8 @@ import random
 import logging
 from rapida.ntl.noaa.cmask import bbox_in_hdf
 from urllib.parse import urlparse
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -127,3 +129,5 @@ async def find_ntl(satellite: str = None, bbox: Iterable[float] = None, dt: date
 
 
     return found
+
+

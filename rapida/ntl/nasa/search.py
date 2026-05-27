@@ -1,9 +1,14 @@
+import json
+import os.path
+from rapida.ntl import cache
 from rapida.ntl.nasa.const import (
     STREAM2CATALOG,
     COLLECTIONS,
     CMR_STAC_ROOT,
     OPERATIONAL, ARCHIVE,
+    NTL_FILENAME_PATTERN
 )
+from rapida.ntl.nasa.util import timestamp_format
 import math
 from datetime import datetime, timedelta, date
 import logging
@@ -11,6 +16,8 @@ from pystac_client import Client
 from rich.progress import Progress
 
 logger = logging.getLogger(__name__)
+
+
 
 
 def calculate_night_hours(midlat: float, day_of_year: int) -> int:
@@ -55,31 +62,42 @@ def stac_search(stream:str, processing_level:str, dt:datetime, bbox:tuple[float]
     stac_url = f'{CMR_STAC_ROOT}{catalog_name}'
     urls = []
     catalog = Client.open(url=stac_url)
+
     search_result = catalog.search(
-        collections=[available_collections],
+        collections=available_collections,
         datetime=dt,
         bbox=bbox
     )
 
-    logger.info(f"Found {search_result.matched()} granule(s) at {stac_url}")
     if search_result.matched():
-
+        logger.info(f"Found {search_result.matched()} granule(s) at {stac_url}")
         items = search_result.item_collection()
 
         for itm in items:
+            #print(json.dumps(itm.to_dict(), indent=4))
             for asset_key, asset in itm.assets.items():
                 # Look for the .h5 file, but specifically grab the HTTPS link
                 if asset.href.endswith('.h5') and asset.href.startswith('https'):
-                    urls.append((itm.collection_id, asset.href))
+                    url = asset.href
+                    _, file_name = os.path.split(url)
+                    match = NTL_FILENAME_PATTERN.match(file_name)
+                    meta = match.groupdict()
+                    product = meta['product']
+                    dt = datetime.strptime(f'{meta["year"]}{meta["doy"]}', '%Y%j')
+                    tile = meta['tile']
+                    timestamp = dt.strftime(timestamp_format(product_id=product))
+                    key = f'product_{asset_key}'
+                    cache.store(key=key, url=url, tile=tile)
+                    urls.append((product,timestamp, tile, url))
 
         return urls
 
 
 def search(
         processing_level: str,
-        target_date: date,
+        nominal_date: date,
         bbox: tuple[float, float, float, float],
-        stream: str = OPERATIONAL,
+        stream: str = None,
         max_concurrency: int = 5,
 
         progress: Progress = None
@@ -94,47 +112,44 @@ def search(
     plevel = processing_level.upper()
     # --- 1. Harmonized Temporal Logic ---
     if stream == OPERATIONAL:
-        days_difference = abs((now-target_date).days)
+        days_difference = abs((now - nominal_date).days)
         if days_difference > 7:
-            raise ValueError(f'Invalid target_date={target_date}.{stream} stream holds max 7 days of data. ')
-        if 'A1' in plevel:
-            # NRT A1 uses a calculated night window across the UTC midnight boundary
-            midlat = (minlat + maxlat) * 0.5
-            night_hrs = calculate_night_hours(midlat, day_of_year=int(target_date.strftime('%j')))
-            start_dt = target_date - timedelta(hours=night_hrs / 2)
-            end_dt = target_date + timedelta(hours=night_hrs / 2)
-            dt = [start_dt, end_dt]
-        if 'A2' in plevel:
-            dt = target_date.replace(hour=12, minute=0, second=0)
-    elif stream == ARCHIVE:
-        if 'A1' in plevel or 'A2' in plevel:
-            # A2 and historical/standard A1 target noon dead-center
-            dt = target_date.replace(hour=12, minute=0, second=0)
-        elif 'A3' in plevel:
-            # A3 Monthly composites target mid-month. If current month, step back one month.
-            if now.month == target_date.month and now.year == target_date.year:
-                prev_month = target_date.replace(day=1) - timedelta(days=1)
-                dt = prev_month.replace(day=15)
-            else:
-                dt = target_date.replace(day=15)
-        elif 'A4' in plevel:
-            if now.year > target_date.year:
-                raise ValueError(f'Can not search in future! Please adjust target date')
-            if now.year == target_date.year:
-                # A4 Annual composites target July 1st
-                dt = target_date.replace(year=now.year-1,month=7, day=1)
-            else:
-                # A4 Annual composites target July 1st
-                dt = target_date.replace(month=7, day=1)
-    else:
-        raise ValueError(f'Invalid stream {stream} for ')
+            raise ValueError(f'Invalid target_date={nominal_date}.{stream} stream holds max 7 days of data. ')
 
+    if 'A1' in plevel or 'A2' in plevel:
+        # A2 and historical/standard A1 target noon dead-center
+        midlat = (minlat + maxlat) * 0.5
+        midlon = (minlon + maxlon) * 0.5
+        utc_offset_hours = midlon / 15.0
+        local_overpass_utc = nominal_date + timedelta(hours=1.5) - timedelta(hours=utc_offset_hours)
+        local_overpass_doy = local_overpass_utc.strftime('%j')
+        start_dt = local_overpass_utc - timedelta(minutes=45)
+        end_dt = local_overpass_utc + timedelta(minutes=45)
+        dt = [start_dt, end_dt]
+    elif 'A3' in plevel:
+        # A3 Monthly composites target mid-month. If current month, step back one month.
+        if now.month == nominal_date.month and now.year == nominal_date.year:
+            prev_month = nominal_date.replace(day=1) - timedelta(days=1)
+            dt = prev_month.replace(day=15)
+        else:
+            dt = nominal_date.replace(day=15)
+    elif 'A4' in plevel:
+        if now.year > nominal_date.year:
+            raise ValueError(f'Can not search in future! Please adjust target date')
+        if now.year == nominal_date.year:
+            # A4 Annual composites target July 1st
+            dt = nominal_date.replace(year=now.year - 1, month=7, day=1)
+        else:
+            # A4 Annual composites target July 1st
+            dt = nominal_date.replace(month=7, day=1)
+    else:
+        raise ValueError(f'Invalid stream {stream} for NASA NTL data')
 
 
     # --- 2. Catalog Search ---
     if progress:
         progress_task = progress.add_task(
-            description=f'[red]Searching {processing_level} ({stream}) imagery for {target_date.date()}',
+            description=f'[red]Searching {processing_level} ({stream}) imagery for {nominal_date.date()}',
             total=None
         )
 
@@ -146,8 +161,8 @@ def search(
     )
 
     if not urls:
-        logger.info(f"No imagery found for {processing_level} on {target_date.date()}")
-
+        logger.info(f"No imagery found for {processing_level} on {nominal_date.date()}")
+        return
     else:
         if progress and 'progress_task' in locals():
             progress.update(progress_task,
@@ -155,4 +170,4 @@ def search(
                             completed=len(urls),
                             total=len(urls))
 
-    return urls
+        return urls

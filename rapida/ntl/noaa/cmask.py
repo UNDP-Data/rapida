@@ -31,13 +31,14 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
             if not bbox_poly.intersects(bounds_poly):
                 return False
             intersection_poly = bbox_poly.intersection(bounds_poly)
-            perc_intersection = round(intersection_poly.area/bbox_poly.area * 100)
+            perc_intersection = round(intersection_poly.area/bbox_poly.area * 100
+                                      )
 
             # with open("/tmp/bbox.geojson", "w") as ff:
             #     ff.write(to_geojson(bbox_poly))
-            n = filename.split('_')[3]
-            with open(f"/tmp/granule_{n}.geojson", "w") as f:
-                f.write(to_geojson(bounds_poly))
+            # n = filename.split('_')[3]
+            # with open(f"/tmp/granule_{n}.geojson", "w") as f:
+            #     f.write(to_geojson(bounds_poly))
             return True, perc_intersection
 
 
@@ -156,7 +157,7 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
         '',  # Output to RAM
         subdataset_str,
         format='MEM',
-        dstSRS='EPSG:4326',
+        dstSRS='EPSG:4326', # works here because we are counting pixels not planar metrics
         outputBounds=[lon_min, lat_min, lon_max, lat_max],
         xRes=0.00675, yRes=0.00675,  # 750 meters in decimal degrees
         dstNodata=-128,
@@ -203,5 +204,5 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
                 if progress and master_task is not None:
                     progress.update(master_task, advance=1)
     now = datetime.datetime.now()
-    logger.idebug(f'Computed cloud coverage for {len(urls)} granules in {(now-then).total_seconds()} secs')
+    logger.debug(f'Computed cloud coverage for {len(urls)} granules in {(now-then).total_seconds()} secs')
     return results

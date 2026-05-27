@@ -3,10 +3,12 @@ import numbers
 from datetime import date
 import click
 from rapida.cli import RapidaCommandGroup
-from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES
+from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES
 from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
+from rapida.ntl.nasa.io import download as download_from_nasa
+
 from rich.table import Table
 logger = logging.getLogger(__name__)
 
@@ -37,12 +39,13 @@ class ProcessingLevelChoiceOption(click.Option):
 def ntl():
     """Nighttime Lights VIIRS data and impact detection"""
     pass
-@ntl.group(short_help=f'Search for available NTL data products across tiers and streams')
+
+@ntl.group(short_help=f'Search for available NTL data')
 def search():
     """Search for available NTL data products across distinct data streams."""
     pass
 
-@search.command(name='noaa', short_help=f'Search for available NTL data from operational NOAA stream')
+@search.command(name='noaa', short_help=f'Search for available  NTL operational data from NOAA source')
 
 @click.option('-b', '--bbox',
               required=True,
@@ -114,17 +117,17 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=Non
         progress.console.print(f"\n[dim]Note: Each granule represents {1025 / 12:.2f}s of instrument data.[/dim]")
 
 
-@search.command(name='nasa', short_help=f'Search for available NTL data from NASA science archive stream')
+@search.command(name='nasa', short_help=f'Search for available NTL science data from NASA source')
 
 @click.option('-b', '--bbox',
               required=True,
               type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
               )
-@click.option("--date", "target_date",
+@click.option("--date", "nominal_date",
               type=click.DateTime(formats=["%Y-%m-%d"]),
               required=True,
-              help=''
+              help='The human experience of a specific night, local time zone matched to the center of bbox'
               )
 @click.option(
         '-s', '--stream',
@@ -144,32 +147,96 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=Non
     )
 
 @click.pass_context
-def search_nasa(ctx, bbox:tuple[numbers.Number]=None, target_date:date=None, stream:str = None, processing_level:str=None):
+def search_nasa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:date=None, stream:str = None, processing_level:str=None):
 
     progress = ctx.obj.get('progress')
 
-    urls = nasa_search(processing_level=processing_level, target_date=target_date,
+    urls = nasa_search(processing_level=processing_level, nominal_date=nominal_date,
                        bbox=bbox, stream=stream, progress=progress)
 
     if urls:
-        table = Table(title=f" {processing_level} VIIRS satellites tiles for the night of  {target_date.date()} covering {bbox}",
+        table = Table(title=f" {processing_level} VIIRS satellites tiles for the night of  {nominal_date.date()}-{nominal_date.strftime('%Y%j')} covering {bbox}",
                       title_style="bold yellow")
         table.add_column("Product", style="red", justify='center')
+        table.add_column("Timestamp", style="red", justify='center')
+        table.add_column("Tile", style="red", justify='center')
         table.add_column("URI", style="green", justify='center')
-        for url in urls:
-            table.add_row(*url)
+        for e in urls:
+            table.add_row(*e)
         progress.console.print(table)
-@ntl.command(short_help=f'Download selected NTL data')
-async def download():
-    logger.info('Downloading NTL')
-
-@ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
-async def detect():
-    logger.info('Detecting impact on the ground')
 
 
-@ntl.command(short_help=f'Track long-term resilience and recovery curves (2-3 Week horizon)')
-async def monitor():
-    logger.info('Monitoring recovery')
+@ntl.group(short_help=f'Download NTL data ')
+def download():
+    pass
+
+
+
+@download.command(name='nasa', short_help=f'Download NTL products from NASA')
+#
+# @click.option('-b', '--bbox',
+#               required=True,
+#               type=BboxParamType(),
+#               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+#               )
+@click.option( "-t", "--timestamp", "timestamp",
+               type=str,
+               required=True,
+               help='Granule timestamp string as date and time. Ex: 202604152232 '
+               )
+@click.option(
+    "-p",
+                "product",
+                type=click.Choice(PRODUCT_NAMES, case_sensitive=True),
+                required=True,
+                help=f'The product to download.'
+
+    )
+
+@click.option(
+    "--dest-dir",
+    "-d",           # Short option
+    "dest_dir",     # Function argument name
+    type=click.Path(
+        exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
+        file_okay=False,   # Strictly enforce that this is a directory, not a file
+        dir_okay=True,
+        resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
+    ),
+    default="/tmp",           # Defaults to the current working directory
+    show_default=True,     # Tells the user what the default is in the --help menu
+    help="Destination directory to save the downloaded the images."
+)
+
+
+@click.pass_context
+async def download_nasa(ctx, bbox:tuple[numbers.Number]=None, timestamp:str = None, product:str=None, dest_dir:str=None):
+    progress = ctx.obj.get('progress')
+
+    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product, dst_dir=dest_dir,progress=progress)
+
+
+
+
+@download.command(name='noaa', short_help=f'Download operational NTL data from NOAA')
+
+
+@click.pass_context
+async def download_noaa(ctx, ):
+    logger.info('Downloading from NOAA')
+
+
+
+
+
+# @ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
+# @click.pass_context
+# async def detect(ctx):
+#     logger.info('Detecting impact on the ground')
+#
+#
+# @ntl.command(short_help=f'Track long-term resilience and recovery curves (2-3 Week horizon)')
+# async def monitor():
+#     logger.info('Monitoring recovery')
 
 

@@ -1,0 +1,49 @@
+import shelve
+import time
+import os
+import tempfile
+import hashlib
+import json
+
+
+
+MAX_AGE_SECONDS = 6 * 3600  # 6 hours
+CACHE_PATH = os.path.join(tempfile.gettempdir(), "ntl_search_cache")
+
+
+
+def search_id(search_params: dict) -> str:
+    """Generates a deterministic unique ID based on the STAC search parameters."""
+    # Sort the dictionary keys to ensure the same parameters always produce the exact same hash
+    param_string = json.dumps(search_params, sort_keys=True)
+    return hashlib.md5(param_string.encode('utf-8')).hexdigest()
+
+
+
+def store(key:str=None, url:str=None, tile:str=None, cache_path=CACHE_PATH):
+    with shelve.open(cache_path) as cache:
+        record = cache.get(key, None)
+        if record is None:
+            record = {tile:url}, time.time()
+        else:
+            record[0].update({tile:url})
+        cache[key] = record
+
+
+
+
+
+def get_urls(key:str=None, tile:str=None, cache_path=CACHE_PATH):
+    with shelve.open(cache_path) as cache:
+        record = cache.get(key, None)
+        if record is None:
+            return
+        for tiles, creation_time in record:
+            # Invalidate purely on read
+            if time.time() - creation_time > MAX_AGE_SECONDS:
+                del cache[key]
+                return  # Expired
+            if tile and tile in tiles:
+                return tiles[tile]
+            return tiles
+

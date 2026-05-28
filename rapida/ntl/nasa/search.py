@@ -57,7 +57,7 @@ def url2result(url:str=None, store=True):
 
 
 
-def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime, bbox:tuple[float]):
+def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime, bbox:tuple[float], route:str=None):
     """
     Calculate VIIRS satellites local overpass time in UTC TZ
     :param stream:
@@ -84,21 +84,21 @@ def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime
 
         dt = local_overpass_utc
     elif 'A3' in plevel:
+        day = 15 if route == 'STAC' else 1
         # A3 Monthly composites target mid-month. If current month, step back one month.
         if now.month == nominal_date.month and now.year == nominal_date.year:
             prev_month = nominal_date.replace(day=1) - timedelta(days=1)
-            dt = prev_month.replace(day=15)
+            dt = prev_month.replace(day=day)
         else:
-            dt = nominal_date.replace(day=15)
+            dt = nominal_date.replace(day=day)
     elif 'A4' in plevel:
         if now.year > nominal_date.year:
             raise ValueError(f'Can not search in future! Please adjust target date')
+        month = 7 if route == 'STAC' else 1 # A4 Annual composites target July 1st on stac and jan 1st on api
         if now.year == nominal_date.year:
-            # A4 Annual composites target July 1st
-            dt = nominal_date.replace(year=now.year - 1, month=7, day=1)
+            dt = nominal_date.replace(year=now.year - 1, month=month, day=1)
         else:
-            # A4 Annual composites target July 1st
-            dt = nominal_date.replace(month=7, day=1)
+            dt = nominal_date.replace(month=month, day=1)
     else:
         raise ValueError(f'Invalid stream {stream} for NASA NTL data')
     return dt
@@ -108,6 +108,7 @@ def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float])-> list[
     tiles = get_intersecting_tiles(bbox=bbox)
     urls = []
     for product in products:
+
         content_url = f'{const.API_CONTENT[stream]}/{product}/{dt.strftime("%Y/%j")}'
         with httpx.Client() as client:
             # Fetch the JSON directory listing
@@ -187,7 +188,7 @@ def search(
         f'Valid processing levels {stream_processing_levels}')
 
     dt = calculate_local_utc(stream=stream,processing_level=processing_level,
-                             nominal_date=nominal_date, bbox=bbox)
+                             nominal_date=nominal_date, bbox=bbox, route=route)
     products = stream_products[processing_level]
     cached_results = []
     expected_products_count = len(products)

@@ -2,7 +2,7 @@ import logging
 import numbers
 import os.path
 from datetime import datetime
-
+from typing import Iterable
 import click
 
 
@@ -12,7 +12,8 @@ from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
 from rapida.ntl.nasa.io import download as download_from_nasa
-
+from rapida.ntl.noaa.const import SOURCE_NAMES, PRODUCT_NAMES as OPER_PRODUCT_NAMES
+from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
 logger = logging.getLogger(__name__)
 
@@ -247,15 +248,66 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
 
 
 @download.command(name='noaa', short_help=f'Download operational NTL data from NOAA')
+@click.option(
+    "--sat", "-s",
+    "satellite", # This will be the name of the argument in your function
+    type=click.Choice(VIIRSNavigator.SATELLITES, case_sensitive=False),
+    multiple=False,
+    help=f"Target satellite(s). One of ({','.join(VIIRSNavigator.SATELLITES)}) that produced the granule."
+)
 
+@click.option("--timestamp", "-t", "timestamp", type=str, required=True, help='Granule timestamp string as date and time. Ex: 202604152232 ')
+@click.option(
+    "--products",
+                "-p",
+                "products",
+                type=click.Choice(OPER_PRODUCT_NAMES, case_sensitive=False),
+                default=OPER_PRODUCT_NAMES,
+                multiple=True,
+                required=False,
+                help=f'One or more of the operational products: {",".join(OPER_PRODUCT_NAMES)} to download.'
+    )
+@click.option("-src", '--src', "source",
+              type=click.Choice(SOURCE_NAMES, case_sensitive=False),
+              required=False,
+              help='The source {AMAZON/GOOGLE} where to search for the granules.'
+              )
+@click.option(
+    "--dst-dir",
+    "-d",           # Short option
+    "dst_dir",     # Function argument name
+    type=click.Path(
+        exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
+        file_okay=False,   # Strictly enforce that this is a directory, not a file
+        dir_okay=True,
+        resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
+    ),
+    default="/tmp",           # Defaults to the current working directory
+    show_default=True,     # Tells the user what the default is in the --help menu
+    help="Destination directory to save the downloaded the images."
+)
 
 @click.pass_context
-async def download_noaa(ctx, ):
-    logger.info('Downloading from NOAA')
+async def download_noaa(ctx, satellite:str=None, timestamp:str=None, products:Iterable[str]=None, source:str=None, dst_dir:str=None ):
+    progress = ctx.obj.get('progress')
 
 
+    downloaded_files = await download_from_noaa(satellite=satellite,timestamp=timestamp,
+                           source=source, products=products,dest_dir=dst_dir, progress=progress)
 
+    if downloaded_files:
+        table = Table(title=f"VIIRS satellites images for the night of  {timestamp} ",
+                      title_style="bold yellow")
 
+        table.add_column("Satellite", style="green", justify='center')
+        table.add_column("Timestamp (UTC)", style="cyan", justify='center')
+        table.add_column("Downloaded file", justify="left", style="red")
+        table.add_column("File size", justify="center", style="white")
+
+        for _, local_file_path, file_size in downloaded_files:
+            values = satellite, timestamp, f'{local_file_path}', f'{bytesto(file_size, "m"):.2f} MB'
+            table.add_row(*values)
+        progress.console.print(table)
 
 # @ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
 # @click.pass_context

@@ -8,11 +8,20 @@ import random
 import logging
 from rapida.ntl.noaa.cmask import bbox_in_hdf
 from urllib.parse import urlparse
-
-
+from rapida.ntl.noaa.const import PRODUCT2NAME
+import aiofiles
 
 logger = logging.getLogger(__name__)
 
+
+# The "Solid" way: Generate stores using from_url
+VIIRS_STORES = {
+    sat: {
+        source: obstore.store.from_url(url, config=PUBLIC_CONFIG)
+        for source, url in sources.items()
+    }
+    for sat, sources in VIIRS_URLS.items()
+}
 
 def parse_noaa_timestamp(time_str: str) -> datetime:
     """
@@ -42,17 +51,10 @@ async def find_ntl(satellite: str = None, bbox: Iterable[float] = None, dt: date
                    products: Iterable[str] = PRODUCT_NAMES, source: str = None):
     found = {}
 
-    # The "Solid" way: Generate stores using from_url
-    viirs_stores = {
-        sat: {
-            source: obstore.store.from_url(url, config=PUBLIC_CONFIG)
-            for source, url in sources.items()
-        }
-        for sat, sources in VIIRS_URLS.items()
-    }
 
 
-    stores = viirs_stores[satellite]
+
+    stores = VIIRS_STORES[satellite]
 
     # 1. Safely determine the primary and alternate sources
     primary_source = source if source else random.choice(SOURCE_NAMES)
@@ -132,15 +134,8 @@ async def find_ntl(satellite: str = None, bbox: Iterable[float] = None, dt: date
 
 async def locate_file(satellite:str=None, dt=None, source:str=None, products: Iterable[str] = PRODUCT_NAMES):
     found = {}
-    # The "Solid" way: Generate stores using from_url
-    viirs_stores = {
-        sat: {
-            source: obstore.store.from_url(url, config=PUBLIC_CONFIG)
-            for source, url in sources.items()
-        }
-        for sat, sources in VIIRS_URLS.items()
-    }
-    stores = viirs_stores[satellite]
+
+    stores = VIIRS_STORES[satellite]
 
     # 1. Safely determine the primary and alternate sources
     primary_source = source if source else random.choice(SOURCE_NAMES)
@@ -188,3 +183,81 @@ async def locate_file(satellite:str=None, dt=None, source:str=None, products: It
 
 
     return found
+
+
+
+async def fetch_file(satellite:str=None, provider:str=None, path:str=None, size:int=None, dst_dir:str=None,
+                     progress=None, progress_task = None):
+    try:
+        adir = os.path.abspath(dst_dir)
+        if not os.path.exists(adir):
+            os.mkdir(adir)
+        down_task = None
+        store = VIIRS_STORES[satellite][provider]
+        rel_path, file_name = os.path.split(path)
+        product = rel_path.split('/')[0]
+        product_name = PRODUCT2NAME[product]
+        if progress:
+            down_task = progress.add_task(f'[red]Downloading  {file_name} from {provider}', total=size)
+        dst_file_path = os.path.join(adir, file_name)
+        response = await obstore.get_async(store, path)
+        async with aiofiles.open(dst_file_path, 'wb') as local_file:
+            # The 'get' call is the async request
+            async for chunk in  response.stream():
+                await local_file.write(chunk)
+                if progress and down_task is not None:
+                    progress.update(down_task, advance=len(chunk))
+
+        if os.stat(dst_file_path).st_size == size:
+            if progress and progress_task is not None:
+                progress.update(progress_task, description=f'[green]Downloaded {file_name} from {provider}', advance=1)
+            return product_name, dst_file_path, size
+    except Exception:
+
+        raise
+    finally:
+        if progress:
+            if down_task:progress.remove_task(down_task)
+
+
+async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_dir='/tmp', progress=None):
+
+    # Download logic (Surgical io to local SSD)
+    tasks = []
+    progress_task = None
+    try:
+        async with asyncio.TaskGroup() as tg:
+            for provider, files in found_paths.items():
+                if progress:
+                    progress_task = progress.add_task(description=f'Downloading VIIRS images...', total=len(files))
+                for path, size in files:
+                    tasks.append(tg.create_task(fetch_file(
+                        satellite=satellite, provider=provider,
+                        path=path, size=size, progress=progress,
+                        dst_dir=dst_dir, progress_task = progress_task
+                    )))
+    except ExceptionGroup as eg:
+        for e in eg.exceptions:
+            logger.error(f"❌ Sub-task failed: {e}")
+    finally:
+
+        results = [t.result() for t in tasks]
+
+        return results
+
+
+
+
+
+async def download(satellite:str=None, timestamp:str=None, source:str=None,
+        products:Iterable[str]=PRODUCT_NAMES, dest_dir='/tmp', progress=None):
+    dt = datetime.strptime(timestamp, '%Y%m%d%H%M')
+    logger.info(f'Locating files for satellite {satellite} timestamp {timestamp} ')
+    found_files = await locate_file(satellite=satellite, dt=dt, source=source, products=products)
+    return  await fetch_ntl(found_paths=found_files, dst_dir=dest_dir, satellite=satellite, progress=progress)
+
+
+def bytesto(bytes, to, bsize=1024):
+    a = {'k' : 1, 'm': 2, 'g' : 3, 't' : 4, 'p' : 5, 'e' : 6 }
+    r = float(bytes)
+    return bytes / (bsize ** a[to])

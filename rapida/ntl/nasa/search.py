@@ -10,6 +10,7 @@ from pystac_client import Client
 from rich.progress import Progress
 from rapida.ntl.nasa.util import get_intersecting_tiles
 import httpx
+from typing import Optional
 logger = logging.getLogger(__name__)
 
 
@@ -104,7 +105,7 @@ def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime
     return dt
 
 
-def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float])-> list[str]:
+def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float], push_to_cache:bool=True)-> list[str]:
     tiles = get_intersecting_tiles(bbox=bbox)
     urls = []
     for product in products:
@@ -121,25 +122,33 @@ def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float])-> list[
                 for tile in tiles:
                     if tile in file_name:
                         url = item.get('downloadsLink')
-                        result = url2result(url=url, store=True)
+                        result = url2result(url=url, store=push_to_cache)
                         urls.append(result)
 
 
     return urls
 
-def stac_search(stream:str, processing_level:str, dt:datetime, bbox:tuple[float]):
+def stac_search(stream:str=None, processing_level:Optional[str]=None, products:list[str]=None, dt:datetime=None,
+                bbox:tuple[float]=None, push_to_cache:bool=True):
 
     catalog_name = const.STREAM2CATALOG[stream]
     catalog_collections = const.COLLECTIONS[catalog_name]
     catalog_processing_levels = catalog_collections.keys()
-    assert processing_level in catalog_processing_levels, (f'Invalid processing level {processing_level} for {catalog_name}. \''
+
+    if not products:
+
+        available_collections = sorted(catalog_collections[processing_level], reverse=True)
+
+        assert processing_level in catalog_processing_levels, (f'Invalid processing level {processing_level} for {catalog_name}. \''
                                                            f'Valid processing levels {catalog_processing_levels}')
+    else:
+        available_collections = list(products)
+    logger.info(
+        f'Searching for imagery in catalog "{catalog_name}" collections: {available_collections}')
 
-    available_collections = sorted(catalog_collections[processing_level], reverse=True) #we preffe
 
-    logger.info(f'Searching for {processing_level} imagery in catalog "{catalog_name}" collections: {available_collections}')
-    logger.debug(f'Searching for {processing_level} imagery in catalog "{catalog_name}" collections: {available_collections} ' \
-                 f'for {dt} and {bbox} geaographic area')
+
+
     stac_url = f'{const.CMR_STAC_ROOT}{catalog_name}'
     urls = []
     catalog = Client.open(url=stac_url)
@@ -149,6 +158,7 @@ def stac_search(stream:str, processing_level:str, dt:datetime, bbox:tuple[float]
         datetime=dt,
         bbox=bbox
     )
+
 
     if search_result.matched():
         logger.info(f"Found {search_result.matched()} granule(s) at {stac_url}")
@@ -160,7 +170,7 @@ def stac_search(stream:str, processing_level:str, dt:datetime, bbox:tuple[float]
                 # Look for the .h5 file, but specifically grab the HTTPS link
                 if asset.href.endswith('.h5') and asset.href.startswith('https'):
                     url = asset.href
-                    result = url2result(url=url, store=True)
+                    result = url2result(url=url, store=push_to_cache)
                     urls.append(result)
 
         return urls
@@ -172,6 +182,7 @@ def search(
         bbox: tuple[float, float, float, float],
         stream: str = None,
         route:str = None,
+        push_to_cache:bool=False,
         max_concurrency: int = 5,
         progress: Progress = None
 ):

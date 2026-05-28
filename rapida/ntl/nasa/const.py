@@ -128,7 +128,7 @@ if __name__ == '__main__':
     levels = {level for stream, prods in COLLECTIONS.items() for level in stream}
 
 
-    # print(PROCESSING_LEVELS)
-    print(cleaned_dict)
+    print(levels)
+
 
     #print(PRODUCTS)

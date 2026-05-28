@@ -15,6 +15,9 @@ from rapida.ntl.nasa.io import download as download_from_nasa
 from rapida.ntl.noaa.const import SOURCE_NAMES, PRODUCT_NAMES as OPER_PRODUCT_NAMES
 from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
+from rapida.project.project import Project
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -291,7 +294,7 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
 async def download_noaa(ctx, satellite:str=None, timestamp:str=None, products:Iterable[str]=None, source:str=None, dst_dir:str=None ):
     progress = ctx.obj.get('progress')
 
-
+    project = Project(os.getcwd())
     downloaded_files = await download_from_noaa(satellite=satellite,timestamp=timestamp,
                            source=source, products=products,dest_dir=dst_dir, progress=progress)
 

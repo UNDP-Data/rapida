@@ -192,7 +192,6 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     if valid_data.size == 0:
         raise Exception(f'Failed to compute cloud coverage for {hdf_url}. No valid data.')
     cc = int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
-    print(cc)
     cache.store(key=file_name, value=cc)
     return cc
 

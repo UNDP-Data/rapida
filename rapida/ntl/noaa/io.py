@@ -130,4 +130,61 @@ async def find_ntl(satellite: str = None, bbox: Iterable[float] = None, dt: date
 
     return found
 
+async def locate_file(satellite:str=None, dt=None, source:str=None, products: Iterable[str] = PRODUCT_NAMES):
+    found = {}
+    # The "Solid" way: Generate stores using from_url
+    viirs_stores = {
+        sat: {
+            source: obstore.store.from_url(url, config=PUBLIC_CONFIG)
+            for source, url in sources.items()
+        }
+        for sat, sources in VIIRS_URLS.items()
+    }
+    stores = viirs_stores[satellite]
 
+    # 1. Safely determine the primary and alternate sources
+    primary_source = source if source else random.choice(SOURCE_NAMES)
+    alt_source = SOURCE_NAMES[0] if primary_source == SOURCE_NAMES[1] else SOURCE_NAMES[1]
+    entries_cache = {}
+    for product_name in products:
+        #match_found = False
+        product = PRODUCTS[product_name]
+        sources_to_try = [primary_source, alt_source]
+        time_pattern = dt.strftime('s%Y%m%d%H%M' if 'cloud' in product.lower() else 'd%Y%m%d_t%H%M')
+        for current_source in sources_to_try:
+            store = stores[current_source]
+
+            date_path = dt.strftime('/%Y/%m/%d/')
+            prefix = f"{product}{date_path}"
+            cache_key = (current_source, prefix)
+            if cache_key not in entries_cache:
+                try:
+                    entries_cache[cache_key] = await obstore.list(store, prefix=prefix).collect_async()
+                except Exception as e:
+                    logger.warning(f"Failed to list {prefix} from {current_source}: {e}")
+                    entries_cache[cache_key] = []
+
+            entries = entries_cache[cache_key]
+            if not entries:
+                continue
+            match_gen = (
+                e for e in entries
+                if time_pattern in e['path'] and e['path'].lower().endswith(('.nc', '.h5'))
+            )
+
+            # next() takes the first match, or returns None if the generator is empty
+            selected_entry = next(match_gen, None)
+
+            if selected_entry:
+                file_path = selected_entry['path']
+                file_size = selected_entry.get('size', 0)  # Safe get
+                if current_source not in found:  # reset
+                    found[current_source] = []
+                found[current_source].append((file_path, file_size))
+                break  # Found it! Stop looking in fallback sources for this product
+
+            else:
+                logger.debug(f"Pattern {time_pattern} not found in {current_source} for {product_name}")
+
+
+    return found

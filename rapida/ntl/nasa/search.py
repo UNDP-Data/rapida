@@ -52,7 +52,7 @@ def url2result(url:str=None, store=True):
     timestamp = dt.strftime(timestamp_format(product_id=product))
     key = f'{product}_{timestamp}'
     if store:
-        cache.store(key=key, url=url, tile=tile)
+        cache.store(key=key, value=url, tile=tile)
     return product, timestamp, tile, url
 
 

@@ -20,15 +20,21 @@ def search_id(search_params: dict) -> str:
 
 
 
-def store(key:str=None, url:str=None, tile:str=None, cache_path=CACHE_PATH):
+def store(key:str=None, value:str=None, tile:str=None, cache_path=CACHE_PATH):
     with shelve.open(cache_path) as cache:
         record = cache.get(key, None)
         if record is None:
-            record = {tile:url}, time.time()
+            if tile:
+                record = {tile:value}, time.time()
+            else:
+                record = value, time.time()
         else:
             tiles, creation_time = record
-            if not tile in tiles:
-                record[0].update({tile:url})
+            if tile:
+                if not tile in tiles:
+                    record[0].update({tile:value})
+            else:
+                record[0] = value
         cache[key] = record
 
 
@@ -38,7 +44,6 @@ def store(key:str=None, url:str=None, tile:str=None, cache_path=CACHE_PATH):
 def fetch(key:str=None, tile:str=None, cache_path=CACHE_PATH):
     with shelve.open(cache_path) as cache:
         record = cache.get(key, None)
-
         if record is None:
             return
         # 1. Directly unpack the tuple
@@ -48,10 +53,11 @@ def fetch(key:str=None, tile:str=None, cache_path=CACHE_PATH):
         if time.time() - creation_time > MAX_AGE_SECONDS:
             del cache[key]
             return  # Expired
-
         # 3. Handle the tile request
         if tile and tile in tiles:
             return tiles[tile],
-
-        return tuple(tiles.values())
+        if isinstance(tiles, dict):
+            return tuple(tiles.values())
+        else:
+            return tiles
 

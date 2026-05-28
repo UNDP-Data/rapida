@@ -12,8 +12,10 @@ import numpy as np
 from rich.progress import Progress
 from osgeo import gdal
 from shapely.ops import transform
-
+from rapida.ntl import cache
 gdal.UseExceptions()
+
+
 logger = logging.getLogger(__name__)
 
 def shift_to_360(lon, lat, z=None):
@@ -160,6 +162,10 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
 
+
+    _, file_name = os.path.split(hdf_url)
+    cc = cache.fetch(key=file_name)
+    if cc is not None:return cc
     lon_min, lat_min, lon_max, lat_max = bbox
     subdataset_str = f'NETCDF:"/vsicurl/{hdf_url}":CloudMaskBinary'
 
@@ -185,8 +191,10 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
 
     if valid_data.size == 0:
         raise Exception(f'Failed to compute cloud coverage for {hdf_url}. No valid data.')
-
-    return int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
+    cc = int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
+    print(cc)
+    cache.store(key=file_name, value=cc)
+    return cc
 
 
 def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: int = 5, progress: Progress = None):
@@ -195,7 +203,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
     if progress:
         master_task = progress.add_task(
             description=f"[cyan]Computing cloud coverage .... ",
-            total=len(urls)
+            total=None
         )
     then = datetime.datetime.now()
 
@@ -207,7 +215,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
             for url in urls
         }
 
-        for future in concurrent.futures.as_completed(future_to_url):
+        for future in concurrent.futures.as_completed(future_to_url, timeout=60):
             url = future_to_url[future]
             try:
                 results[url] = future.result()
@@ -219,4 +227,8 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
                     progress.update(master_task, advance=1)
     now = datetime.datetime.now()
     logger.debug(f'Computed cloud coverage for {len(urls)} granules in {(now-then).total_seconds()} secs')
+    if progress and 'master_task' in locals():
+        progress.remove_task(master_task)
+
+
     return results

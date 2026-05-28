@@ -21,10 +21,6 @@ async def download(timestamp: str = None, product: str = None, tile:str=None, ds
     # EarthAccess token
     ea_token = os.environ.get('EARTHDATA_TOKEN')
     headers = {"Authorization": f"Bearer {ea_token}"}
-
-
-    semaphore = asyncio.Semaphore(5)
-
     return await download_remote_files(
         file_urls=urls,dst_folder=dst_dir, progress=progress, headers=headers
     )

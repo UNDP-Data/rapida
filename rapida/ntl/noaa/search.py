@@ -15,12 +15,12 @@ import time
 import logging
 from typing import Iterable, Optional
 from rapida.ntl.noaa.io import (
-find_ntl, public_url, parse_noaa_timestamp
+find_ntl, public_url, parse_noaa_timestamp, locate_file
 )
 
 from rapida.ntl.noaa.cmask import cloud_coverage_batch
 from rapida.ntl.noaa.const import  PRODUCTS_RE
-
+from rapida.ntl import cache
 logger = logging.getLogger(__name__)
 
 
@@ -183,6 +183,7 @@ async def granules2files(granules: list[Granule]=None, satellite: str = None,
 
         if progress and progress_task is not None:
             progress.update(progress_task, description = f'Selected {len(results)} granule(s) for satellite {satellite}')
+            progress.remove_task(progress_task)
         return results
 
     except ExceptionGroup as eg:
@@ -537,6 +538,9 @@ class VIIRSNavigator:
         return selected_granules
 
 
+
+
+
 def search_granules(satellites:Optional[Iterable[str]]=None,
                     target_date:date=None, bbox:Iterable[float] = None,
                    cmask:bool=False, progress=None):
@@ -625,6 +629,8 @@ async def async_search_granules(
     else:
         selected_granules = list(found_granules.values())
         selected_granules.sort(key=lambda g: g.rank, reverse=True)
+
+
     return selected_granules
 
 # if __name__ == '__main__':

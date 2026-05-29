@@ -99,19 +99,24 @@ async def download_file(file_url=None, dst_file_path=None,
     for attempt in range(no_attempts):
         try:
             down_task = None
-            async with session.get(file_url, timeout=data_read_timeout) as response:
+            async with session.get(file_url, timeout=data_read_timeout, allow_redirects=True) as response:
                 if response.status == 200:
+                    # Use .get() to avoid KeyError if the header is missing
+                    remote_size_str = response.headers.get('Content-Length')
+                    remote_size = int(remote_size_str) if remote_size_str else None
 
-                    remote_size = int(response.headers['Content-Length'])
                     if os.path.exists(dst_file_path):
-                        if not force and os.path.getsize(dst_file_path) == remote_size:
+                        # Only compare sizes if remote_size is known
+                        if not force and remote_size is not None and os.path.getsize(dst_file_path) == remote_size:
                             logger.debug(f'Returning local file {dst_file_path}')
                             return dst_file_path
                         else:
                             os.remove(dst_file_path)
 
                     if progress:
+                        # total=None allows rich to show a spinner instead of a % bar for unknown sizes
                         down_task = progress.add_task(f'[cyan]Downloading {file_url}', total=remote_size)
+
                     async with aiofiles.open(dst_file_path, 'wb') as local_file:
                         while True:
                             chunk = await response.content.read(chunk_size)
@@ -122,8 +127,9 @@ async def download_file(file_url=None, dst_file_path=None,
                                 progress.update(down_task, advance=len(chunk))
 
                     size = os.path.getsize(dst_file_path)
-                    if size != remote_size:
-                        raise Exception(f'{file_url} is was not downloaded correctly!')
+                    # Only validate size if the server provided a Content-Length
+                    if remote_size is not None and size != remote_size:
+                        raise Exception(f'{file_url} was not downloaded correctly!')
 
                     logger.debug(f'File {dst_file_path} was successfully downloaded')
 
@@ -138,7 +144,7 @@ async def download_file(file_url=None, dst_file_path=None,
                 os.remove(dst_file_path)
             raise ce
         except Exception as e:
-            logger.error(f'Exception "{e}" was encountered in while downloading {file_url}')
+            logger.error(f'Exception "{e}" was encountered while downloading {file_url}')
             if os.path.exists(dst_file_path):
                 os.remove(dst_file_path)
             if attempt == no_attempts - 1:
@@ -147,8 +153,6 @@ async def download_file(file_url=None, dst_file_path=None,
         finally:
             if down_task and progress:
                 progress.remove_task(down_task)
-
-
 
 async def download_s3_object(
     url,
@@ -230,7 +234,10 @@ async def download_remote_files(
         dst_folder: str,
         progress=None,
         target_path_func=None,
-        force=False, connect_timeout=250, data_read_timeout=9000
+        headers:dict[str:str] = None,
+        force=False,
+        connect_timeout=250,
+        data_read_timeout=9000
 ):
     """
     Download remote files from a list of URLs.
@@ -241,8 +248,9 @@ async def download_remote_files(
     :param target_path_func: A function that takes a URL as an argument and returns a path to save the file to.
     """
     try:
+
         timeout = aiohttp.ClientTimeout(connect=connect_timeout, sock_connect=data_read_timeout)
-        async with aiohttp.ClientSession(timeout=timeout) as client_session:
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as client_session:
             tasks = []
             os.makedirs(dst_folder, exist_ok=True)
             for file_url in file_urls:
@@ -254,7 +262,7 @@ async def download_remote_files(
                     file_name = os.path.basename(target_path)
                 else:
                     file_name = os.path.basename(file_url)
-                    target_path = os.path.join(dst_folder, file_name)
+                target_path = os.path.join(dst_folder, file_name)
 
                 tasks.append(
                     asyncio.create_task(

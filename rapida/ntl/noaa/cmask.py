@@ -11,11 +11,17 @@ import concurrent
 import numpy as np
 from rich.progress import Progress
 from osgeo import gdal
-
-
+from shapely.ops import transform
+from rapida.ntl import cache
 gdal.UseExceptions()
+
+
 logger = logging.getLogger(__name__)
 
+def shift_to_360(lon, lat, z=None):
+    """Transforms standard -180/180 coordinates to a 0-360 system."""
+    shifted_lon = lon + 360.0 if lon < 0 else lon
+    return (shifted_lon, lat) if z is None else (shifted_lon, lat, z)
 
 def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
     fs = fsspec.filesystem("http")
@@ -27,17 +33,28 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
             # Now it reads at HTTP speeds without the boto3 overhead
             bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
             bbox_poly = box(*bbox, ccw=True)
-            #if not bbox_poly.within(bounds_poly):
-            if not bbox_poly.intersects(bounds_poly):
-                return False
-            intersection_poly = bbox_poly.intersection(bounds_poly)
-            perc_intersection = round(intersection_poly.area/bbox_poly.area * 100)
+            # 2. The Kiribati Ghost Detection
+            minx, miny, maxx, maxy = bounds_poly.bounds
+            is_idl_crosser = (maxx - minx) > 300
 
+            if is_idl_crosser:
+                # Transform both geometries to 0-360 space to fix the tear
+                working_bounds = transform(shift_to_360, bounds_poly)
+                working_bbox = transform(shift_to_360, bbox_poly)
+            else:
+                # Use standard geometries
+                working_bounds = bounds_poly
+                working_bbox = bbox_poly
+            #if not bbox_poly.within(bounds_poly):
+            if not working_bbox.intersects(working_bounds):
+                return False
+            intersection_poly = working_bbox.intersection(working_bounds)
+            perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
             # with open("/tmp/bbox.geojson", "w") as ff:
             #     ff.write(to_geojson(bbox_poly))
-            n = filename.split('_')[3]
-            with open(f"/tmp/granule_{n}.geojson", "w") as f:
-                f.write(to_geojson(bounds_poly))
+            # n = filename.split('_')[3]
+            # with open(f"/tmp/granule_{n}.geojson", "w") as f:
+            #     f.write(to_geojson(bounds_poly))
             return True, perc_intersection
 
 
@@ -145,6 +162,10 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
 
+
+    _, file_name = os.path.split(hdf_url)
+    cc = cache.fetch(key=file_name)
+    if cc is not None:return cc
     lon_min, lat_min, lon_max, lat_max = bbox
     subdataset_str = f'NETCDF:"/vsicurl/{hdf_url}":CloudMaskBinary'
 
@@ -156,7 +177,7 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
         '',  # Output to RAM
         subdataset_str,
         format='MEM',
-        dstSRS='EPSG:4326',
+        dstSRS='EPSG:4326', # works here because we are counting pixels not planar metrics
         outputBounds=[lon_min, lat_min, lon_max, lat_max],
         xRes=0.00675, yRes=0.00675,  # 750 meters in decimal degrees
         dstNodata=-128,
@@ -170,8 +191,9 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
 
     if valid_data.size == 0:
         raise Exception(f'Failed to compute cloud coverage for {hdf_url}. No valid data.')
-
-    return int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
+    cc = int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
+    cache.store(key=file_name, value=cc)
+    return cc
 
 
 def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: int = 5, progress: Progress = None):
@@ -180,7 +202,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
     if progress:
         master_task = progress.add_task(
             description=f"[cyan]Computing cloud coverage .... ",
-            total=len(urls)
+            total=None
         )
     then = datetime.datetime.now()
 
@@ -192,7 +214,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
             for url in urls
         }
 
-        for future in concurrent.futures.as_completed(future_to_url):
+        for future in concurrent.futures.as_completed(future_to_url, timeout=60):
             url = future_to_url[future]
             try:
                 results[url] = future.result()
@@ -203,5 +225,9 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
                 if progress and master_task is not None:
                     progress.update(master_task, advance=1)
     now = datetime.datetime.now()
-    logger.idebug(f'Computed cloud coverage for {len(urls)} granules in {(now-then).total_seconds()} secs')
+    logger.debug(f'Computed cloud coverage for {len(urls)} granules in {(now-then).total_seconds()} secs')
+    if progress and 'master_task' in locals():
+        progress.remove_task(master_task)
+
+
     return results

@@ -14,7 +14,6 @@ from rapida.cli.publish import publish
 from rapida.cli.h3id import addh3id
 from rapida.cli.ntl import ntl
 from rich.progress import Progress
-
 import click
 import nest_asyncio
 nest_asyncio.apply()

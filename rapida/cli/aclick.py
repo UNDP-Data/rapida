@@ -43,7 +43,7 @@ class RapidaCommandGroup(click.Group):
     def command(self, *args, **kwargs):
         # Automatically wrap all @group.command() calls in AsyncCommand
         kwargs.setdefault('cls', AsyncCommand)
-        return super().command(*args, **kwargs)
+        return super().command(*args, no_args_is_help=True, **kwargs)
 
     def group(self, *args, **kwargs):
         # Ensure nested groups inherit this behavior

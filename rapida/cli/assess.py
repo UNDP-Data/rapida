@@ -167,6 +167,10 @@ def build_variable_help():
               show_default=True,help=f'The year for which to compute population' )
 @click.option('--datetime-range', '-dt', required=False, type=str, callback=validate_datetime_range, default=datetime.date.today().strftime('%Y-%m-%d'),
               help=f"Optional. Date range for landuse component in YYYY-MM-DD/YYYY-MM-DD format or single date YYYY-MM-DD (12 months range). Only valid when 'landuse' component is selected. Start date must be after end date, end date must be before today, and at least 1 day apart.")
+
+@click.option("--outage-date", "outage_date", type=click.DateTime(formats=["%Y-%m-%d"]), required=False,
+              help='The human experience of a specific night, local time zone matched to the center of bbox')
+
 @click.option('--cloud-cover', '-cc', required=False, type=int, multiple=False, default=5,
               show_default=True,help=f"Optional. Minimum cloud cover rate to search items for landuse component.")
 @click.option('-p', '--project',
@@ -181,7 +185,7 @@ def build_variable_help():
               help="Set log level to debug"
               )
 @click.pass_context
-def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, cloud_cover=None, project: str = None, force=False, debug=False):
+def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, outage_date=None, cloud_cover=None, project: str = None, force=False, debug=False):
     """
     Assess/evaluate a specific geospatial exposure components/variables
 
@@ -265,6 +269,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
                           variables=variables,
                           target_year=year,
                           datetime_range=datetime_range,
+                          outage_date=outage_date,
                           cloud_cover=cloud_cover,
                           force=force)
 

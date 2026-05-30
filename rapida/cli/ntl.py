@@ -16,7 +16,7 @@ from rapida.ntl.noaa.const import SOURCE_NAMES, PRODUCT_NAMES as OPER_PRODUCT_NA
 from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
 from rapida.ntl.nasa.io import bulk_download as bdownload
-
+from rapida.project.project import Project
 
 logger = logging.getLogger(__name__)
 
@@ -424,14 +424,59 @@ async def bulk_download(ctx, bbox:tuple[numbers.Number]=None, start_date:datetim
     )
 
 
+@ntl.command(short_help=f'Find and download best NTL data for a specific area and time ')
+
+@click.option('-b', '--bbox',
+              required=True,
+              type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              )
+@click.option("--from", "start_date",
+              type=click.DateTime(formats=["%Y-%m-%d"]),
+              required=True,
+              help='The start date of required period'
+              )
+@click.option("--to", "end_date",
+              type=click.DateTime(formats=["%Y-%m-%d"]),
+              required=True,
+              help='The end date of required period'
+              )
+
+@click.option(
+        '-p','--products',
+        # type=click.Choice(PRODUCTS, case_sensitive=False),
+        cls=NASAProductsChoiceOption,
+        #callback=validate_products_strict,
+        required=True,
+        multiple=True,
+        help=f"One or more STAC collections hosting different processing level or products limited to one stream. "
+    )
+@click.option(
+    "--dst-dir",
+    "dst_dir",     # Function argument name
+    type=click.Path(
+        exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
+        file_okay=False,   # Strictly enforce that this is a directory, not a file
+        dir_okay=True,
+        resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
+    ),
+    default=tempfile.gettempdir(),           # Defaults to the current working directory
+    show_default=True,     # Tells the user what the default is in the --help menu
+    help="Destination directory to save the downloaded the images."
+)
+
+
+@click.pass_context
+async def fetch(ctx):
+    progress = ctx.obj.get('progress')
 
 
 
-# @ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
-# @click.pass_context
-# async def detect(ctx):
-#     logger.info('Detecting impact on the ground')
-#
+@ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
+@click.pass_context
+async def detect(ctx):
+    logger.info('Detecting impact on the ground')
+
 #
 # @ntl.command(short_help=f'Track long-term resilience and recovery curves (2-3 Week horizon)')
 # async def monitor():

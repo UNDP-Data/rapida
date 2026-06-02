@@ -402,12 +402,12 @@ class VIIRSNavigator:
 
         return Granule(sat=self.satellite,start_time=start_time,offset=offset_km, elevation=elevation)
 
-    def night_passes(self, bbox:Iterable[float]=None, target_date:date=None):
+    def night_passes(self, bbox:Iterable[float]=None, nominal_date:date=None):
 
         midlon, midlat, northlat = self.decompose_bbox(bbox=bbox)
 
         # 1. NIGHT DURATION (Use Mid-Lat for 'Average' Night)
-        doy = target_date.timetuple().tm_yday
+        doy = nominal_date.timetuple().tm_yday
         declination = 0.409 * math.sin(2 * math.pi * (doy - 80) / 365)
         lat_rad = math.radians(midlat)
         cos_h = -math.tan(lat_rad) * math.tan(declination)
@@ -415,12 +415,12 @@ class VIIRSNavigator:
 
         # 2. THE ANCHOR (01:30 AM Local -> UTC)
 
-        utc_anchor = datetime.combine(target_date, dtime(1, 30)) - timedelta(hours=midlon / 15.0)
+        utc_anchor = datetime.combine(nominal_date, dtime(1, 30)) - timedelta(hours=midlon / 15.0)
 
         # 3. THE TRIGGER (Use North-Lat to find when the satellite ENTERS the box)
         search_start = utc_anchor - timedelta(hours=night_hrs / 2)
         night_passes = self.orb.get_next_passes(search_start, night_hrs, midlon, midlat, 0) # northlat???
-        logger.debug(f'{self.satellite} passes {len(night_passes)} time(s) over {list(bbox)} on the night of {target_date:%y-%m-%d}')
+        logger.debug(f'{self.satellite} passes {len(night_passes)} time(s) over {list(bbox)} on the night of {nominal_date:%y-%m-%d}')
         passes = []
         for _pass_ in night_passes:
             rise_time, fall_time, max_elev_time = _pass_
@@ -432,15 +432,15 @@ class VIIRSNavigator:
                 logger.debug(f'Skipping ascending pass {_pass_}')
                 continue
             p = DescendingPass(sat=self.satellite, rise_time=rise_time, fall_time=fall_time,
-                               max_elev_time=max_elev_time, target_date=target_date)
+                               max_elev_time=max_elev_time, target_date=nominal_date)
 
             passes.append(p)
         return passes
 
 
-    async def night_granules_async(self, bbox:Iterable[float]=None, target_date:date=None, cmask=False, progress=None):
+    async def night_granules_async(self, bbox:Iterable[float]=None, nominal_date:date=None, cmask=False, progress=None):
         midlon, midlat, northlat = self.decompose_bbox(bbox=bbox)
-        passes = self.night_passes(target_date=target_date, bbox=bbox)
+        passes = self.night_passes(nominal_date=nominal_date, bbox=bbox)
 
         selected_granules = {}
         granules = []
@@ -491,7 +491,7 @@ class VIIRSNavigator:
 
     def night_granules(self, bbox:Iterable[float]=None, target_date:date=None, cmask:bool=False, progress=None ):
         midlon, midlat, northlat = self.decompose_bbox(bbox=bbox)
-        passes = self.night_passes(target_date=target_date, bbox=bbox)
+        passes = self.night_passes(nominal_date=target_date, bbox=bbox)
 
         selected_granules = {}
         granules = []
@@ -574,13 +574,13 @@ def search_granules(satellites:Optional[Iterable[str]]=None,
         return selected_granules
 
 async def async_search_granules(
-        satellites:Optional[Iterable[str]]=None, target_date:date=None, bbox:Iterable[float] = None,
+        satellites:Optional[Iterable[str]]=None, nominal_date:date=None, bbox:Iterable[float] = None,
         cmask=False, progress=None
     ):
     """
 
     :param satellites:
-    :param target_date:
+    :param nominal_date:
     :param bbox:
     :param cmask:
     :param progress:
@@ -588,7 +588,7 @@ async def async_search_granules(
     """
 
     satellite_names = list(VIIRSNavigator.SAT_CONFIGS.keys())
-    assert isinstance(target_date, date), f'invalid target date {target_date}'
+    assert isinstance(nominal_date, date), f'invalid target date {nominal_date}'
     satellites = satellites or satellite_names
     selected_granules = []
     found_granules = {}
@@ -600,7 +600,7 @@ async def async_search_granules(
             for sat in satellites:
                 nav = VIIRSNavigator(satellite=sat)
                 tasks.append(tg.create_task(
-                    nav.night_granules_async(bbox=bbox, target_date=target_date, cmask=cmask,
+                    nav.night_granules_async(bbox=bbox, nominal_date=nominal_date, cmask=cmask,
                                              progress=progress)
                 ))
 

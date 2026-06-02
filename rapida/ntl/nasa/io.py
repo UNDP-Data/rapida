@@ -14,17 +14,15 @@ import numbers
 
 logger = logging.getLogger(__name__)
 
-async def download(timestamp: str = None, product: str = None, tile:str=None, dst_dir:str=None, progress:Progress=None):
-
-
-    key = f'{product.upper()}_{timestamp}'
-    urls = cache.fetch(key=key, tile=tile)
-
+async def download(timestamp: str = None, product: str = None, tile:str=None, dst_dir:str=None, urls:list[str]=None, progress:Progress=None):
 
     if not urls:
-        logger.info(f'Failed to locate information in {cache.CACHE_PATH} for {product}-{timestamp}-{tile or ""} \n' \
-                       f'Consider searching first.')
-        return 
+        key = f'{product.upper()}_{timestamp}'
+        urls = cache.fetch(key=key, tile=tile)
+        if not urls:
+            logger.info(f'Failed to locate information in {cache.CACHE_PATH} for {product}-{timestamp}-{tile or ""} \n' \
+                           f'Consider searching first.')
+            return
 
     # EarthAccess token
     ea_token = os.environ.get('EARTHDATA_TOKEN')
@@ -34,6 +32,7 @@ async def download(timestamp: str = None, product: str = None, tile:str=None, ds
         raise ValueError("CRITICAL: EARTHDATA_TOKEN environment variable is not set or is empty!")
 
     headers = {"Authorization": f"Bearer {ea_token}"}
+
     return await download_remote_files(
         file_urls=urls,dst_folder=dst_dir, progress=progress, headers=headers
     )

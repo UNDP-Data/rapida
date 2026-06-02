@@ -11,6 +11,7 @@ from rich.progress import Progress
 from rapida.ntl.nasa.util import get_intersecting_tiles
 import httpx
 from typing import Optional
+from rapida.util.http_get_json import http_get_json
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +43,7 @@ def calculate_night_hours(midlat: float, day_of_year: int) -> int:
     return int(round(night_hrs))
 
 
-def url2result(url:str=None, store=True):
+def url2result(url:str, store=True):
 
     _, file_name = os.path.split(url)
     match = const.NTL_FILENAME_PATTERN.match(file_name)
@@ -58,7 +59,8 @@ def url2result(url:str=None, store=True):
 
 
 
-def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime, bbox:tuple[float], route:str=None):
+def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime, bbox:tuple[float, float, float, float],
+                        route:str=None, products:list[str] =None):
     """
     Calculate VIIRS satellites local overpass time in UTC TZ
     :param stream:
@@ -85,13 +87,28 @@ def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime
 
         dt = local_overpass_utc
     elif 'A3' in plevel:
-        day = 15 if route == 'STAC' else 1
-        # A3 Monthly composites target mid-month. If current month, step back one month.
-        if now.month == nominal_date.month and now.year == nominal_date.year:
-            prev_month = nominal_date.replace(day=1) - timedelta(days=1)
-            dt = prev_month.replace(day=day)
+
+        if route == 'STAC':
+            day=15
+            # A3 Monthly composites target mid-month. If current month, step back one month.
+            if now.month == nominal_date.month and now.year == nominal_date.year:
+                dt = nominal_date.replace(month=now.month-1, day=day)
+            else:
+                dt = nominal_date.replace(day=day)
         else:
-            dt = nominal_date.replace(day=day)
+            months_back = 3
+            day = 1
+            for m in range(1, months_back+1):
+                exists = True
+                for product in products:
+                    dt = nominal_date.replace(month=now.month - m, day=day)
+                    content_url = f'{const.API_CONTENT[stream]}/{product}/{dt.strftime("%Y/%j")}'
+                    try:
+                        content = http_get_json(url=content_url, timeout=10)
+                        exists &= content is not None
+                    except httpx.HTTPStatusError:
+                        exists = False
+                if exists:break
     elif 'A4' in plevel:
         if now.year > nominal_date.year:
             raise ValueError(f'Can not search in future! Please adjust target date')
@@ -105,16 +122,20 @@ def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime
     return dt
 
 
-def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float], push_to_cache:bool=True)-> list[str]:
+def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float, float, float, float], push_to_cache:bool=True)-> list[str]:
     tiles = get_intersecting_tiles(bbox=bbox)
     urls = []
+    logger.info(
+        f'Searching for imagery in products "{products}')
     for product in products:
-
         content_url = f'{const.API_CONTENT[stream]}/{product}/{dt.strftime("%Y/%j")}'
         with httpx.Client() as client:
             # Fetch the JSON directory listing
             response = client.get(content_url, timeout=10.0)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                continue
             # MODAPS returns a flat JSON array of file objects
             payload = response.json()['content']
             for item in payload:
@@ -129,7 +150,7 @@ def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float], push_to
     return urls
 
 def stac_search(stream:str=None, processing_level:Optional[str]=None, products:list[str]=None, dt:datetime=None,
-                bbox:tuple[float]=None, push_to_cache:bool=True):
+                bbox:tuple[float, float, float, float]=None, push_to_cache:bool=True):
 
     catalog_name = const.STREAM2CATALOG[stream]
     catalog_collections = const.COLLECTIONS[catalog_name]
@@ -197,26 +218,27 @@ def search(
     assert processing_level.upper() in stream_processing_levels, (
         f'Invalid processing level {processing_level} for {stream_name}. \''
         f'Valid processing levels {stream_processing_levels}')
-
-    dt = calculate_local_utc(stream=stream,processing_level=processing_level,
-                             nominal_date=nominal_date, bbox=bbox, route=route)
     products = stream_products[processing_level]
+    dt = calculate_local_utc(stream=stream,processing_level=processing_level,
+                             nominal_date=nominal_date, bbox=bbox, route=route, products=products)
+
     cached_results = []
     expected_products_count = len(products)
     found_products_count = 0
-
+    keys = []
     for product in products:
         timestamp = dt.strftime(timestamp_format(product_id=product))
         key = f'{product}_{timestamp}'
         urls = cache.fetch(key=key)
         if urls:
             found_products_count += 1
+            keys.append(key)
             for url in urls:
                 cached_results.append(url2result(url=url, store=False))
 
     # Only short-circuit if the cache successfully returned data for EVERY product requested
     if found_products_count == expected_products_count:
-        logger.info("Full cache hit. Bypassing network search.")
+        logger.info(f"Full cache hit for {keys}. Bypassing network search.")
         return cached_results
     # --- 2. Catalog Search ---
     if progress:
@@ -230,6 +252,7 @@ def search(
             products=products,
             dt=dt,
             bbox=bbox,
+            push_to_cache=push_to_cache
         )
     else:
         urls = stac_search(
@@ -237,10 +260,11 @@ def search(
             processing_level=processing_level,
             dt=dt,
             bbox=bbox,
+            push_to_cache=push_to_cache
         )
 
     if not urls:
-        logger.info(f"No imagery found for {processing_level} on {nominal_date.date()}")
+        logger.info(f"No imagery found for stream {stream} route {route} level {processing_level} on {nominal_date.date()}")
         return
     else:
         if progress and 'progress_task' in locals():

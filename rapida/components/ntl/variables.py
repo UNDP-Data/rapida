@@ -15,14 +15,14 @@ def generate_variables():
     attribution = "NASA Black Marble data courtesy of the NASA Goddard Space Flight Center’s Terrestrial Information Systems Laboratory and the Earth from Space Institute (EfSI)."
 
     variables = OrderedDict()
-    variables['noaa_nrt_outage'] = dict(title='Outage detected through NOAA real time data',
+    variables['noaa_oper_outage'] = dict(title='Outage detected through NOAA real time data',
                                    source=f"NOAA",
                                    operator='sum',
                                    percentage=True,
                                    license=license,
                                    attribution="Data sourced from the NOAA Open Data Dissemination (NODD) Program, utilizing the Joint Polar Satellite System (JPSS) VIIRS Sensor Data Records hosted on [AWS Open Data / Google Cloud Public Datasets].",
                                    )
-    variables['nasa_oper_outage'] = dict(title='Outage detected through NASA Black Marble operational (LANCEMODIS) data',
+    variables['nasa_nrt_outage'] = dict(title='Outage detected through NASA Black Marble operational (LANCEMODIS) data',
                                     source=f"NASA",
                                     operator='sum',
                                     percentage=True,

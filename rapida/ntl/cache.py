@@ -67,9 +67,10 @@ if __name__ == '__main__':
     key = 'VJ146A3_202604'
     r = fetch(key=key, tile='h21v04')
     print(r)
+    r = fetch(key=key)
+    print(r)
     ky = '32445566'
-    # with shelve.open(CACHE_PATH) as cache:
-    #     del cache[ky]
+
     store(key=ky, value='a')
     r = fetch(key=ky)
     print(r)

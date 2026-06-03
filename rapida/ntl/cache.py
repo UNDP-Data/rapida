@@ -34,7 +34,12 @@ def store(key:str=None, value:str=None, tile:str=None, cache_path=CACHE_PATH):
                 if not tile in tiles:
                     record[0].update({tile:value})
             else:
-                record[0] = value
+                if tile:
+                    if not tile in tiles:
+                        tiles.update({tile: value})
+                        record = tiles, creation_time
+                else:
+                    record = value, creation_time
         cache[key] = record
 
 
@@ -64,5 +69,14 @@ def fetch(key:str=None, tile:str=None, cache_path=CACHE_PATH):
 
 if __name__ == '__main__':
     key = 'VJ146A3_202604'
-    r = fetch(key=key)
+    r = fetch(key=key, tile='h21v04')
+    print(r)
+    ky = '32445566'
+    # with shelve.open(CACHE_PATH) as cache:
+    #     del cache[ky]
+    store(key=ky, value='a')
+    r = fetch(key=ky)
+    print(r)
+    store(key=ky, value='b')
+    r = fetch(key=ky)
     print(r)

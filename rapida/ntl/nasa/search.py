@@ -221,23 +221,27 @@ def search(
     products = stream_products[processing_level]
     dt = calculate_local_utc(stream=stream,processing_level=processing_level,
                              nominal_date=nominal_date, bbox=bbox, route=route, products=products)
-    print(dt)
+    expected_tiles = get_intersecting_tiles(bbox=bbox)
+    expected_tiles_count = len(expected_tiles)
     cached_results = []
     expected_products_count = len(products)
     found_products_count = 0
+    found_tiles_count = 0
     keys = []
     for product in products:
         timestamp = dt.strftime(timestamp_format(product_id=product))
         key = f'{product}_{timestamp}'
-        urls = cache.fetch(key=key)
-        if urls:
-            found_products_count += 1
-            keys.append(key)
-            for url in urls:
+        for tile in expected_tiles:
+            url = cache.fetch(key=key, tile=tile)
+            print(url)
+            if url:
                 cached_results.append(url2result(url=url, store=False))
+                found_tiles_count += 1
+        found_products_count += 1
+        keys.append(key)
 
-    # Only short-circuit if the cache successfully returned data for EVERY product requested
-    if found_products_count == expected_products_count:
+    # Only short-circuit if the cache successfully returned expected number of tiles for EVERY product requested
+    if found_products_count == expected_products_count and found_tiles_count >= expected_tiles_count*expected_products_count:
         logger.info(f"Full cache hit for {keys}. Bypassing network search.")
         return cached_results
     # --- 2. Catalog Search ---

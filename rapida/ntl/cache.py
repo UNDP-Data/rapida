@@ -48,16 +48,21 @@ def fetch(key:str=None, tile:str=None, cache_path=CACHE_PATH):
             return
         # 1. Directly unpack the tuple
         tiles, creation_time = record
-
         # 2. Check for expiration
         if time.time() - creation_time > MAX_AGE_SECONDS:
             del cache[key]
             return  # Expired
         # 3. Handle the tile request
-        if tile and tile in tiles:
-            return tiles[tile],
-        if isinstance(tiles, dict):
-            return tuple(tiles.values())
+        if tile:
+            if tile in tiles:
+                return tiles[tile]
+            return
         else:
             return tiles
 
+
+
+if __name__ == '__main__':
+    key = 'VJ146A3_202604'
+    r = fetch(key=key)
+    print(r)

@@ -32,14 +32,10 @@ def store(key:str=None, value:str=None, tile:str=None, cache_path=CACHE_PATH):
             tiles, creation_time = record
             if tile:
                 if not tile in tiles:
-                    record[0].update({tile:value})
+                    tiles.update({tile: value})
+                record = tiles, creation_time
             else:
-                if tile:
-                    if not tile in tiles:
-                        tiles.update({tile: value})
-                        record = tiles, creation_time
-                else:
-                    record = value, creation_time
+                record = value, creation_time
         cache[key] = record
 
 

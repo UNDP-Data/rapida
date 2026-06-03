@@ -1,4 +1,4 @@
-
+from shapely.geometry import box
 from datetime import datetime
 import numbers
 import logging
@@ -8,8 +8,9 @@ from rapida.ntl.nasa.util import get_intersecting_tiles
 from rapida.ntl.nasa.search import search
 from rapida.ntl.nasa import const as nasaconst
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
+from rapida.ntl.noaa.cmask import select_required_granules
 
-DELIVERABLES = tuple([g.upper() for g in generate_variables() if not 'nrt' in g])
+DELIVERABLES = tuple([g.upper() for g in generate_variables()])
 
 logger = logging.getLogger('rapida')
 
@@ -33,6 +34,9 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, del
             satellites=None, nominal_date=nominal_date, bbox=bbox,
             cmask=True, progress=progress)
 
+        required_granules = select_required_granules(sorted_granules=granules, bbox=bbox)
+
+        return [g.url for g in required_granules]
     expected_tiles = get_intersecting_tiles(bbox=bbox)
     routes = nasaconst.ROUTES
     stream = nasaconst.ARCHIVE
@@ -85,13 +89,6 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, del
 
     return urls
 
-    # for product, file_urls in all_urls.items():
-    #
-    #
-    #
-    #
-    #     return await download_and_extract(urls=urls, stream=stream, route=route, processing_level=processing_level, expected_tiles=expected_tiles,
-    #                                           bbox=bbox, vsimem=vsimem, deliverable=deliverable, dst_dir=dst_dir, progress=progress)
 
 
 

@@ -81,7 +81,7 @@ def search():
               type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
               )
-@click.option("--date", "target_date",
+@click.option("--date", "nominal_date",
               type=click.DateTime(formats=["%Y-%m-%d"]),
               required=True,
               help=''
@@ -282,7 +282,7 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
 
 @click.option("--timestamp", "-t", "timestamp", type=str, required=True, help='Granule timestamp string as date and time. Ex: 202604152232 ')
 @click.option("-p",
-                "--products"
+                "--products",
                 "products",
                 type=click.Choice(OPER_PRODUCT_NAMES, case_sensitive=False),
                 default=OPER_PRODUCT_NAMES,

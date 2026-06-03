@@ -13,6 +13,8 @@ from rich.progress import Progress
 from osgeo import gdal
 from shapely.ops import transform
 from rapida.ntl import cache
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
 gdal.UseExceptions()
 
 
@@ -23,15 +25,161 @@ def shift_to_360(lon, lat, z=None):
     shifted_lon = lon + 360.0 if lon < 0 else lon
     return (shifted_lon, lat) if z is None else (shifted_lon, lat, z)
 
-def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
-    fs = fsspec.filesystem("http")
+def bounds_from_url(hdf_url: str):
+
     purl = urllib.parse.urlparse(hdf_url)
     _, filename = os.path.split(purl.path)
-
-    with fs.open(hdf_url, block_size=1024 * 1024) as f:
+    storage_options = {}
+    if hdf_url.startswith(('http', 'https')):
+        storage_options.update({'block_size': 1024 * 1024})
+    with fsspec.open(hdf_url, **storage_options) as f:
         with h5py.File(f, "r") as hfile:
             # Now it reads at HTTP speeds without the boto3 overhead
-            bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
+            return bounds_from_file(hfile=hfile)
+
+
+def bounds_from_file(hfile:h5py.File) -> Polygon:
+
+    lat = hfile['Latitude']
+    lon = hfile['Longitude']
+
+    # 1. Fetch the full perimeter arrays into memory.
+    # Thanks to fsspec's 1MB block cache, this resolves in just 1 or 2 HTTP requests.
+    top_lat = lat[0, :]
+    top_lon = lon[0, :]
+
+    bot_lat = lat[-1, :]
+    bot_lon = lon[-1, :]
+
+    left_lat = lat[:, 0]
+    left_lon = lon[:, 0]
+
+    right_lat = lat[:, -1]
+    right_lon = lon[:, -1]
+
+    step = 330
+
+    def sample_edge(arr):
+        """Samples the array at the given step, strictly ensuring the exact final corner is included."""
+        indices = list(range(0, len(arr), step))
+        if indices[-1] != len(arr) - 1:
+            indices.append(len(arr) - 1)
+        return arr[indices]
+
+    # 2. Top edge (Left to Right)
+    t_lon = list(sample_edge(top_lon))
+    t_lat = list(sample_edge(top_lat))
+
+    # 3. Right edge (Top to Bottom)
+    r_lon = list(sample_edge(right_lon))
+    r_lat = list(sample_edge(right_lat))
+
+    # 4. Bottom edge (Right to Left) -> Needs Reversing to maintain the continuous ring
+    b_lon = list(sample_edge(bot_lon))[::-1]
+    b_lat = list(sample_edge(bot_lat))[::-1]
+
+    # 5. Left edge (Bottom to Top) -> Needs Reversing
+    l_lon = list(sample_edge(left_lon))[::-1]
+    l_lat = list(sample_edge(left_lat))[::-1]
+
+    # 6. Combine all edges into a single continuous boundary ring
+    ring_lons = t_lon + r_lon + b_lon + l_lon
+    ring_lats = t_lat + r_lat + b_lat + l_lat
+
+    # 7. Create the dense, curved polygon
+    poly = Polygon(zip(ring_lons, ring_lats))
+
+    # Optional but recommended: run a 0-distance buffer to instantly fix any
+    # micro-intersections or invalid topologies that occur precisely at the corner joints
+    return poly.buffer(0)
+import math
+from itertools import combinations
+def select_required_granules(sorted_granules: list, bbox: tuple) -> list:
+    boxpoly = box(*bbox, ccw=True)
+
+    for combo_size in range(2, len(sorted_granules) + 1):
+
+        for combo in combinations(sorted_granules, combo_size):
+            # Merge the geometries for this specific combination
+            merged_poly = unary_union([bounds_from_url(g.url) for g in combo])
+
+            # 3. FLOATING-POINT SAFE COVERAGE CHECK
+            # We use difference() because .within() can fail on microscopic 1e-15 gap artifacts
+            uncovered = boxpoly.difference(merged_poly)
+
+            if uncovered.is_empty or uncovered.area < 1e-6:
+                logger.info(f"Success: BBOX covered perfectly by {combo_size} granule(s).")
+                return combo  # Exits immediately with the absolute minimum required set
+
+    logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
+    return tuple()
+
+
+
+    # for granule in sorted_granules:
+    #     bounds = bounds_from_url(granule.url)
+    #     intersection = bbox.intersection(bounds)
+    #     if intersection.area > 1e-6:
+    #         selected.append(granule)
+    #         coverage = intersection.area / bbox.area * 100
+    #         if math.isclose(coverage, b=100, abs_tol=1e-2):
+    #             return selected
+
+
+def select_required_granules_old(sorted_granules: list, bbox: tuple) -> list:
+    """
+    Selects the minimum number of high-scoring granules required to fully cover the BBOX.
+    Assumes `sorted_granules` is already sorted by Score (descending).
+    """
+    target_poly = box(*bbox, ccw=True)
+    uncovered_area = target_poly
+    selected_granules = []
+
+    for granule in sorted_granules:
+        # 1. Fetch the working_bounds for this granule
+
+        working_bounds = bounds_from_url(granule.url)
+
+        if not working_bounds:
+            continue
+
+        # 2. Check if this granule covers any REMAINING uncovered area
+        if working_bounds.intersects(uncovered_area):
+            intersection = working_bounds.intersection(uncovered_area)
+
+            # Use a tiny area threshold to ignore topological slivers/floating point artifacts
+            if intersection.area > 1e-6:
+                selected_granules.append(granule)
+                _, filename = os.path.split(granule.url)
+                logger.info(f"Selected {granule.sat} at {granule.timestamp} - Added coverage.")
+                with open(os.path.join('/tmp/noaa/', filename.replace('.nc', '.geojson')), "w") as f:
+                    f.write(to_geojson(working_bounds))
+                # 3. Punch a hole in the target area
+                uncovered_area = uncovered_area.difference(working_bounds)
+
+                # 4. Check if we achieved 100% coverage
+                if uncovered_area.is_empty or uncovered_area.area < 1e-6:
+                    logger.info("BBOX fully covered.")
+                    break
+
+    if not uncovered_area.is_empty and uncovered_area.area > 1e-6:
+        logger.warning(f"Exhausted all granules. BBOX still has uncovered regions.")
+
+    return selected_granules
+
+
+def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
+    #fs = fsspec.filesystem("http")
+    purl = urllib.parse.urlparse(hdf_url)
+    dst_dir, filename = os.path.split(purl.path)
+    storage_options = {}
+    if hdf_url.startswith(('http', 'https')):
+        storage_options.update({'block_size':1024*1024})
+    with fsspec.open(hdf_url, **storage_options) as f:
+        with h5py.File(f, "r") as hfile:
+            # Now it reads at HTTP speeds without the boto3 overhead
+            #bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
+            bounds_poly = bounds_from_file(hfile)
             bbox_poly = box(*bbox, ccw=True)
             # 2. The Kiribati Ghost Detection
             minx, miny, maxx, maxy = bounds_poly.bounds
@@ -50,10 +198,9 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
                 return False
             intersection_poly = working_bbox.intersection(working_bounds)
             perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
-            # with open("/tmp/bbox.geojson", "w") as ff:
+            # with open(os.path.join(dst_dir, 'bbox.geojson'), "w") as ff:
             #     ff.write(to_geojson(bbox_poly))
-            # n = filename.split('_')[3]
-            # with open(f"/tmp/granule_{n}.geojson", "w") as f:
+            # with open(os.path.join(dst_dir, filename.replace('.nc', '.geojson')), "w") as f:
             #     f.write(to_geojson(bounds_poly))
             return True, perc_intersection
 
@@ -161,7 +308,10 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
 
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
-
+    # 1. Initialize GDAL environment INSIDE the worker process
+    gdal.UseExceptions()
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
+    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '60')  # Prevents hanging vsicurl requests
 
     _, file_name = os.path.split(hdf_url)
     cc = cache.fetch(key=file_name)
@@ -202,7 +352,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
     if progress:
         master_task = progress.add_task(
             description=f"[cyan]Computing cloud coverage .... ",
-            total=None
+            total=len(urls)
         )
     then = datetime.datetime.now()
 
@@ -231,3 +381,6 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
 
 
     return results
+
+url = '/tmp/noaa/JRR-CloudMask_v3r2_n21_s202605262338220_e202605262339467_c202605270028035.nc'
+bbox_in_hdf(hdf_url=url, bbox=(34.4,47,38.5,51))

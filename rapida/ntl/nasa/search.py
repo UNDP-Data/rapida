@@ -233,7 +233,6 @@ def search(
         key = f'{product}_{timestamp}'
         for tile in expected_tiles:
             url = cache.fetch(key=key, tile=tile)
-            print(url)
             if url:
                 cached_results.append(url2result(url=url, store=False))
                 found_tiles_count += 1

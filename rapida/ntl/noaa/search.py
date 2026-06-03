@@ -79,7 +79,7 @@ class Granule:
         return hash(str(self))
 
     def __str__(self):
-        ddict = dict(satellite=self.sat, timestamp=self.timestamp,offset_km=self.offset,elevation=self.elevation, cloud_coverage=self.cloud_cover, rank=self.rank)
+        ddict = dict(satellite=self.sat, timestamp=self.timestamp,offset_km=self.offset,elevation=self.elevation, cloud_coverage=self.cloud_cover, rank=self.rank, bbox_perc_intersection=self.pint)
         return json.dumps(ddict, separators=(',', ':'),)
     def __repr__(self):
         return f'{self.sat} granule {self.id}  with sat rank {self.sat_rank:0d} and offset {self.offset} km from SSP featuring elevation of {self.elevation:.0f} degrees '
@@ -622,7 +622,7 @@ async def async_search_granules(
             if isinstance(cloud_cover, Exception):
                 continue
             g.cloud_cover = cloud_cover
-            g.url = os.path.split(cm_url)[-1]
+            g.url = cm_url
             selected_granules.append(g)
         selected_granules.sort(key=lambda g: g.rank, reverse=True)
 

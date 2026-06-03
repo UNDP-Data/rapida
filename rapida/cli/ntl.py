@@ -11,11 +11,10 @@ from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, 
 from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
-from rapida.ntl.nasa.io import download as download_from_nasa, bulk_download
+from rapida.ntl.nasa.io import download as download_from_nasa, bulk_download as bdownload
 from rapida.ntl.noaa.const import SOURCE_NAMES, PRODUCT_NAMES as OPER_PRODUCT_NAMES
 from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
-from rapida.ntl.nasa.io import bulk_download as bdownload
 from rapida.ntl.fetch import DELIVERABLES, fetch as fetch_ntl
 from rapida.ntl.nasa.outage import detect_outage
 
@@ -419,19 +418,6 @@ async def bulk_download(ctx, bbox:tuple[numbers.Number]=None, start_date:datetim
               help='The human experience of a specific night, local time zone matched to the center of bbox'
               )
 
-@click.option(
-    "--dst-dir",
-    "dst_dir",     # Function argument name
-    type=click.Path(
-        exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
-        file_okay=False,   # Strictly enforce that this is a directory, not a file
-        dir_okay=True,
-        resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
-    ),
-    default=tempfile.gettempdir(),           # Defaults to the current working directory
-    show_default=True,     # Tells the user what the default is in the --help menu
-    help="Destination directory to save the downloaded the images."
-)
 
 @click.option("-d","deliverable",
                 type=click.Choice(DELIVERABLES, case_sensitive=False),
@@ -441,10 +427,10 @@ async def bulk_download(ctx, bbox:tuple[numbers.Number]=None, start_date:datetim
 
 
 @click.pass_context
-async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None, dst_dir:str=None):
+async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None):
 
     progress = ctx.obj.get('progress')
-    return await fetch_ntl(bbox=bbox,nominal_date=nominal_date, progress=progress, deliverable=deliverable, dst_dir=dst_dir)
+    return await fetch_ntl(bbox=bbox,nominal_date=nominal_date, deliverable=deliverable, progress=progress, )
 
 
 @ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')

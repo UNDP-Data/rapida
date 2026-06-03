@@ -15,7 +15,7 @@ def generate_variables():
     attribution = "NASA Black Marble data courtesy of the NASA Goddard Space Flight Center’s Terrestrial Information Systems Laboratory and the Earth from Space Institute (EfSI)."
 
     variables = OrderedDict()
-    variables['noaa_oper_outage'] = dict(title='Outage detected through NOAA real time data',
+    variables['noaa_outage'] = dict(title='Outage detected through NOAA real time data',
                                    source=f"NOAA",
                                    operator='sum',
                                    percentage=True,
@@ -30,7 +30,7 @@ def generate_variables():
                                     attribution=attribution,
                                     )
 
-    variables['nasa_arch_outage'] = dict(title='Outage detected through NASA Black Marble archived (LAADS) data',
+    variables['nasa_outage'] = dict(title='Outage detected through NASA Black Marble archived (LAADS) data',
                                          source=f"NASA",
                                          operator='sum',
                                          percentage=True,

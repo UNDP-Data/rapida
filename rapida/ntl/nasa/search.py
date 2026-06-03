@@ -221,7 +221,7 @@ def search(
     products = stream_products[processing_level]
     dt = calculate_local_utc(stream=stream,processing_level=processing_level,
                              nominal_date=nominal_date, bbox=bbox, route=route, products=products)
-
+    print(dt)
     cached_results = []
     expected_products_count = len(products)
     found_products_count = 0

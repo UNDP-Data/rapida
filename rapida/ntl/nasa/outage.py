@@ -4,12 +4,13 @@ import numbers
 import logging
 from rich.progress import Progress
 from rapida.ntl.fetch import fetch
+
 from scipy.ndimage import uniform_filter
 import numpy as np
-
+import asyncio
 import rasterio
 from scipy.ndimage import label
-
+from pathlib import Path
 from rapida.ntl import vis
 
 
@@ -77,13 +78,42 @@ async def detect_outage(bbox:tuple[numbers.Number]=None, nominal_date:datetime=N
                 dst_dir:str=None, progress:Progress=None):
 
     logger.info(f'Fetching best imagery for {bbox} {nominal_date}')
-    data_urls = await fetch(bbox=bbox, nominal_date=nominal_date, progress=progress, deliverable=deliverable)
 
-    logger.info(f'Fetching baseline imagery for {bbox} {nominal_date}')
-    baseline_urls = await fetch(bbox=bbox, nominal_date=nominal_date, progress=progress, deliverable='baseline')
+    if 'noaa' in deliverable:
+        pass
+    else:
+        # fetch from NASA tries to return A1 and A2 products
+        image_urls = await fetch(bbox=bbox, nominal_date=nominal_date, progress=progress, deliverable=deliverable)
 
-    print(data_urls)
-    print(baseline_urls)
+        downloaded_files = []
+        tasks = []
+        progress_task = None
+
+
+
+        #
+        # for task in asyncio.as_completed(tasks, timeout=20 * len(tasks)):
+        #     try:
+        #         downloaded_files = await task
+        #         print(downloaded_files)
+        #         if progress and progress_task is not None:
+        #             progress.update(progress_task, description=f'[green]🡇 {downloaded_file.name}', advance=1)
+        #         downloaded_files.append(str(downloaded_file))
+        #     except Exception as e:
+        #         logger.error(e)
+        #
+        #     except asyncio.CancelledError as ce:
+        #         for atask in tasks:
+        #             if not atask.done():
+        #                 atask.cancel()
+        #         await asyncio.gather(*tasks, return_exceptions=True)
+        #         raise
+
+    #logger.info(f'Fetching baseline imagery for {bbox} {nominal_date}')
+    #baseline_urls = await fetch(bbox=bbox, nominal_date=nominal_date, progress=progress, deliverable='baseline')
+
+
+
 
     # data = {}
     # with rasterio.open(target_data) as target, rasterio.open(baseline_data) as base:

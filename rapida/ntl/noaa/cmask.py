@@ -15,6 +15,7 @@ from shapely.ops import transform
 from rapida.ntl import cache
 from shapely.geometry import Polygon
 from shapely.ops import unary_union
+from itertools import combinations
 gdal.UseExceptions()
 
 
@@ -92,81 +93,39 @@ def bounds_from_file(hfile:h5py.File) -> Polygon:
     # Optional but recommended: run a 0-distance buffer to instantly fix any
     # micro-intersections or invalid topologies that occur precisely at the corner joints
     return poly.buffer(0)
-import math
-from itertools import combinations
-def select_required_granules(sorted_granules: list, bbox: tuple) -> list:
+
+def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progress=None) -> list:
     boxpoly = box(*bbox, ccw=True)
+    best_poly = bounds_from_url(sorted_granules[0].url)
+    uncovered = boxpoly.difference(best_poly)
+    if uncovered.is_empty or uncovered.area < 1e-6:
+        logger.debug(f"BBOX {bbox} is covered  by first granule.")
+        return [sorted_granules[0]]
+    progress_task = None
+    try:
+        if progress:
+            progress_task = progress.add_task(description=f'Selecting best granules tha cover {bbox}', total=None)
+        for combo_size in range(2, len(sorted_granules) + 1):
+            if progress and progress_task:
+                progress.update(progress_task, description=f'Evaluating granules by pairs of {combo_size} ')
+            for combo in combinations(sorted_granules, combo_size):
 
-    for combo_size in range(2, len(sorted_granules) + 1):
+                # Merge the geometries for this specific combination
+                merged_poly = unary_union([bounds_from_url(g.url) for g in combo])
 
-        for combo in combinations(sorted_granules, combo_size):
-            # Merge the geometries for this specific combination
-            merged_poly = unary_union([bounds_from_url(g.url) for g in combo])
+                # 3. FLOATING-POINT SAFE COVERAGE CHECK
+                # We use difference() because .within() can fail on microscopic 1e-15 gap artifacts
+                uncovered = boxpoly.difference(merged_poly)
 
-            # 3. FLOATING-POINT SAFE COVERAGE CHECK
-            # We use difference() because .within() can fail on microscopic 1e-15 gap artifacts
-            uncovered = boxpoly.difference(merged_poly)
+                if uncovered.is_empty or uncovered.area < 1e-6:
+                    logger.debug(f"Success: BBOX covered perfectly by {combo_size} granule(s).")
+                    return combo  # Exits immediately with the absolute minimum required set
 
-            if uncovered.is_empty or uncovered.area < 1e-6:
-                logger.info(f"Success: BBOX covered perfectly by {combo_size} granule(s).")
-                return combo  # Exits immediately with the absolute minimum required set
-
-    logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
-    return tuple()
-
-
-
-    # for granule in sorted_granules:
-    #     bounds = bounds_from_url(granule.url)
-    #     intersection = bbox.intersection(bounds)
-    #     if intersection.area > 1e-6:
-    #         selected.append(granule)
-    #         coverage = intersection.area / bbox.area * 100
-    #         if math.isclose(coverage, b=100, abs_tol=1e-2):
-    #             return selected
-
-
-def select_required_granules_old(sorted_granules: list, bbox: tuple) -> list:
-    """
-    Selects the minimum number of high-scoring granules required to fully cover the BBOX.
-    Assumes `sorted_granules` is already sorted by Score (descending).
-    """
-    target_poly = box(*bbox, ccw=True)
-    uncovered_area = target_poly
-    selected_granules = []
-
-    for granule in sorted_granules:
-        # 1. Fetch the working_bounds for this granule
-
-        working_bounds = bounds_from_url(granule.url)
-
-        if not working_bounds:
-            continue
-
-        # 2. Check if this granule covers any REMAINING uncovered area
-        if working_bounds.intersects(uncovered_area):
-            intersection = working_bounds.intersection(uncovered_area)
-
-            # Use a tiny area threshold to ignore topological slivers/floating point artifacts
-            if intersection.area > 1e-6:
-                selected_granules.append(granule)
-                _, filename = os.path.split(granule.url)
-                logger.info(f"Selected {granule.sat} at {granule.timestamp} - Added coverage.")
-                with open(os.path.join('/tmp/noaa/', filename.replace('.nc', '.geojson')), "w") as f:
-                    f.write(to_geojson(working_bounds))
-                # 3. Punch a hole in the target area
-                uncovered_area = uncovered_area.difference(working_bounds)
-
-                # 4. Check if we achieved 100% coverage
-                if uncovered_area.is_empty or uncovered_area.area < 1e-6:
-                    logger.info("BBOX fully covered.")
-                    break
-
-    if not uncovered_area.is_empty and uncovered_area.area > 1e-6:
-        logger.warning(f"Exhausted all granules. BBOX still has uncovered regions.")
-
-    return selected_granules
-
+        logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
+        return tuple()
+    finally:
+        if progress and progress_task:
+            progress.remove_task(progress_task)
 
 def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
     #fs = fsspec.filesystem("http")
@@ -311,7 +270,7 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     # 1. Initialize GDAL environment INSIDE the worker process
     gdal.UseExceptions()
     gdal.PushErrorHandler('CPLQuietErrorHandler')
-    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '60')  # Prevents hanging vsicurl requests
+    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '300')  # Prevents hanging vsicurl requests
 
     _, file_name = os.path.split(hdf_url)
     cc = cache.fetch(key=file_name)
@@ -382,5 +341,3 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
 
     return results
 
-url = '/tmp/noaa/JRR-CloudMask_v3r2_n21_s202605262338220_e202605262339467_c202605270028035.nc'
-bbox_in_hdf(hdf_url=url, bbox=(34.4,47,38.5,51))

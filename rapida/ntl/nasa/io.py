@@ -155,6 +155,45 @@ def h52vrt(
         tile_vrts += [vrt_path]
     return tile_vrts
 
+async def extract(image_files: list[str] = None, dst_tif_path:str=None,  sds_name:str=None,
+                  bbox: tuple[float, float, float, float] = None,  progress=None,
+                               ):
+    _, tif_name = os.path.split(dst_tif_path)
+
+    vrt_path = f'/vsimem/{tif_name}.vrt'
+    to_unlink = []
+
+    to_unlink += h52vrt(paths=image_files, sds_name=sds_name, is_remote=False, bbox=bbox,vrt_path=vrt_path)
+
+    to_unlink = [e for e in to_unlink if gdal.VSIStatL(e) is not None]
+
+
+
+    translate_options = dict(
+        format="GTiff",
+        creationOptions=[
+            "TILED=YES",  # Optimizes read performance
+            "BIGTIFF=IF_SAFER",
+            "COPY_SRC_MDD=YES"
+        ],
+        outputSRS='EPSG:4326',
+
+    )
+
+    if progress:
+        task = progress.add_task(f'[red]Extracting data using GDAL')
+        callback_dict = dict(
+            callback=gdal_callback,
+            callback_data=(progress, task, None)
+        )
+        translate_options.update(callback_dict)
+
+    # Pass the dataset object directly instead of the string path
+    ds = gdal.Translate(destName=output_tif_path, srcDS=vrt_path, **translate_options)
+    ds = None
+
+    [gdal.Unlink(e) for e in to_unlink]
+    return output_tif_path
 
 async def download_and_extract(file_urls: list[str] = None, stream: str = None, route=None, processing_level=None,
                                product: str = None, bbox: tuple[float, float, float, float] = None, vsimem=False,

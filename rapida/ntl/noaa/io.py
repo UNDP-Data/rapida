@@ -220,7 +220,7 @@ async def fetch_file(satellite:str=None, provider:str=None, path:str=None, size:
             if down_task:progress.remove_task(down_task)
 
 
-async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_dir='/tmp', progress=None):
+async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_dir:str=None, progress=None):
 
     # Download logic (Surgical io to local SSD)
     tasks = []
@@ -250,11 +250,11 @@ async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_di
 
 
 async def download(satellite:str=None, timestamp:str=None, source:str=None,
-        products:Iterable[str]=PRODUCT_NAMES, dest_dir='/tmp', progress=None):
+        products:Iterable[str]=PRODUCT_NAMES, dst_dir:str=None, progress=None):
     dt = datetime.strptime(timestamp, '%Y%m%d%H%M')
     logger.info(f'Locating files for satellite {satellite} timestamp {timestamp} ')
     found_files = await locate_file(satellite=satellite, dt=dt, source=source, products=products)
-    return  await fetch_ntl(found_paths=found_files, dst_dir=dest_dir, satellite=satellite, progress=progress)
+    return  await fetch_ntl(found_paths=found_files, dst_dir=dst_dir, satellite=satellite, progress=progress)
 
 
 def bytesto(bytes, to, bsize=1024):

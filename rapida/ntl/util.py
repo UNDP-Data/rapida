@@ -1,4 +1,10 @@
 import math
+
+import numpy as np
+import rasterio
+from rasterio.transform import Affine
+from rasterio.enums import ColorInterp
+
 def get_intersecting_tiles(bbox: tuple[float, float, float, float]) -> list[tuple[int, int]]:
     """
     Identifies VIIRS Sinusoidal tiles (h, v) intersecting a geographic bounding box.
@@ -35,3 +41,21 @@ def timestamp_format(product_id: str) -> str:
     for identifier, time_format in TIMESTAMP_FORMATS.items():
         if identifier in product_id:
             return time_format
+
+
+def write_outage_tif(src_arrays:dict[str, np.array]=None, gt:list = None, dst_path:str=None ) -> bool:
+    transform = Affine.from_gdal(*gt)
+    label, ar = next(iter(src_arrays.items()))
+    height, width = ar.shape
+    with rasterio.open(dst_path, mode='w',driver='GTiff',height=height,width=width,
+            count=len(src_arrays),
+            dtype='float32',
+            crs='EPSG:4326',
+            transform=transform) as dst:
+        dst.update_tags(INTERLEAVE='PIXEL')
+        dst.colorinterp = [ColorInterp.undefined] * len(src_arrays)
+
+        for i, e in enumerate(src_arrays.items(), start=1):
+            label, array = e
+            dst.write(array.astype('float32'), i)
+            dst.set_band_description(i, label)

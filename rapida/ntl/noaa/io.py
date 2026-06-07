@@ -188,11 +188,11 @@ async def locate_file(satellite:str=None, dt=None, source:str=None, products: It
 
 async def fetch_file(satellite:str=None, provider:str=None, path:str=None, size:int=None, dst_dir:str=None,
                      progress=None, progress_task = None):
+    down_task = None
     try:
         adir = os.path.abspath(dst_dir)
-        if not os.path.exists(adir):
-            os.mkdir(adir)
-        down_task = None
+        os.makedirs(adir, exist_ok=True)
+
         store = VIIRS_STORES[satellite][provider]
         rel_path, file_name = os.path.split(path)
         product = rel_path.split('/')[0]
@@ -216,8 +216,8 @@ async def fetch_file(satellite:str=None, provider:str=None, path:str=None, size:
 
         raise
     finally:
-        if progress:
-            if down_task:progress.remove_task(down_task)
+        if progress and down_task is not None:
+            progress.remove_task(down_task)
 
 
 async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_dir:str=None, progress=None):

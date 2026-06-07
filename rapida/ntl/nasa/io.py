@@ -12,6 +12,7 @@ from rapida.util.download_remote_file import download_remote_files
 import logging
 from urllib.parse import urlparse
 from rapida.ntl.nasa.search import stac_search
+from rapida.ntl.util import get_intersecting_tiles
 from datetime import datetime
 import numbers
 from rapida.ntl.nasa import const as nasaconst
@@ -155,20 +156,48 @@ def h52vrt(
         tile_vrts += [vrt_path]
     return tile_vrts
 
-async def extract(image_files: list[str] = None, dst_tif_path:str=None,  sds_name:str=None,
-                  bbox: tuple[float, float, float, float] = None,  progress=None,
+
+def extract_bb(image_files: list[str] = None, sds_name:str=None, return_gt=False,
+                     bbox: tuple[float, float, float, float] = None,  progress=None
                                ):
-    _, tif_name = os.path.split(dst_tif_path)
+    vrt_path = f'/vsimem/{secrets.token_hex(10)}.vrt'
+    to_unlink = []
+    to_unlink += h52vrt(paths=image_files, sds_name=sds_name, is_remote=False, bbox=bbox,vrt_path=vrt_path)
+    to_unlink = [e for e in to_unlink if gdal.VSIStatL(e) is not None]
+    translate_options = dict(
+        format="MEM",
+        outputSRS='EPSG:4326',
+    )
+
+    if progress:
+        task = progress.add_task(f'[red]Extracting data using GDAL')
+        callback_dict = dict(
+            callback=gdal_callback,
+            callback_data=(progress, task, None)
+        )
+        translate_options.update(callback_dict)
+
+    # Pass the dataset object directly instead of the string path
+    ds = gdal.Translate(destName='', srcDS=vrt_path, **translate_options)
+
+    gt = ds.GetGeoTransform()
+    [gdal.Unlink(e) for e in to_unlink]
+    array = ds.GetRasterBand(1).ReadAsArray()
+    ds = None
+    if return_gt:
+        return array, gt
+    return array
+
+async def extract(image_files: list[str] = None, sds_name:str=None, product:str=None, dst_dir:str=None,
+                  nominal_date:datetime=None, bbox: tuple[float, float, float, float] = None,  progress=None
+                               ):
+    product_tif_path = os.path.join(dst_dir, f'{product}_{nominal_date:%Y%m%d}_{nominal_date.timestamp()}.tif')
+    _, tif_name = os.path.split(product_tif_path)
 
     vrt_path = f'/vsimem/{tif_name}.vrt'
     to_unlink = []
-
     to_unlink += h52vrt(paths=image_files, sds_name=sds_name, is_remote=False, bbox=bbox,vrt_path=vrt_path)
-
     to_unlink = [e for e in to_unlink if gdal.VSIStatL(e) is not None]
-
-
-
     translate_options = dict(
         format="GTiff",
         creationOptions=[
@@ -189,11 +218,11 @@ async def extract(image_files: list[str] = None, dst_tif_path:str=None,  sds_nam
         translate_options.update(callback_dict)
 
     # Pass the dataset object directly instead of the string path
-    ds = gdal.Translate(destName=output_tif_path, srcDS=vrt_path, **translate_options)
+    ds = gdal.Translate(destName=product_tif_path, srcDS=vrt_path, **translate_options)
     ds = None
 
     [gdal.Unlink(e) for e in to_unlink]
-    return output_tif_path
+    return Path(product_tif_path)
 
 async def download_and_extract(file_urls: list[str] = None, stream: str = None, route=None, processing_level=None,
                                product: str = None, bbox: tuple[float, float, float, float] = None, vsimem=False,
@@ -251,12 +280,25 @@ async def download_and_extract(file_urls: list[str] = None, stream: str = None, 
 
 
 
-async def download(timestamp: str = None, product: str = None, tile:str=None, dst_dir:str=None, urls:list[str]=None, progress:Progress=None):
+async def download(timestamp: str = None, product: str = None, tile:str=None,
+                   bbox:tuple[float, float, float, float]=None,dst_dir:str=None, urls:list[str]=[], progress:Progress=None):
+
+    assert timestamp not in [None, ''], f'Invalid timestamp={timestamp}'
+    assert product not in [None, ''], f'Invalid product={product}'
+
 
     if not urls:
+        if tile is None:
+            assert bbox, f'Invalid bbox={bbox}'
+        if tile is None and bbox is not None:
+            tiles = get_intersecting_tiles(bbox=bbox)
+        else:
+            tiles = tile,
         key = f'{product.upper()}_{timestamp}'
-        urls = cache.fetch(key=key, tile=tile)
-        if not urls:
+        for tile in tiles:
+            urls.append(cache.fetch(key=key, tile=tile))
+
+        if not len(urls) == len(tiles):
             logger.info(f'Failed to locate information in {cache.CACHE_PATH} for {product}-{timestamp}-{tile or ""} \n' \
                            f'Consider searching first.')
             return
@@ -270,9 +312,10 @@ async def download(timestamp: str = None, product: str = None, tile:str=None, ds
 
     headers = {"Authorization": f"Bearer {ea_token}"}
 
-    return await download_remote_files(
+    downloaded_files =  await download_remote_files(
         file_urls=urls,dst_folder=dst_dir, progress=progress, headers=headers
     )
+    return {timestamp:downloaded_files}
 
 
 async def download_tile(

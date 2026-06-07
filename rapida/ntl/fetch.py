@@ -4,13 +4,13 @@ import numbers
 import logging
 from rich.progress import Progress
 from rapida.components.ntl.variables import generate_variables
-from rapida.ntl.nasa.util import get_intersecting_tiles
+from rapida.ntl.util import get_intersecting_tiles
 from rapida.ntl.nasa.search import search
 from rapida.ntl.nasa import const as nasaconst
-from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
+from rapida.ntl.noaa.search import async_search_granules
 from rapida.ntl.noaa.cmask import select_required_granules
 from rapida.ntl.nasa.io import download as download_from_nasa
-from rapida.ntl.noaa.io import locate_file, download as download_from_noaa
+from rapida.ntl.noaa.io import download as download_from_noaa
 import asyncio
 DELIVERABLES = tuple([g.upper() for g in generate_variables()])
 
@@ -31,6 +31,7 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
                 deliverable:str=None, dst_dir:str=None, progress:Progress=None):
     """
     Indentify and download the BEST available data suitable to detect outages.
+    :param dst_dir:
     :param bbox:
     :param nominal_date:
     :param progress:
@@ -49,8 +50,6 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
         selected_granules = select_required_granules(sorted_granules=granules, bbox=bbox, progress=progress)
         logger.info(f'Selected {len(selected_granules)}  granule(s) that cover(s) bbox {bbox}')
         tasks = []
-        progress_task = None
-
         for granule in selected_granules:
             # We no longer need a dictionary, just a simple list of tasks
             task = asyncio.create_task(
@@ -59,16 +58,12 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
             tasks.append(task)
 
         downloaded_files = {}
-        if progress:
-            progress_task = progress.add_task(description=f'[red]Downloading VIIRS images...', total=len(tasks))
+
         for coro in asyncio.as_completed(tasks, timeout=100 * 3 * len(tasks)):
             try:
                 # Unpack the tuple we returned from our wrapper
                 timestamp, downloaded_files_dict = await coro
-
                 downloaded_files[timestamp] = downloaded_files_dict
-                if progress and progress_task is not None:
-                    progress.update(progress_task, description=f'[green]🡇 Downloaded images for timestamp {timestamp}', advance=1)
                 logger.info(f'Downloaded operational VIIRS images for timestamp {timestamp}')
             except Exception as e:
                 logger.error(e)
@@ -77,8 +72,6 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
                 for atask in tasks:
                     if not atask.done():
                         atask.cancel()
-                if progress and progress_task is not None:
-                    progress.remove_task(progress_task)
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
 
@@ -128,7 +121,6 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
             logger.info(
                 f'Selected {len(selected_urls)} images for deliverable {deliverable} for processing level {processing_level} route {route}')
 
-
             timestamps = set(selected_urls.values())
             if len(timestamps) > 1:
                 logger.info(
@@ -140,7 +132,9 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
 
             downloaded = await download_from_nasa(timestamp=timestamp, product=selected_product, dst_dir=dst_dir, urls=urls,
                                               progress=progress)
-            logger.info(f'Successfully downloaded {len(downloaded)} selected images ')
+
+
+            logger.info(f'Successfully downloaded {len(downloaded[timestamp])} selected images ')
             # Save the successful URLs
             downloaded_files[selected_product] = downloaded
 

@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Iterable
 import click
 import tempfile
+
+
 from rapida.cli import RapidaCommandGroup
 from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, PRODUCTS, \
     NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
@@ -232,6 +234,12 @@ def download():
               help='A specific tile number conforming to NASA BalckMarble 10x10 degrres tile numbering. Ex: h21v03 '
               )
 
+@click.option('-b', '--bbox',
+              required=False,
+              type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              )
+
 @click.option(
     "--dst-dir",
     "dst_dir",     # Function argument name
@@ -248,10 +256,16 @@ def download():
 
 
 @click.pass_context
-async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=None, dst_dir:str=None):
+async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=None,
+                        bbox:tuple[float, float, float, float]=None,dst_dir:str=None):
     progress = ctx.obj.get('progress')
+    if tile and bbox:
+        raise click.UsageError("Illegal usage: `--tile` and `--bbox` are mutually exclusive.")
 
-    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product, tile=tile, dst_dir=dst_dir,progress=progress)
+    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product,
+                                                tile=tile, bbox=bbox, dst_dir=dst_dir,progress=progress)
+
+
 
     if downloaded_files:
         table = Table(title=f"Downloaded files for {product.upper()} {timestamp} ", title_style="bold yellow")
@@ -260,13 +274,14 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
         table.add_column("Timestamp", style="red", justify='center')
         table.add_column("Tile", style="red", justify='center')
         table.add_column("Size", style="green", justify='center')
-        for local_file_path in downloaded_files:
-            _, file_name = os.path.split(local_file_path)
-            file_size = os.path.getsize(local_file_path)
-            m = NTL_FILENAME_PATTERN.match(file_name)
-            meta = m.groupdict()
-            tile = meta['tile']
-            table.add_row(local_file_path, timestamp, tile, f'{file_size}')
+        for timestamp, files in downloaded_files.items():
+            for local_file_path in files:
+                _, file_name = os.path.split(local_file_path)
+                file_size = os.path.getsize(local_file_path)
+                m = NTL_FILENAME_PATTERN.match(file_name)
+                meta = m.groupdict()
+                tile = meta['tile']
+                table.add_row(local_file_path, timestamp, tile, f'{file_size}')
 
         progress.console.print(table)
 
@@ -483,12 +498,34 @@ async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None
     )
 
 
+
+@click.option(
+    '--cmask', '-cm', "cmask",
+    is_flag=True,
+    help=(
+            "Enable strict Cloud Masking (ignores pixels with NASA quality flags of 3). "
+            "Disable this flag during major storm events to prevent atmospheric noise "
+            "from erroneously masking out legitimate blackout signals."
+    ),
+    default=False
+)
+@click.option(
+    '--display',  "display",
+    is_flag=True,
+    help=(
+            "Show a graphic visualization of the outage analysis."
+            "Useful to inspect the input imagery and debug/understand the outage results "
+    ),
+    default=False
+)
+
 @click.pass_context
-async def detect(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None, dst_dir:str=None):
+async def detect(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None,
+                 cmask:bool=True, dst_dir:str=None, display:bool=False):
     progress = ctx.obj.get('progress')
     return await detect_outage(
         bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
-        progress=progress
+        progress=progress, cmask=cmask, display=display
     )
 
 

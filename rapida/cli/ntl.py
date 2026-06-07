@@ -8,8 +8,7 @@ import tempfile
 
 
 from rapida.cli import RapidaCommandGroup
-from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, PRODUCTS, \
-    NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
+from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
 from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
@@ -18,7 +17,7 @@ from rapida.ntl.noaa.const import SOURCE_NAMES, PRODUCT_NAMES as OPER_PRODUCT_NA
 from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
 from rapida.ntl.fetch import DELIVERABLES, fetch as fetch_ntl
-from rapida.ntl.nasa.outage import detect_outage
+from rapida.ntl.outage import detect_outage
 
 logger = logging.getLogger(__name__)
 

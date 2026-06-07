@@ -5,7 +5,7 @@ from rasterio.transform import Affine
 from rasterio.enums import ColorInterp
 from scipy.ndimage import uniform_filter, gaussian_filter
 import logging
-
+from scipy.ndimage import label
 
 logger = logging.getLogger('rapida')
 
@@ -185,3 +185,21 @@ def write_outage_tif(src_arrays:dict[str, np.array]=None, gt:list = None, dst_pa
             label, array = e
             dst.write(array.astype('float32'), i)
             dst.set_band_description(i, label)
+
+
+
+def spatial_filter(outage_map, min_size=2):
+    # 1. Group connected pixels into "clumps"
+    labeled_array, num_features = label(outage_map)
+
+    # 2. Count how many pixels are in each clump
+    clump_sizes = np.bincount(labeled_array.ravel())
+
+    # 3. Create a mask of clumps that meet your size requirement
+    mask_size = clump_sizes >= min_size
+
+    # 4. Filter the original map (clump 0 is the background, so we ignore it)
+    mask_size[0] = 0
+    return mask_size[labeled_array]
+
+

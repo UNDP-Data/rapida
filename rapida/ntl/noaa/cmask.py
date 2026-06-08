@@ -154,7 +154,7 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
                 working_bbox = bbox_poly
             #if not bbox_poly.within(bounds_poly):
             if not working_bbox.intersects(working_bounds):
-                return False
+                return False, 0
             intersection_poly = working_bbox.intersection(working_bounds)
             perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
             # with open(os.path.join(dst_dir, 'bbox.geojson'), "w") as ff:

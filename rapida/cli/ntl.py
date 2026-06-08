@@ -186,7 +186,7 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetim
     )
 
 @click.pass_context
-def search_nasa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
+def search_nasa(ctx, bbox:tuple[numbers.Number, numbers.Number, numbers.Number, numbers.Number]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
 
     progress = ctx.obj.get('progress')
 
@@ -497,6 +497,12 @@ async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None
     )
 
 
+@click.option('-ot', "--outage-drop-threshold",
+    type=int,
+    default=80,
+    required=False,
+    help="Specify the outage drop threshold that wil determine the spatial structure of an outage event, "
+)
 
 @click.option(
     '--cmask', '-cm', "cmask",
@@ -520,11 +526,11 @@ async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None
 
 @click.pass_context
 async def detect(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None,
-                 cmask:bool=True, dst_dir:str=None, display:bool=False):
+                 cmask:bool=True, dst_dir:str=None, outage_drop_threshold:int=None, display:bool=False):
     progress = ctx.obj.get('progress')
     return await detect_outage(
         bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
-        progress=progress, cmask=cmask, display=display
+        progress=progress, cmask=cmask, outage_drop_threshold=outage_drop_threshold, display=display
     )
 
 

@@ -10,7 +10,9 @@ from rapida.ntl.noaa.cmask import bbox_in_hdf
 from urllib.parse import urlparse
 from rapida.ntl.noaa.const import PRODUCT2NAME
 import aiofiles
-
+from pyresample import geometry
+from satpy import Scene
+import numpy as np
 logger = logging.getLogger(__name__)
 
 
@@ -242,7 +244,6 @@ async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_di
     finally:
 
         results = [t.result() for t in tasks]
-
         return results
 
 
@@ -261,3 +262,131 @@ def bytesto(bytes, to, bsize=1024):
     a = {'k' : 1, 'm': 2, 'g' : 3, 't' : 4, 'p' : 5, 'e' : 6 }
     r = float(bytes)
     return bytes / (bsize ** a[to])
+
+
+
+
+
+def create_area_from_geotransform(gt, array_shape):
+    """
+    Creates a Pyresample AreaDefinition exactly matching a GDAL array.
+
+    Args:
+        gt (tuple): GDAL GeoTransform (TopLeftX, PixelWidth, Rot, TopLeftY, Rot, PixelHeight)
+        array_shape (tuple): (height, width) of the target array
+    """
+    height, width = array_shape
+
+    # Calculate exact bounding box edges based on pixels
+    ll_x = gt[0]
+    ur_y = gt[3]
+    ur_x = gt[0] + (width * gt[1])
+    ll_y = gt[3] + (height * gt[5])  # gt[5] is usually negative
+
+    area_extent = [ll_x, ll_y, ur_x, ur_y]
+
+    # Build the EPSG:4326 definition
+    area_def = geometry.AreaDefinition(
+        area_id='gdal_matched_grid',
+        description='Grid mapped directly from Level-3 Baseline GeoTransform',
+        proj_id='EPSG:4326',
+        projection={'proj': 'longlat', 'datum': 'WGS84'},
+        width=width,
+        height=height,
+        area_extent=area_extent
+    )
+
+    return area_def
+
+
+
+
+
+def read_and_align_sdr(sdr_path, geo_path, target_area):
+    # 1. Calculate a slightly buffered crop box for Satpy
+    lon_min, lat_min, lon_max, lat_max = target_area.area_extent_ll
+    pad = 0.2  # Add a 0.2 degree buffer so EWA has data for edge pixels
+    crop_bbox = (lon_min - pad, lat_min - pad, lon_max + pad, lat_max + pad)
+
+    # 2. Load the scene
+    scn = Scene(filenames=[sdr_path, geo_path], reader='viirs_sdr')
+    scn.load(['DNB'])
+
+    # 3. Crop in memory BEFORE resampling (Massive speed/RAM boost)
+    cropped_scn = scn.crop(ll_bbox=crop_bbox)
+
+    # 4. Resample directly to the baseline's grid footprint
+    resampled_scn = cropped_scn.resample(
+        target_area,
+        resampler='ewa',
+        rows_per_scan=16,
+        fill_value=-999.0  # Explicitly manage fill values
+    )
+
+    dnb_array = resampled_scn['DNB'].values
+    dnb_array = np.where(dnb_array < -900, np.nan, dnb_array)
+
+    return dnb_array * 1e5  # Scale to match Black Marble nW/cm2/sr
+
+
+
+
+def read_and_align_sdr_and_cmask(sdr_path, geo_path, cmask_path, target_area):
+    """
+    Loads, crops, and resamples VIIRS SDR (Radiance) and EDR (Cloud Mask)
+    using the native fill values extracted dynamically from the file metadata.
+    """
+    # 1. Calculate a slightly buffered crop box for Satpy
+    lon_min, lat_min, lon_max, lat_max = target_area.area_extent_ll
+    pad = 0.2
+    crop_bbox = (lon_min - pad, lat_min - pad, lon_max + pad, lat_max + pad)
+
+    # 2. Load the Scenes
+    sdr_scn = Scene(filenames=[sdr_path, geo_path], reader='viirs_sdr')
+    sdr_scn.load(['DNB'])
+
+    cmask_scn = Scene(filenames=[cmask_path], reader='viirs_edr')
+    cmask_scn.load(['CloudMask'])
+
+
+    # ---------------------------------------------------------
+    # 4. DYNAMIC FILL VALUE EXTRACTION
+    # Pull the exact _FillValue from the file attributes.
+    # We provide a safe fallback just in case the attribute is missing.
+    # ---------------------------------------------------------
+    dnb_fill = sdr_scn['DNB'].attrs.get('_FillValue', np.nan)
+
+    # EDR categorical data usually defaults to 255 or -127 for unsigned/signed bytes
+    cmask_fill = cmask_scn['CloudMask'].attrs.get('_FillValue', 255)
+
+    # 5. Resample SDR using the native fill value
+    resampled_sdr = sdr_scn.resample(
+        target_area,
+        resampler='ewa',
+        rows_per_scan=16,
+        fill_value=dnb_fill
+    )
+
+    # 6. Resample Cloud Mask
+    resampled_cmask = cmask_scn.resample(
+        target_area,
+        resampler='nearest',
+        radius_of_influence=1000,
+        fill_value=cmask_fill
+    )
+
+    # 7. Extract raw NumPy arrays and mask
+    dnb_array = resampled_sdr['DNB'].values
+
+    # Safely convert the dynamic fill value to np.nan for math operations
+    if np.isnan(dnb_fill):
+        # Data might already be masked as NaN by Satpy during load
+        dnb_array = np.where(np.isnan(dnb_array), np.nan, dnb_array)
+    else:
+        # Mask the explicit file-defined integer/float fill value
+        dnb_array = np.where(dnb_array == dnb_fill, np.nan, dnb_array)
+
+    dnb_scaled = dnb_array * 1e5  # Scale to match Black Marble nW/cm2/sr
+    cmask_array = resampled_cmask['CloudMask'].values
+
+    return dnb_scaled, cmask_array

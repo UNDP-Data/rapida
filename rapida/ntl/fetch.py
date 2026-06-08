@@ -4,7 +4,7 @@ import numbers
 import logging
 from rich.progress import Progress
 from rapida.components.ntl.variables import generate_variables
-from rapida.ntl.util import get_intersecting_tiles
+from rapida.ntl.utils import get_intersecting_tiles
 from rapida.ntl.nasa.search import search
 from rapida.ntl.nasa import const as nasaconst
 from rapida.ntl.noaa.search import async_search_granules
@@ -18,13 +18,16 @@ logger = logging.getLogger('rapida')
 
 async def download_and_track(granule, dest_dir, prog_bar):
     # Run the actual download
-    result_dict = await download_from_noaa(
+    results = await download_from_noaa(
         satellite=granule.sat,
         timestamp=granule.timestamp,
         dst_dir=dest_dir,
         progress=prog_bar
     )
+    result_dict = {}
     # Return both the timestamp AND the result
+    for e in results:
+        result_dict[e[0]] = e[1]
     return granule.timestamp, result_dict
 
 async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,

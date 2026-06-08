@@ -1,13 +1,13 @@
 import os.path
 from rapida.ntl import cache
 from rapida.ntl.nasa import const
-from rapida.ntl.util import timestamp_format
+from rapida.ntl.utils import timestamp_format
 import math
 from datetime import datetime, timedelta
 import logging
 from pystac_client import Client
 from rich.progress import Progress
-from rapida.ntl.util import get_intersecting_tiles
+from rapida.ntl.utils import get_intersecting_tiles
 import httpx
 from typing import Optional
 from rapida.util.http_get_json import http_get_json

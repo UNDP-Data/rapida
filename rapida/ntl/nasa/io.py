@@ -12,7 +12,7 @@ from rapida.util.download_remote_file import download_remote_files
 import logging
 from urllib.parse import urlparse
 from rapida.ntl.nasa.search import stac_search
-from rapida.ntl.util import get_intersecting_tiles
+from rapida.ntl.utils import get_intersecting_tiles
 from datetime import datetime
 import numbers
 from rapida.ntl.nasa import const as nasaconst

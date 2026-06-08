@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 from matplotlib import gridspec
+from matplotlib.colors import ListedColormap, BoundaryNorm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
 
@@ -110,4 +111,83 @@ def plot(array):
     plt.colorbar(img, label='')
     plt.title("Night Lights - Zero Drama Edition")
 
+    plt.show()
+
+
+def display2(data=dict(), interpolation='nearest', title='', max_discrete_vals=5):
+    """
+    Improved display function that maximizes screen real estate,
+    ensures perfectly aligned subplots, and automatically detects
+    discrete classification maps to build custom legends.
+    """
+    n = len(data)
+    if n == 0: return
+
+    # 1. Calculate a better figure size
+    ncols = 2
+    nrows = int(np.ceil(n / ncols))
+
+    fig, axes = plt.subplots(nrows=nrows, ncols=ncols,
+                             figsize=(16, 5 * nrows),
+                             constrained_layout=True,
+                             squeeze=False)
+
+    axes_flat = axes.flatten()
+    fax = None
+
+    for i, (iname, a) in enumerate(data.items()):
+        ax = axes_flat[i]
+
+        # Share axis logic to keep zoom synced
+        if i == 0:
+            fax = ax
+        else:
+            ax.sharex(fax)
+            ax.sharey(fax)
+
+        ax.set_title(iname, fontsize=14, fontweight='bold')
+        ax.set_aspect('equal')
+
+        # --- THE NEW DYNAMIC LOGIC ---
+        # Filter out NaNs to safely check unique values
+        valid_vals = a[~np.isnan(a)]
+        unique_vals = np.unique(valid_vals)
+
+        # Check if this is a discrete/classification map (e.g., grid_health or masks)
+        if len(unique_vals) <= max_discrete_vals:
+            # It's discrete! Use specific colors and a custom legend.
+            # (Matches your Black/Yellow/Red layout for 3 values)
+            discrete_palette = ['black', 'yellow', 'red', 'cyan', 'magenta']
+            colors = discrete_palette[:len(unique_vals)]
+            cmap = ListedColormap(colors)
+
+            # BoundaryNorm ensures the colorbar is split perfectly by the number of classes
+            bounds = np.arange(len(unique_vals) + 1) - 0.5
+            norm = BoundaryNorm(bounds, cmap.N)
+
+            # Force interpolation='none' so classes don't blur at the edges
+            im = ax.imshow(a, interpolation='none', cmap=cmap, norm=norm)
+
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+
+            # Build a discrete colorbar with centered ticks
+            cbar = plt.colorbar(im, cax=cax, ticks=np.arange(len(unique_vals)))
+            # Label the ticks with their actual array values
+            cbar.ax.set_yticklabels([f'Val: {v}' for v in unique_vals])
+
+        else:
+            # It's continuous! (e.g., raw radiance or log_diff)
+            cmap = 'viridis' if 'Mask' in iname else 'magma'
+            im = ax.imshow(a, interpolation=interpolation, cmap=cmap)
+
+            divider = make_axes_locatable(ax)
+            cax = divider.append_axes("right", size="5%", pad=0.1)
+            plt.colorbar(im, cax=cax)
+
+    # Hide any unused subplots
+    for j in range(i + 1, len(axes_flat)):
+        axes_flat[j].axis('off')
+
+    fig.suptitle(title, fontsize=20)
     plt.show()

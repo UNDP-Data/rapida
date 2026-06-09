@@ -49,6 +49,9 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
         granules = await async_search_granules(
             satellites=None, nominal_date=nominal_date, bbox=bbox,
             cmask=True, progress=progress)
+        if not granules:
+            logger.info(f'No descending granules for found for {nominal_date.date()} over target area {bbox}')
+            return
         logger.info(f'Found {len(granules)} descending granules')
         selected_granules = select_required_granules(sorted_granules=granules, bbox=bbox, progress=progress)
         logger.info(f'Selected {len(selected_granules)}  granule(s) that cover(s) bbox {bbox}')

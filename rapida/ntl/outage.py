@@ -49,9 +49,10 @@ async def detect_outage(bbox:tuple[numbers.Number]=None, nominal_date:datetime=N
 
     downloaded_data_files = await fetch(bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, progress=progress,
                                    dst_dir=dst_dir)
+    if not downloaded_data_files:
+        return
 
-
-    if 'NOAA' in deliverable: # {timestamp:(product, file_path, size)}
+    if 'NOAA' in deliverable: # {timestamp:{product:file_path}}
         target_area = create_area_from_geotransform(gt, baseline_array.shape)
         for timestamp, entry in downloaded_data_files.items():
             a1, cm = read_and_align_sdr_and_cmask(sdr_path=entry[noaa_const.SDR],geo_path=entry[noaa_const.GEO],
@@ -61,6 +62,17 @@ async def detect_outage(bbox:tuple[numbers.Number]=None, nominal_date:datetime=N
 
 
 
+            data[f'{noaa_const.SDR}_{timestamp}'] = a1
+            data[f'{noaa_const.CM}_{timestamp}'] = cm
+
+
+            # if display:
+            #     from rapida.ntl import vis
+            #     vis.display2(data=data, title=f'Outage inputs and results for {deliverable} at {bbox} on {nominal_date.date()}')
+
+
+
+        return
     else: # NASA, {product:(timestamp:(tiles)}
         for product, results in downloaded_data_files.items():
             level = product[-2:]

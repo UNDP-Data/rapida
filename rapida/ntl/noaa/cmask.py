@@ -13,7 +13,8 @@ from rich.progress import Progress
 from osgeo import gdal
 from shapely.ops import transform
 from rapida.ntl import cache
-from shapely.geometry import Polygon
+from shapely.geometry import MultiPoint, Polygon
+from shapely import concave_hull
 from shapely.ops import unary_union
 from itertools import combinations
 gdal.UseExceptions()
@@ -39,60 +40,36 @@ def bounds_from_url(hdf_url: str):
             return bounds_from_file(hfile=hfile)
 
 
-def bounds_from_file(hfile:h5py.File) -> Polygon:
+def bounds_from_file(hfile, step=50) -> Polygon:
+    # 1. Subsample the entire 2D array directly during the read.
+    # h5py translates this slice into an optimized partial read,
+    # making it very fast even over a network (fsspec).
+    lat_grid = hfile['Latitude'][::step, ::step][()]
+    lon_grid = hfile['Longitude'][::step, ::step][()]
 
-    lat = hfile['Latitude']
-    lon = hfile['Longitude']
+    # 2. Flatten into 1D arrays
+    lats = lat_grid.flatten()
+    lons = lon_grid.flatten()
 
-    # 1. Fetch the full perimeter arrays into memory.
-    # Thanks to fsspec's 1MB block cache, this resolves in just 1 or 2 HTTP requests.
-    top_lat = lat[0, :]
-    top_lon = lon[0, :]
+    # 3. Create a mask to filter out NoData/Fill values globally
+    valid_mask = (lons >= -180.0) & (lons <= 180.0) & \
+                 (lats >= -90.0) & (lats <= 90.0)
 
-    bot_lat = lat[-1, :]
-    bot_lon = lon[-1, :]
+    valid_lons = lons[valid_mask]
+    valid_lats = lats[valid_mask]
 
-    left_lat = lat[:, 0]
-    left_lon = lon[:, 0]
+    if len(valid_lons) == 0:
+        return Polygon()  # Return empty if no valid data exists
 
-    right_lat = lat[:, -1]
-    right_lon = lon[:, -1]
+    # 4. Create a Shapely MultiPoint collection
+    points = MultiPoint(np.column_stack((valid_lons, valid_lats)))
 
-    step = 330
+    # 5. Generate the footprint boundary
+    # convex_hull creates a tight bounding polygon around the outermost points.
+    poly = concave_hull(points,ratio=0.1)
 
-    def sample_edge(arr):
-        """Samples the array at the given step, strictly ensuring the exact final corner is included."""
-        indices = list(range(0, len(arr), step))
-        if indices[-1] != len(arr) - 1:
-            indices.append(len(arr) - 1)
-        return arr[indices]
-
-    # 2. Top edge (Left to Right)
-    t_lon = list(sample_edge(top_lon))
-    t_lat = list(sample_edge(top_lat))
-
-    # 3. Right edge (Top to Bottom)
-    r_lon = list(sample_edge(right_lon))
-    r_lat = list(sample_edge(right_lat))
-
-    # 4. Bottom edge (Right to Left) -> Needs Reversing to maintain the continuous ring
-    b_lon = list(sample_edge(bot_lon))[::-1]
-    b_lat = list(sample_edge(bot_lat))[::-1]
-
-    # 5. Left edge (Bottom to Top) -> Needs Reversing
-    l_lon = list(sample_edge(left_lon))[::-1]
-    l_lat = list(sample_edge(left_lat))[::-1]
-
-    # 6. Combine all edges into a single continuous boundary ring
-    ring_lons = t_lon + r_lon + b_lon + l_lon
-    ring_lats = t_lat + r_lat + b_lat + l_lat
-
-    # 7. Create the dense, curved polygon
-    poly = Polygon(zip(ring_lons, ring_lats))
-
-    # Optional but recommended: run a 0-distance buffer to instantly fix any
-    # micro-intersections or invalid topologies that occur precisely at the corner joints
     return poly.buffer(0)
+
 
 def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progress=None) -> list:
     boxpoly = box(*bbox, ccw=True)
@@ -140,6 +117,10 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
             #bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
             bounds_poly = bounds_from_file(hfile)
             bbox_poly = box(*bbox, ccw=True)
+            with open(os.path.join('/tmp', 'bbox.geojson'), "w") as ff:
+                ff.write(to_geojson(bbox_poly))
+            with open(os.path.join('/tmp', filename.replace('.nc', '.geojson')), "w") as f:
+                f.write(to_geojson(bounds_poly))
             # 2. The Kiribati Ghost Detection
             minx, miny, maxx, maxy = bounds_poly.bounds
             is_idl_crosser = (maxx - minx) > 300
@@ -157,10 +138,7 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
                 return False, 0
             intersection_poly = working_bbox.intersection(working_bounds)
             perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
-            # with open(os.path.join(dst_dir, 'bbox.geojson'), "w") as ff:
-            #     ff.write(to_geojson(bbox_poly))
-            # with open(os.path.join(dst_dir, filename.replace('.nc', '.geojson')), "w") as f:
-            #     f.write(to_geojson(bounds_poly))
+
             return True, perc_intersection
 
 

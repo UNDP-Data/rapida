@@ -412,14 +412,14 @@ class VIIRSNavigator:
         lat_rad = math.radians(midlat)
         cos_h = -math.tan(lat_rad) * math.tan(declination)
         night_hrs = int(round(24 - (2 * math.degrees(math.acos(max(-1.0, min(1.0, cos_h)))) / 15)))
-
+        search_duration_hrs = max(10, night_hrs)
         # 2. THE ANCHOR (01:30 AM Local -> UTC)
 
         utc_anchor = datetime.combine(nominal_date, dtime(1, 30)) - timedelta(hours=midlon / 15.0)
 
         # 3. THE TRIGGER (Use North-Lat to find when the satellite ENTERS the box)
-        search_start = utc_anchor - timedelta(hours=night_hrs / 2)
-        night_passes = self.orb.get_next_passes(search_start, night_hrs, midlon, midlat, 0) # northlat???
+        search_start = utc_anchor - timedelta(hours=search_duration_hrs / 2)
+        night_passes = self.orb.get_next_passes(search_start, search_duration_hrs, midlon, midlat, 0) # northlat???
         logger.debug(f'{self.satellite} passes {len(night_passes)} time(s) over {list(bbox)} on the night of {nominal_date:%y-%m-%d}')
         passes = []
         for _pass_ in night_passes:
@@ -439,6 +439,7 @@ class VIIRSNavigator:
 
 
     async def night_granules_async(self, bbox:Iterable[float]=None, nominal_date:date=None, cmask=False, progress=None):
+
         midlon, midlat, northlat = self.decompose_bbox(bbox=bbox)
         passes = self.night_passes(nominal_date=nominal_date, bbox=bbox)
 
@@ -575,7 +576,7 @@ def search_granules(satellites:Optional[Iterable[str]]=None,
 
 async def async_search_granules(
         satellites:Optional[Iterable[str]]=None, nominal_date:date=None, bbox:Iterable[float] = None,
-        cmask=False, progress=None
+        cmask=False, progress=None, push_to_cache:bool=False,
     ):
     """
 
@@ -613,6 +614,9 @@ async def async_search_granules(
     finally:
         if progress and progress_task is not None:
             progress.remove_task(progress_task)
+
+
+
 
     if cmask:
         cloud_coverage_results = cloud_coverage_batch(urls=list(found_granules.keys()), bbox=bbox, progress=progress)

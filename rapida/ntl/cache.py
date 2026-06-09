@@ -8,7 +8,7 @@ import json
 
 
 MAX_AGE_SECONDS = 6 * 3600  # 6 hours
-CACHE_PATH = os.path.join(tempfile.gettempdir(), "ntl_search_cache")
+CACHE_PATH = os.path.join(tempfile.gettempdir(), "ntl_cache")
 
 
 

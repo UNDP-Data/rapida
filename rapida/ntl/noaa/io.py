@@ -26,6 +26,17 @@ VIIRS_STORES = {
     for sat, sources in VIIRS_URLS.items()
 }
 
+
+def get_viirs_stores(satellite: str):
+    """
+    Factory function to instantiate obstore clients on demand.
+    Must only be called from inside an active asyncio event loop.
+    """
+    return {
+        source: obstore.store.from_url(url, config=PUBLIC_CONFIG)
+        for source, url in VIIRS_URLS[satellite].items()
+    }
+
 def parse_noaa_timestamp(time_str: str) -> datetime:
     """
     Converts a NOAA VIIRS string (e.g., '202604010001018') into a timezone-naive UTC datetime.

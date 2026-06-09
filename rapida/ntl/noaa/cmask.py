@@ -117,10 +117,10 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
             #bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
             bounds_poly = bounds_from_file(hfile)
             bbox_poly = box(*bbox, ccw=True)
-            with open(os.path.join('/tmp', 'bbox.geojson'), "w") as ff:
-                ff.write(to_geojson(bbox_poly))
-            with open(os.path.join('/tmp', filename.replace('.nc', '.geojson')), "w") as f:
-                f.write(to_geojson(bounds_poly))
+            # with open(os.path.join('/tmp', 'bbox.geojson'), "w") as ff:
+            #     ff.write(to_geojson(bbox_poly))
+            # with open(os.path.join('/tmp', filename.replace('.nc', '.geojson')), "w") as f:
+            #     f.write(to_geojson(bounds_poly))
             # 2. The Kiribati Ghost Detection
             minx, miny, maxx, maxy = bounds_poly.bounds
             is_idl_crosser = (maxx - minx) > 300

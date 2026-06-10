@@ -266,9 +266,6 @@ async def fetch_ntl(found_paths:dict[str, list]=None, satellite:str=None, dst_di
         return results
 
 
-
-
-
 async def download(satellite:str=None, timestamp:str=None, source:str=None,
         products:Iterable[str]=PRODUCT_NAMES, dst_dir:str=None, progress=None):
     dt = datetime.strptime(timestamp, '%Y%m%d%H%M')
@@ -387,7 +384,7 @@ def read_and_align_sdr_and_cmask(sdr_path, geo_path, cmask_path, target_area):
     resampled_cmask = cmask_scn.resample(
         target_area,
         resampler='nearest',
-        radius_of_influence=1000,
+        radius_of_influence=1500,
         fill_value=cmask_fill
     )
 

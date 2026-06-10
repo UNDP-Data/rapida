@@ -497,15 +497,15 @@ async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None
     )
 
 
-@click.option('-ot', "--outage-drop-threshold",
+@click.option('-ot', "--percentage_drop",
     type=int,
-    default=80,
+    default=50,
     required=False,
     help="Specify the outage drop threshold that wil determine the spatial structure of an outage event, "
 )
 
 @click.option(
-    '--cmask', '-cm', "cmask",
+    '--cmask', '-cm', "mask_clouds",
     is_flag=True,
     help=(
             "Enable strict Cloud Masking (ignores pixels with NASA quality flags of 3). "
@@ -526,11 +526,11 @@ async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None
 
 @click.pass_context
 async def detect(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None,
-                 cmask:bool=True, dst_dir:str=None, outage_drop_threshold:int=None, display:bool=False):
+                 mask_clouds:bool=True, dst_dir:str=None, percentage_drop:int=None, display:bool=False):
     progress = ctx.obj.get('progress')
     return await detect_outage(
         bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
-        progress=progress, cmask=cmask, outage_drop_threshold=outage_drop_threshold, display=display
+        progress=progress, mask_clouds=mask_clouds, percentage_drop=percentage_drop, display=display
     )
 
 

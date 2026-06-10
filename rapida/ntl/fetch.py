@@ -141,8 +141,12 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
 
 
             logger.info(f'Successfully downloaded {len(downloaded[timestamp])} selected images ')
-            # Save the successful URLs
-            downloaded_files[selected_product] = downloaded
+
+            if not timestamp in downloaded_files:
+                downloaded_files[timestamp] = {}
+
+
+            downloaded_files[timestamp].update({selected_product:downloaded[timestamp]})
 
             # Break out of the 'routes' loop to stop searching for this processing_level
             break

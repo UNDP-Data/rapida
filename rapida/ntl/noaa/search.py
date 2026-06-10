@@ -70,7 +70,7 @@ class Granule:
         if str(self.cloud_cover).isnumeric():
             clear_sky_score = 100 - self.cloud_cover
             # 70% Weather, 30% Geometry
-            return int((self.sat_rank * 0.3) + (clear_sky_score * 0.7))
+            return int((self.sat_rank * 0.4) + (clear_sky_score * 0.6))
 
         return int(self.sat_rank)
 

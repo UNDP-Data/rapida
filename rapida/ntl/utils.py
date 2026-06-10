@@ -48,7 +48,7 @@ def get_custom_bbox_label(bbox: tuple[float, float, float, float]) -> str:
         names = []
         for e in [admin1, admin2, admin3]:
             if e not in ['', None]:
-                names.append(e)
+                names.append(e.replace(' ', '_'))
 
         # Join the admins with dashes, then attach the country code
         admin_str = "-".join(names)
@@ -114,6 +114,7 @@ def noaa_outage(
     has_signal = a3_log > np.log1p(0.5)
 
     master_mask = is_land & is_clear & has_signal & ~np.isnan(a3_log) & ~np.isnan(nrt_log)
+    #master_mask = is_land & ~np.isnan(a3_log) & ~np.isnan(nrt_log)
 
     if not np.any(master_mask):
         logger.warning("No valid clear land pixels found in the target area.")
@@ -306,7 +307,7 @@ def nasa_outage(
 
     return diff_display, final_outages, grid_health, confidence
 
-def logdiff_outage(
+def logdiff_outage_orig(
         baseline_log_array: np.ndarray,
         nrt_log_array: np.ndarray,
         cloud_mask: np.ndarray,  # Boolean array: True where clouds exist
@@ -351,6 +352,83 @@ def logdiff_outage(
     return log_diff, outage_map
 
 
+from scipy.ndimage import generic_filter
+
+
+def logdiff_outage(
+        log_monthly_data: np.ndarray,
+        log_daily_data: np.ndarray,
+        analysis_mask: np.ndarray,  # Boolean array: True where mask wil be applied
+        percentage_drop: float = 50.0,
+        z_threshold: float = -2.5,
+        relative_noise_floor: float = 0.15
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Calculates outages using a hybrid approach of direct log-differencing and
+    localized spatial Z-scores to handle VNP46A1 noise and viewing geometry.
+
+    Args:
+        log_monthly_data: Log-scaled baseline (np.log1p of radiance).
+        log_daily_data: Log-scaled Near Real-Time daily observation.
+        analysis_mask: Boolean mask where True represents invalid/cloudy pixels.
+        percentage_drop: Physical radiance drop threshold (e.g., 50 means a 50% drop).
+        z_threshold: Spatial significance threshold (number of local standard deviations).
+        relative_noise_floor: Minimum standard deviation limit to avoid zero-division in dark regions.
+
+    Returns:
+        log_diff (np.ndarray): Continuous array of log differences for continuous severity analysis.
+        z_score (np.ndarray): Localized spatial Z-scores for visualization.
+        outage_map (np.ndarray): Clean boolean mask of confirmed crisis outages.
+    """
+    # Proportional loss mapping
+    remaining_fraction = 1.0 - (percentage_drop / 100.0)
+    log_drop_threshold = np.log(remaining_fraction)
+
+    # 1. Master Validity Mask
+    is_valid = ~np.isnan(log_daily_data) & ~np.isnan(log_monthly_data) & ~analysis_mask
+
+    if not np.any(is_valid):
+        return (
+            np.full_like(log_daily_data, np.nan),
+            np.full_like(log_daily_data, np.nan),
+            np.zeros_like(log_daily_data, dtype=bool)
+        )
+
+    # 2. Prevent edge-bleed during spatial smoothing
+    fill_val = np.nanmean(log_monthly_data[is_valid])
+    base_filled = np.where(is_valid, log_monthly_data, fill_val)
+    nrt_filled = np.where(is_valid, log_daily_data, fill_val)
+
+    # 3. Spatial Smoothing (Using 1-pixel radius disk equivalent / uniform 3x3)
+    # Using generic_filter or uniform_filter here keeps dependencies clean
+    from scipy.ndimage import uniform_filter
+    base_smooth = uniform_filter(base_filled, size=3)
+    nrt_smooth = uniform_filter(nrt_filled, size=3)
+
+    # 4. Direct Log Difference (Physical Ratio Estimation)
+    log_diff_raw = nrt_smooth - base_smooth
+
+    # 5. Dynamic Local Spatial Noise Floor Estimation
+    # Calculates standard deviation inside a 3x3 window on the smoothed baseline
+    local_baseline_std = generic_filter(base_smooth, np.std, size=3)
+
+    # Convert linear relative noise floor scale to approximate log space scaling
+    # log_std approx std / (linear_val + 1)
+    baseline_linear = np.expm1(base_smooth)
+    log_std = np.maximum(local_baseline_std / (baseline_linear + 1.0), relative_noise_floor)
+
+    # 6. Calculate Spatial Z-Score
+    z_score_raw = log_diff_raw / log_std
+
+    # 7. Mask out invalid/cloudy/water pixels across arrays
+    log_diff = np.where(is_valid, log_diff_raw, np.nan)
+    z_score = np.where(is_valid, z_score_raw, np.nan)
+
+    # 8. Dual-Engine Outage Mapping
+    # Triggers only if it passes BOTH the absolute physical drop AND the local spatial statistical variance
+    outage_map = (log_diff < log_drop_threshold) & (z_score < z_threshold)
+
+    return log_diff, z_score, outage_map
 
 def rigorous_ssim(img1, img2, data_range=12.0) -> np.ndarray:
     """
@@ -506,3 +584,70 @@ def spatial_filter(outage_map, min_size=2):
     return mask_size[labeled_array]
 
 
+
+
+def wavelet_continuous_persistence(
+        monthly: np.ndarray,
+        daily: np.ndarray,
+        lw_bg: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    import pywt
+    # 1. Build the Standard NumPy Exclusion Mask
+    master_mask = ~np.isin(lw_bg, [0, 1, 5]) | np.isnan(monthly) | np.isnan(daily)
+
+    # 2. Condition and stabilize inputs
+    noise_floor = 0.2
+    monthly_clean = np.where(~master_mask, np.maximum(monthly, 0.0), 0.0)
+    daily_clean = np.where(~master_mask, np.maximum(daily, 0.0), 0.0)
+
+    max_level = pywt.swt_max_level(min(daily.shape))
+    target_level = min(5, max_level)
+
+    # This will hold the continuous sum of all loss fractions across scales
+    cumulative_loss_map = np.zeros_like(daily, dtype=np.float32)
+
+    # 3. Execute the Multi-Scale Integration
+    for l in range(1, target_level + 1):
+        try:
+            swt_base = pywt.swt2(monthly_clean, 'db4', level=l)
+            swt_nrt = pywt.swt2(daily_clean, 'db4', level=l)
+
+            cA_base_full = swt_base[0][0]
+            cA_nrt_full = swt_nrt[0][0]
+        except ValueError:
+            break
+
+        lit_mask = cA_base_full > 1.0
+
+        # Calculate continuous physical fraction (0.0 to 1.0+)
+        loss_fraction = np.divide(
+            (cA_base_full - cA_nrt_full),
+            (cA_base_full + noise_floor),
+            out=np.zeros_like(cA_base_full),
+            where=lit_mask
+        )
+
+        # Compound the raw physical loss directly!
+        cumulative_loss_map += np.where(lit_mask & ~master_mask, loss_fraction, 0)
+
+    # 4. Final Cleanup
+    # We now have a continuous spectrum where high values definitively equal deep structural collapses
+    continuous_spectrum = np.where(~master_mask, cumulative_loss_map, 0.0)
+    # =========================================================================
+    # THE SELF-ADAPTING GATEKEEPER (Dynamic Statistical Threshold)
+    # =========================================================================
+    # Isolate valid pixels that experienced at least *some* baseline drop
+    valid_signals = continuous_spectrum[~master_mask & (continuous_spectrum > 0.01)]
+
+    if len(valid_signals) > 0:
+        # Calculate the ambient structural noise floor of THIS specific image
+        scene_mean = np.mean(valid_signals)
+        scene_std = np.std(valid_signals)
+
+        # A blackout is defined mathematically as a 3-sigma anomaly (99.7% confidence)
+        dynamic_threshold = scene_mean + (1.0 * scene_std)
+    else:
+        dynamic_threshold = 0.0
+    print(dynamic_threshold)
+    outage_map = (continuous_spectrum > dynamic_threshold) & ~master_mask
+    return continuous_spectrum, outage_map, master_mask

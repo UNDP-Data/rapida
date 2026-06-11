@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y build-essential libsqlite3-dev zlib1g-d
 # ==========================================
 # STAGE 2: Python Environment Builder (The "Fat" Stage)
 # ==========================================
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.10.0 AS python-builder
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0 AS python-builder
 
 ENV UV_COMPILE_BYTECODE=1
 ENV UV_LINK_MODE=copy
@@ -46,7 +46,7 @@ RUN uv pip install --no-cache .
 # ==========================================
 # STAGE 3: Production Runtime (The "Skinny" Stage)
 # ==========================================
-FROM ghcr.io/osgeo/gdal:ubuntu-small-3.10.0 AS prod
+FROM ghcr.io/osgeo/gdal:ubuntu-full-3.10.0 AS prod
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PLAYWRIGHT_BROWSERS_PATH=0

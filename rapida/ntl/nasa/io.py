@@ -1,4 +1,6 @@
 from pathlib import Path
+
+import click.exceptions
 import httpx
 from osgeo import gdal, gdal_array
 import fsspec
@@ -294,7 +296,8 @@ async def download(timestamp: str = None, product: str = None, tile:str=None,
 
     assert timestamp not in [None, ''], f'Invalid timestamp={timestamp}'
     assert product not in [None, ''], f'Invalid product={product}'
-
+    if bbox is None and tile is None and not urls:
+        raise click.exceptions.BadOptionUsage(message=f'Either bbox ot tile is required for download.')
 
     if not urls:
         if tile is None:

@@ -78,6 +78,7 @@ def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progre
     if uncovered.is_empty or uncovered.area < 1e-6:
         logger.debug(f"BBOX {bbox} is covered  by first granule.")
         return [sorted_granules[0]]
+    logger.info(f'bbox {bbox} is not covered completely by best swath...going to select more for complete coverage.')
     progress_task = None
     try:
         if progress:

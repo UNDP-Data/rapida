@@ -5,18 +5,19 @@ from datetime import datetime
 from typing import Iterable
 import click
 import tempfile
+
+
 from rapida.cli import RapidaCommandGroup
-from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, PRODUCTS, \
-    NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
+from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
 from rapida.ntl.nasa.search import search as nasa_search
 from rapida.ntl.noaa.search import async_search_granules, VIIRSNavigator
 from rapida.util.bbox_param_type import BboxParamType
-from rapida.ntl.nasa.io import download as download_from_nasa, bulk_download
+from rapida.ntl.nasa.io import download as download_from_nasa, bulk_download as bdownload
 from rapida.ntl.noaa.const import SOURCE_NAMES, PRODUCT_NAMES as OPER_PRODUCT_NAMES
 from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
-from rapida.ntl.nasa.io import bulk_download as bdownload
-
+from rapida.ntl.fetch import DELIVERABLES, fetch as fetch_ntl
+from rapida.ntl.outage import detect_outage
 
 logger = logging.getLogger(__name__)
 
@@ -41,27 +42,7 @@ class ProcessingLevelChoiceOption(click.Option):
         return super().handle_parse_result(ctx, opts, args)
 
 
-def validate_products_strict(ctx, param, value):
-    if not value:
-        return value
 
-    # Check for mixed catalogs
-    has_nrt = any('nrt' in p.lower() for p in value)
-    has_std = any('nrt' not in p.lower() for p in value)
-    nrt_choices  = [item for p in COLLECTIONS['LANCEMODIS'].values() for item in p]
-    std_choices = [item for p in COLLECTIONS['LAADS'].values() for item in p]
-    if has_nrt and has_std:
-        raise click.BadParameter(
-            f"Cannot mix NRT and Standard products in the same command. "
-            f"They belong to different catalogs:\n"
-            f"LANCEMODIS - NOAA operational: {', '.join(nrt_choices)}\n" 
-            f"LAADS - NASA archive : {', '.join(std_choices)}"
-        )
-
-    if has_nrt:
-        return tuple(nrt_choices)
-    else:
-        return tuple(std_choices)
 
 class NASAProductsChoiceOption(click.Option):
     """
@@ -101,7 +82,7 @@ def search():
               type=BboxParamType(),
               help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
               )
-@click.option("--date", "target_date",
+@click.option("--date", "nominal_date",
               type=click.DateTime(formats=["%Y-%m-%d"]),
               required=True,
               help=''
@@ -132,10 +113,10 @@ def search():
 
 
 @click.pass_context
-async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:datetime=None, satellites:list[str] = [], cmask:bool=None  ):
+async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, satellites:list[str] = [], cmask:bool=None):
 
     progress = ctx.obj.get('progress')
-    table = Table(title=f"VIIRS satellites granules for the night of  {target_date.date()} covering {bbox}",
+    table = Table(title=f"VIIRS satellites granules for the night of  {nominal_date.date()} covering {bbox}",
                   title_style="bold yellow")
     table.add_column("Position", justify="center", style="white")
     table.add_column("Satellite", style="green", justify='center')
@@ -149,7 +130,7 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:datetime
     table.add_column("BBOX intersection (%)", justify="center", style="white")
 
     granules = await async_search_granules(
-        satellites=satellites, target_date=target_date, bbox=bbox,
+        satellites=satellites, nominal_date=nominal_date, bbox=bbox,
         cmask=cmask, progress=progress)
     if granules:
         for i, granule in enumerate(granules, start=1):
@@ -205,7 +186,7 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, target_date:datetime
     )
 
 @click.pass_context
-def search_nasa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
+def search_nasa(ctx, bbox:tuple[numbers.Number, numbers.Number, numbers.Number, numbers.Number]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
 
     progress = ctx.obj.get('progress')
 
@@ -252,6 +233,12 @@ def download():
               help='A specific tile number conforming to NASA BalckMarble 10x10 degrres tile numbering. Ex: h21v03 '
               )
 
+@click.option('-b', '--bbox',
+              required=False,
+              type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              )
+
 @click.option(
     "--dst-dir",
     "dst_dir",     # Function argument name
@@ -268,10 +255,16 @@ def download():
 
 
 @click.pass_context
-async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=None, dst_dir:str=None):
+async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=None,
+                        bbox:tuple[float, float, float, float]=None,dst_dir:str=None):
     progress = ctx.obj.get('progress')
+    if tile and bbox:
+        raise click.UsageError("Illegal usage: `--tile` and `--bbox` are mutually exclusive.")
 
-    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product, tile=tile, dst_dir=dst_dir,progress=progress)
+    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product,
+                                                tile=tile, bbox=bbox, dst_dir=dst_dir,progress=progress)
+
+
 
     if downloaded_files:
         table = Table(title=f"Downloaded files for {product.upper()} {timestamp} ", title_style="bold yellow")
@@ -280,13 +273,14 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
         table.add_column("Timestamp", style="red", justify='center')
         table.add_column("Tile", style="red", justify='center')
         table.add_column("Size", style="green", justify='center')
-        for local_file_path in downloaded_files:
-            _, file_name = os.path.split(local_file_path)
-            file_size = os.path.getsize(local_file_path)
-            m = NTL_FILENAME_PATTERN.match(file_name)
-            meta = m.groupdict()
-            tile = meta['tile']
-            table.add_row(local_file_path, timestamp, tile, f'{file_size}')
+        for timestamp, files in downloaded_files.items():
+            for local_file_path in files:
+                _, file_name = os.path.split(local_file_path)
+                file_size = os.path.getsize(local_file_path)
+                m = NTL_FILENAME_PATTERN.match(file_name)
+                meta = m.groupdict()
+                tile = meta['tile']
+                table.add_row(local_file_path, timestamp, tile, f'{file_size}')
 
         progress.console.print(table)
 
@@ -301,9 +295,8 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
 )
 
 @click.option("--timestamp", "-t", "timestamp", type=str, required=True, help='Granule timestamp string as date and time. Ex: 202604152232 ')
-@click.option(
-    "--products",
-                "-p",
+@click.option("-p",
+                "--products",
                 "products",
                 type=click.Choice(OPER_PRODUCT_NAMES, case_sensitive=False),
                 default=OPER_PRODUCT_NAMES,
@@ -424,15 +417,126 @@ async def bulk_download(ctx, bbox:tuple[numbers.Number]=None, start_date:datetim
     )
 
 
+@ntl.command(short_help=f'Find and download best NTL data for a specific event associated with an area and date ')
+
+@click.option('-b', '--bbox',
+              required=True,
+              type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              )
+
+
+@click.option("--date", "nominal_date",
+              type=click.DateTime(formats=["%Y-%m-%d"]),
+              required=True,
+              help='The human experience of a specific night, local time zone matched to the center of bbox'
+              )
+
+
+@click.option("-d","deliverable",
+                type=click.Choice(DELIVERABLES, case_sensitive=False),
+                required=True,
+                help=f'One or more of the RAPIDA NTL deliverables.'
+    )
+
+@click.option(
+    "--dst-dir",
+    "dst_dir",     # Function argument name
+    type=click.Path(
+        exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
+        file_okay=False,   # Strictly enforce that this is a directory, not a file
+        dir_okay=True,
+        resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
+    ),
+    default=tempfile.gettempdir(),           # Defaults to the current working directory
+    show_default=True,     # Tells the user what the default is in the --help menu
+    help="Destination directory to save the downloaded the images."
+)
+
+
+@click.pass_context
+async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None, dst_dir:str=None):
+
+    progress = ctx.obj.get('progress')
+    return await fetch_ntl(bbox=bbox,nominal_date=nominal_date, deliverable=deliverable, progress=progress, dst_dir=dst_dir )
+
+
+@ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
+
+@click.option('-b', '--bbox',
+              required=True,
+              type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              )
+
+
+@click.option("--date", "nominal_date",
+              type=click.DateTime(formats=["%Y-%m-%d"]),
+              required=True,
+              help='The human experience of a specific night, local time zone matched to the center of bbox'
+              )
+
+@click.option(
+    "--dst-dir",
+    "dst_dir",     # Function argument name
+    type=click.Path(
+        exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
+        file_okay=False,   # Strictly enforce that this is a directory, not a file
+        dir_okay=True,
+        resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
+    ),
+    default=tempfile.gettempdir(),           # Defaults to the current working directory
+    show_default=True,     # Tells the user what the default is in the --help menu
+    help="Destination directory to save the downloaded the images."
+)
+
+@click.option("-d","deliverable",
+                type=click.Choice(DELIVERABLES, case_sensitive=False),
+                required=True,
+                help=f'One or more of the RAPIDA NTL deliverables.'
+    )
+
+
+@click.option('-ot', "--percentage_drop",
+    type=int,
+    default=50,
+    required=False,
+    help="Specify the outage drop threshold that wil determine the spatial structure of an outage event, "
+)
+
+@click.option(
+    '--cmask', '-cm', "mask_clouds",
+    is_flag=True,
+    help=(
+            "Enable strict Cloud Masking (ignores pixels with NASA quality flags of 3). "
+            "Disable this flag during major storm events to prevent atmospheric noise "
+            "from erroneously masking out legitimate blackout signals."
+    ),
+    default=False
+)
+@click.option(
+    '--display',  "display",
+    is_flag=True,
+    help=(
+            "Show a graphic visualization of the outage analysis."
+            "Useful to inspect the input imagery and debug/understand the outage results "
+    ),
+    default=False
+)
+
+@click.pass_context
+async def detect(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None,
+                 mask_clouds:bool=True, dst_dir:str=None, percentage_drop:int=None, display:bool=False):
+    progress = ctx.obj.get('progress')
+    return await detect_outage(
+        bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
+        progress=progress, mask_clouds=mask_clouds, percentage_drop=percentage_drop, display=display
+    )
 
 
 
-# @ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
-# @click.pass_context
-# async def detect(ctx):
-#     logger.info('Detecting impact on the ground')
-#
-#
+
+
 # @ntl.command(short_help=f'Track long-term resilience and recovery curves (2-3 Week horizon)')
 # async def monitor():
 #     logger.info('Monitoring recovery')

@@ -74,7 +74,7 @@ def _mgrs_100k_key_for_zone(lat: float, lon: float, zone: int) -> str:
 def generate_utm_100k_grid(aoi_utm) -> List[Polygon]:
     if aoi_utm.is_empty:
         return []
-    xmin, ymin, xmax, ymax = aoi_utm.bounds
+    xmin, ymin, xmax, ymax = aoi_utm.bounds_from_file
     e0 = math.floor(xmin / 100000.0) * 100000.0
     e1 = math.ceil (xmax / 100000.0) * 100000.0
     n0 = math.floor(ymin / 100000.0) * 100000.0

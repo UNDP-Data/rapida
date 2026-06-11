@@ -265,7 +265,7 @@ class StacCollection(object):
             return [gpd.GeoSeries([merged], crs=3857).to_crs(original_crs).iloc[0]]
 
         # Generate internal grid points spaced equally based on scene size
-        minx, miny, maxx, maxy = merged.bounds
+        minx, miny, maxx, maxy = merged.bounds_from_file
         # create double size of scene to be able to cover the whole scene area
         spacing = scene_size * 2
         nx = int(np.ceil((maxx - minx) / spacing))

@@ -13,7 +13,7 @@ import mgrs
 
 def _tile_id_from_center(ds) -> str:
     # Use dataset center in WGS84 to derive the 100 km MGRS tile id (e.g., "36NYG")
-    (minx, miny, maxx, maxy) = ds.bounds
+    (minx, miny, maxx, maxy) = ds.bounds_from_file
     cx = (minx + maxx) / 2
     cy = (miny + maxy) / 2
     # to lon/lat

@@ -13,7 +13,7 @@ def is_int(val):
         else:
             return False
 
-def bbox_to_geojson_polygon(west, south, east, north):
+def bbox_to_geojson_polygon(west, south, east, north, as_string=False):
     """
     Converts a bounding box to a GeoJSON Polygon geometry.
 
@@ -44,7 +44,9 @@ def bbox_to_geojson_polygon(west, south, east, north):
             "coordinates": coordinates
         }
     }
-
+    if as_string:
+        import json
+        return json.dumps(geojson, indent=2)
     return geojson
 
 

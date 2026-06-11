@@ -55,7 +55,7 @@ def process_chunk(chunk_rows, overlay_df, overlay_df_sindex, crs):
         single_row_gdf = gpd.GeoDataFrame([row], geometry='geometry', crs=crs)
         poly_geom = single_row_gdf.geometry.iloc[0]
 
-        possible_matches_index = list(overlay_df_sindex.intersection(poly_geom.bounds))
+        possible_matches_index = list(overlay_df_sindex.intersection(poly_geom.bounds_from_file))
         possible_matches = overlay_df.iloc[possible_matches_index]
         precise_matches = possible_matches[possible_matches.intersects(poly_geom)].copy()
         precise_matches.loc[:, "geometry"] = precise_matches.geometry.intersection(poly_geom)

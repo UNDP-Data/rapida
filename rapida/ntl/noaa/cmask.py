@@ -13,6 +13,10 @@ from rich.progress import Progress
 from osgeo import gdal
 from shapely.ops import transform
 from rapida.ntl import cache
+from shapely.geometry import MultiPoint, Polygon
+from shapely import concave_hull
+from shapely.ops import unary_union
+from itertools import combinations
 gdal.UseExceptions()
 
 
@@ -23,16 +27,101 @@ def shift_to_360(lon, lat, z=None):
     shifted_lon = lon + 360.0 if lon < 0 else lon
     return (shifted_lon, lat) if z is None else (shifted_lon, lat, z)
 
-def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
-    fs = fsspec.filesystem("http")
+def bounds_from_url(hdf_url: str):
+
     purl = urllib.parse.urlparse(hdf_url)
     _, filename = os.path.split(purl.path)
-
-    with fs.open(hdf_url, block_size=1024 * 1024) as f:
+    storage_options = {}
+    if hdf_url.startswith(('http', 'https')):
+        storage_options.update({'block_size': 1024 * 1024})
+    with fsspec.open(hdf_url, **storage_options) as f:
         with h5py.File(f, "r") as hfile:
             # Now it reads at HTTP speeds without the boto3 overhead
-            bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
+            return bounds_from_file(hfile=hfile)
+
+
+def bounds_from_file(hfile, step=50) -> Polygon:
+    # 1. Subsample the entire 2D array directly during the read.
+    # h5py translates this slice into an optimized partial read,
+    # making it very fast even over a network (fsspec).
+    lat_grid = hfile['Latitude'][::step, ::step][()]
+    lon_grid = hfile['Longitude'][::step, ::step][()]
+
+    # 2. Flatten into 1D arrays
+    lats = lat_grid.flatten()
+    lons = lon_grid.flatten()
+
+    # 3. Create a mask to filter out NoData/Fill values globally
+    valid_mask = (lons >= -180.0) & (lons <= 180.0) & \
+                 (lats >= -90.0) & (lats <= 90.0)
+
+    valid_lons = lons[valid_mask]
+    valid_lats = lats[valid_mask]
+
+    if len(valid_lons) == 0:
+        return Polygon()  # Return empty if no valid data exists
+
+    # 4. Create a Shapely MultiPoint collection
+    points = MultiPoint(np.column_stack((valid_lons, valid_lats)))
+
+    # 5. Generate the footprint boundary
+    # convex_hull creates a tight bounding polygon around the outermost points.
+    poly = concave_hull(points,ratio=0.1)
+
+    return poly.buffer(0)
+
+
+def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progress=None) -> list:
+    boxpoly = box(*bbox, ccw=True)
+    best_poly = bounds_from_url(sorted_granules[0].url)
+    uncovered = boxpoly.difference(best_poly)
+    if uncovered.is_empty or uncovered.area < 1e-6:
+        logger.debug(f"BBOX {bbox} is covered  by first granule.")
+        return [sorted_granules[0]]
+    logger.info(f'bbox {bbox} is not covered completely by best swath...going to select more for complete coverage.')
+    progress_task = None
+    try:
+        if progress:
+            progress_task = progress.add_task(description=f'Selecting best granules tha cover {bbox}', total=None)
+        for combo_size in range(2, len(sorted_granules) + 1):
+            if progress and progress_task:
+                progress.update(progress_task, description=f'Evaluating granules by pairs of {combo_size} ')
+            for combo in combinations(sorted_granules, combo_size):
+
+                # Merge the geometries for this specific combination
+                merged_poly = unary_union([bounds_from_url(g.url) for g in combo])
+
+                # 3. FLOATING-POINT SAFE COVERAGE CHECK
+                # We use difference() because .within() can fail on microscopic 1e-15 gap artifacts
+                uncovered = boxpoly.difference(merged_poly)
+
+                if uncovered.is_empty or uncovered.area < 1e-6:
+                    logger.debug(f"Success: BBOX covered perfectly by {combo_size} granule(s).")
+                    return combo  # Exits immediately with the absolute minimum required set
+
+        logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
+        return tuple()
+    finally:
+        if progress and progress_task:
+            progress.remove_task(progress_task)
+
+def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
+    #fs = fsspec.filesystem("http")
+    purl = urllib.parse.urlparse(hdf_url)
+    dst_dir, filename = os.path.split(purl.path)
+    storage_options = {}
+    if hdf_url.startswith(('http', 'https')):
+        storage_options.update({'block_size':1024*1024})
+    with fsspec.open(hdf_url, **storage_options) as f:
+        with h5py.File(f, "r") as hfile:
+            # Now it reads at HTTP speeds without the boto3 overhead
+            #bounds_poly = wkt.loads(hfile.attrs['geospatial_bounds'].decode('utf-8'))
+            bounds_poly = bounds_from_file(hfile)
             bbox_poly = box(*bbox, ccw=True)
+            # with open(os.path.join('/tmp', 'bbox.geojson'), "w") as ff:
+            #     ff.write(to_geojson(bbox_poly))
+            # with open(os.path.join('/tmp', filename.replace('.nc', '.geojson')), "w") as f:
+            #     f.write(to_geojson(bounds_poly))
             # 2. The Kiribati Ghost Detection
             minx, miny, maxx, maxy = bounds_poly.bounds
             is_idl_crosser = (maxx - minx) > 300
@@ -47,13 +136,10 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
                 working_bbox = bbox_poly
             #if not bbox_poly.within(bounds_poly):
             if not working_bbox.intersects(working_bounds):
-                return False
+                return False, 0
             intersection_poly = working_bbox.intersection(working_bounds)
             perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
-            # with open("/tmp/bbox.geojson", "w") as ff:
-            #     ff.write(to_geojson(bbox_poly))
-            # n = filename.split('_')[3]
-            # with open(f"/tmp/granule_{n}.geojson", "w") as f:
+            # with open(os.path.join('/tmp', filename.replace('.nc', '.geojson')), "w") as f:
             #     f.write(to_geojson(bounds_poly))
             return True, perc_intersection
 
@@ -161,7 +247,10 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
 
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
-
+    # 1. Initialize GDAL environment INSIDE the worker process
+    gdal.UseExceptions()
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
+    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '300')  # Prevents hanging vsicurl requests
 
     _, file_name = os.path.split(hdf_url)
     cc = cache.fetch(key=file_name)
@@ -202,7 +291,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
     if progress:
         master_task = progress.add_task(
             description=f"[cyan]Computing cloud coverage .... ",
-            total=None
+            total=len(urls)
         )
     then = datetime.datetime.now()
 
@@ -231,3 +320,4 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
 
 
     return results
+

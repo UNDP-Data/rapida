@@ -59,7 +59,7 @@ SUB_DATASETS: dict[str:str] = {
     "A1G": "DNB_At_Sensor_Radiance",
     "A2": "DNB_BRDF-Corrected_NTL",
     "A3": "AllAngle_Composite_Snow_Free",
-    "A4": "NearNadir_Composite_Snow_Free"
+    "A4": "AllAngle_Composite_Snow_Free"
 }
 PROCESSING_LEVELS = {stream_name: list(stream_data.keys()) for stream_name, stream_data in COLLECTIONS.items()}
 PROCESSING_LEVEL_NAMES = {CATALOG2STREAM[stream_name]: list(stream_data.keys()) for stream_name, stream_data in COLLECTIONS.items()}

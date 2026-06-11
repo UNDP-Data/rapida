@@ -10,6 +10,7 @@ from rapida.components.elegrid.variables import generate_variables as gen_electr
 from rapida.components.deprivation.variables import generate_variables as gen_depriv_vars
 from rapida.components.landuse.variables import generate_variables as gen_landuse_vars
 from rapida.components.gdp.variables import generate_variables as gen_gdp_vars
+from rapida.components.ntl.variables import generate_variables as gen_ntl_vars
 from rapida.util.setup_logger import setup_logger
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ def setup_prompt(session: Session):
             "elegrid": gen_electric_vars(),
             "landuse": gen_landuse_vars(),
             "gdp": gen_gdp_vars(),
+            "ntl": gen_ntl_vars()
         }
     }
     session.config.update(vars_dict)

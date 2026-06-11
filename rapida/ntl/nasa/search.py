@@ -1,16 +1,16 @@
-import json
 import os.path
 from rapida.ntl import cache
 from rapida.ntl.nasa import const
-from rapida.ntl.nasa.util import timestamp_format
+from rapida.ntl.utils import timestamp_format
 import math
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 import logging
 from pystac_client import Client
 from rich.progress import Progress
-from rapida.ntl.nasa.util import get_intersecting_tiles
+from rapida.ntl.utils import get_intersecting_tiles
 import httpx
 from typing import Optional
+from rapida.util.http_get_json import http_get_json
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +42,7 @@ def calculate_night_hours(midlat: float, day_of_year: int) -> int:
     return int(round(night_hrs))
 
 
-def url2result(url:str=None, store=True):
+def url2result(url:str, store=True):
 
     _, file_name = os.path.split(url)
     match = const.NTL_FILENAME_PATTERN.match(file_name)
@@ -58,7 +58,8 @@ def url2result(url:str=None, store=True):
 
 
 
-def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime, bbox:tuple[float], route:str=None):
+def calculate_local_utc_old(stream:str, processing_level:str, nominal_date: datetime, bbox:tuple[float, float, float, float],
+                        route:str=None, products:list[str] =None):
     """
     Calculate VIIRS satellites local overpass time in UTC TZ
     :param stream:
@@ -85,13 +86,28 @@ def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime
 
         dt = local_overpass_utc
     elif 'A3' in plevel:
-        day = 15 if route == 'STAC' else 1
-        # A3 Monthly composites target mid-month. If current month, step back one month.
-        if now.month == nominal_date.month and now.year == nominal_date.year:
-            prev_month = nominal_date.replace(day=1) - timedelta(days=1)
-            dt = prev_month.replace(day=day)
+
+        if route == 'STAC':
+            day=15
+            # A3 Monthly composites target mid-month. If current month, step back one month.
+            if now.month == nominal_date.month and now.year == nominal_date.year:
+                dt = nominal_date.replace(month=now.month-1, day=day)
+            else:
+                dt = nominal_date.replace(day=day)
         else:
-            dt = nominal_date.replace(day=day)
+            months_back = 3
+            day = 1
+            for m in range(1, months_back+1):
+                exists = True
+                for product in products:
+                    dt = nominal_date.replace(month=now.month - m, day=day)
+                    content_url = f'{const.API_CONTENT[stream]}/{product}/{dt.strftime("%Y/%j")}'
+                    try:
+                        content = http_get_json(url=content_url, timeout=10)
+                        exists &= content is not None
+                    except httpx.HTTPStatusError:
+                        exists = False
+                if exists:break
     elif 'A4' in plevel:
         if now.year > nominal_date.year:
             raise ValueError(f'Can not search in future! Please adjust target date')
@@ -102,19 +118,158 @@ def calculate_local_utc(stream:str, processing_level:str, nominal_date: datetime
             dt = nominal_date.replace(month=month, day=1)
     else:
         raise ValueError(f'Invalid stream {stream} for NASA NTL data')
+
     return dt
 
 
-def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float], push_to_cache:bool=True)-> list[str]:
+def stac_catalog_has_data(stream: str, processing_level: str, dt: datetime,
+                          bbox: tuple[float, float, float, float], products: list[str] = None) -> bool:
+    """
+    Pure 1:1 clone of stac_search logic. Hardened to expose local import errors.
+    """
+    catalog_name = const.STREAM2CATALOG[stream]
+    catalog_collections = const.COLLECTIONS[catalog_name]
+
+    if not products:
+        available_collections = sorted(catalog_collections[processing_level.upper()], reverse=True)
+    else:
+        available_collections = list(products)
+
+    stac_url = f'{const.CMR_STAC_ROOT}{catalog_name}'
+
+    try:
+        # If Client is not imported, this will instantly throw a NameError
+        catalog = Client.open(url=stac_url)
+
+        search_result = catalog.search(
+            collections=available_collections,
+            datetime=dt,  # Exact match, identical to your stac_search
+            bbox=bbox
+        )
+
+        if search_result.matched():
+            expected_tiles = get_intersecting_tiles(bbox=bbox)
+            items = search_result.item_collection()
+
+            for itm in items:
+                for asset_key, asset in itm.assets.items():
+                    if asset.href.endswith('.h5') and asset.href.startswith(('https', 'http')):
+                        _, file_name = os.path.split(asset.href)
+                        match = const.NTL_FILENAME_PATTERN.match(file_name)
+                        if match:
+                            meta = match.groupdict()
+                            if meta['tile'] in expected_tiles:
+                                return True
+
+        return False
+
+    except Exception as e:
+        # ELEVATED TO ERROR: This will print the exact Python crash to your console
+        logger.error(f"CRITICAL STAC PROBE FAILURE for {dt.strftime('%Y-%m')}: {e}", exc_info=True)
+        return False
+
+
+def calculate_local_utc(stream: str, processing_level: str, nominal_date: datetime,
+                        bbox: tuple[float, float, float, float],
+                        route: str = None, products: list[str] = None):
+    """
+    Calculate VIIRS satellites local overpass time in UTC TZ
+    """
+    minlon, minlat, maxlon, maxlat = bbox
+    now = datetime.now()
+    plevel = processing_level.upper()
+
+    if stream == const.OPERATIONAL:
+        days_difference = abs((now - nominal_date).days)
+        if days_difference > 7:
+            raise ValueError(f'Invalid target_date={nominal_date}. {stream} stream holds max 7 days of data.')
+
+    if 'A1' in plevel or 'A2' in plevel:
+        midlon = (minlon + maxlon) * 0.5
+        utc_offset_hours = midlon / 15.0
+        local_overpass_utc = nominal_date + timedelta(hours=1.5) - timedelta(hours=utc_offset_hours)
+        dt = local_overpass_utc
+
+    elif 'A3' in plevel:
+        months_back = 3
+        day = 15 if route == 'STAC' else 1
+        current_probe_date = nominal_date
+
+        if now.year == current_probe_date.year and now.month == current_probe_date.month:
+            current_probe_date = current_probe_date.replace(day=1) - timedelta(days=1)
+
+        found_valid_dt = False
+
+        for attempt in range(months_back + 1):
+            dt = current_probe_date.replace(day=day)
+            exists = True
+
+            if route == 'API':
+                for product in products:
+                    content_url = f'{const.API_CONTENT[stream]}/{product}/{dt.strftime("%Y/%j")}'
+                    try:
+                        content = http_get_json(url=content_url, timeout=10.0)
+                        if not content or len(content) == 0:
+                            exists = False
+                            break
+                    except Exception as e:
+                        logger.debug(f"API Probe failed for {product} on {dt.strftime('%Y-%m')}: {e}")
+                        exists = False
+                        break
+
+            elif route == 'STAC':
+                # Symmetrical STAC Probe using the dynamic URL & spatial filter helper
+                exists = stac_catalog_has_data(
+                    stream=stream,
+                    processing_level=plevel,
+                    dt=dt,
+                    bbox=bbox,
+                    products=None  # Passing None triggers the automatic const fallback just like stac_search
+                )
+
+            if exists:
+                found_valid_dt = True
+                break
+            else:
+                logger.debug(f"No {route} data found for {current_probe_date.strftime('%Y-%m')}. Stepping back.")
+                current_probe_date = current_probe_date.replace(day=1) - timedelta(days=1)
+
+        if not found_valid_dt:
+            logger.warning(
+                f"Catastrophic latency: Could not find published A3 data via {route} within {months_back} months of {nominal_date.strftime('%Y-%m')}."
+            )
+            dt = nominal_date.replace(day=day)
+
+    elif 'A4' in plevel:
+        if nominal_date > now:
+            raise ValueError('Cannot search in the future! Please adjust target date.')
+
+        month = 7 if route == 'STAC' else 1
+
+        if now.year == nominal_date.year:
+            dt = nominal_date.replace(year=nominal_date.year - 1, month=month, day=1)
+        else:
+            dt = nominal_date.replace(month=month, day=1)
+
+    else:
+        raise ValueError(f'Invalid stream {stream} for NASA NTL data')
+
+    return dt
+
+def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float, float, float, float], push_to_cache:bool=True)-> list[str]:
     tiles = get_intersecting_tiles(bbox=bbox)
     urls = []
+    logger.info(
+        f'Searching for imagery in products "{products}')
     for product in products:
-
         content_url = f'{const.API_CONTENT[stream]}/{product}/{dt.strftime("%Y/%j")}'
         with httpx.Client() as client:
             # Fetch the JSON directory listing
             response = client.get(content_url, timeout=10.0)
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                continue
             # MODAPS returns a flat JSON array of file objects
             payload = response.json()['content']
             for item in payload:
@@ -129,7 +284,7 @@ def api_search(stream:str, products:str, dt:datetime, bbox:tuple[float], push_to
     return urls
 
 def stac_search(stream:str=None, processing_level:Optional[str]=None, products:list[str]=None, dt:datetime=None,
-                bbox:tuple[float]=None, push_to_cache:bool=True):
+                bbox:tuple[float, float, float, float]=None, push_to_cache:bool=True):
 
     catalog_name = const.STREAM2CATALOG[stream]
     catalog_collections = const.COLLECTIONS[catalog_name]
@@ -162,14 +317,21 @@ def stac_search(stream:str=None, processing_level:Optional[str]=None, products:l
 
     if search_result.matched():
         logger.info(f"Found {search_result.matched()} granule(s) at {stac_url}")
+        expected_tiles = get_intersecting_tiles(bbox=bbox)
         items = search_result.item_collection()
 
         for itm in items:
             #print(json.dumps(itm.to_dict(), indent=4))
             for asset_key, asset in itm.assets.items():
                 # Look for the .h5 file, but specifically grab the HTTPS link
-                if asset.href.endswith('.h5') and asset.href.startswith('https'):
+                if asset.href.endswith('.h5') and asset.href.startswith(('https', 'http')):
                     url = asset.href
+                    _, file_name = os.path.split(url)
+                    match = const.NTL_FILENAME_PATTERN.match(file_name)
+                    meta = match.groupdict()
+                    tile = meta['tile']
+                    if not tile in expected_tiles:
+                        continue
                     result = url2result(url=url, store=push_to_cache)
                     urls.append(result)
 
@@ -197,26 +359,30 @@ def search(
     assert processing_level.upper() in stream_processing_levels, (
         f'Invalid processing level {processing_level} for {stream_name}. \''
         f'Valid processing levels {stream_processing_levels}')
-
-    dt = calculate_local_utc(stream=stream,processing_level=processing_level,
-                             nominal_date=nominal_date, bbox=bbox, route=route)
     products = stream_products[processing_level]
+    dt = calculate_local_utc(stream=stream,processing_level=processing_level,
+                             nominal_date=nominal_date, bbox=bbox, route=route, products=products)
+    expected_tiles = get_intersecting_tiles(bbox=bbox)
+    expected_tiles_count = len(expected_tiles)
     cached_results = []
     expected_products_count = len(products)
     found_products_count = 0
-
+    found_tiles_count = 0
+    keys = []
     for product in products:
         timestamp = dt.strftime(timestamp_format(product_id=product))
         key = f'{product}_{timestamp}'
-        urls = cache.fetch(key=key)
-        if urls:
-            found_products_count += 1
-            for url in urls:
+        for tile in expected_tiles:
+            url = cache.fetch(key=key, tile=tile)
+            if url:
                 cached_results.append(url2result(url=url, store=False))
+                found_tiles_count += 1
+        found_products_count += 1
+        keys.append(key)
 
-    # Only short-circuit if the cache successfully returned data for EVERY product requested
-    if found_products_count == expected_products_count:
-        logger.info("Full cache hit. Bypassing network search.")
+    # Only short-circuit if the cache successfully returned expected number of tiles for EVERY product requested
+    if found_products_count == expected_products_count and found_tiles_count >= expected_tiles_count*expected_products_count:
+        logger.info(f"Full cache hit for {keys}. Bypassing network search.")
         return cached_results
     # --- 2. Catalog Search ---
     if progress:
@@ -230,6 +396,7 @@ def search(
             products=products,
             dt=dt,
             bbox=bbox,
+            push_to_cache=push_to_cache
         )
     else:
         urls = stac_search(
@@ -237,10 +404,11 @@ def search(
             processing_level=processing_level,
             dt=dt,
             bbox=bbox,
+            push_to_cache=push_to_cache
         )
 
     if not urls:
-        logger.info(f"No imagery found for {processing_level} on {nominal_date.date()}")
+        logger.info(f"No imagery found for stream {stream} route {route} level {processing_level} on {nominal_date.date()}")
         return
     else:
         if progress and 'progress_task' in locals():

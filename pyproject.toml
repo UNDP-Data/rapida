@@ -39,8 +39,6 @@ dependencies = [
     "geopandas",
     "azure-identity",
     "rich",
-    #"morecantile",
-    #"mapbox_vector_tile",
     "sympy",
     "pydantic",
     "pmtiles",
@@ -62,6 +60,11 @@ dependencies = [
     "h5py>=3.16.0",
     "fsspec>=2026.4.0",
     "satpy>=0.59.0",
+    "matplotlib>=3.10.9",
+    "netcdf4>=1.7.3",
+    "h5netcdf>=1.8.1",
+    "spacetrack>=1.4.0"
+
 ]
 
 [project.optional-dependencies]

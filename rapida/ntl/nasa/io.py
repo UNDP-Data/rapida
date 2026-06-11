@@ -1,6 +1,11 @@
 from pathlib import Path
+
+import click.exceptions
 import httpx
-from rapida.ntl.nasa.util import get_intersecting_tiles
+from osgeo import gdal, gdal_array
+import fsspec
+import h5py
+import secrets
 import asyncio
 import os
 from rich.progress import Progress
@@ -9,22 +14,306 @@ from rapida.util.download_remote_file import download_remote_files
 import logging
 from urllib.parse import urlparse
 from rapida.ntl.nasa.search import stac_search
+from rapida.ntl.utils import get_intersecting_tiles
 from datetime import datetime
 import numbers
+from rapida.ntl.nasa import const as nasaconst
+from rapida.util.geo import gdal_callback
+import urllib
 
 logger = logging.getLogger(__name__)
 
-async def download(timestamp: str = None, product: str = None, tile:str=None, dst_dir:str=None, progress:Progress=None):
 
 
-    key = f'{product.upper()}_{timestamp}'
-    urls = cache.fetch(key=key, tile=tile)
+def h52vrt(
+        paths: list[str],
+        sds_name: str,
+        is_remote: bool = False,
+        vrt_path: str = None,
+        bbox: tuple[float, float, float, float] = None
+) -> str:
+    """
+    Creates an in-memory/local disk mosaicked VRT from an iterable of local or remote VIIRS HDF5 files.
+    Bypasses GDAL's internal georeferencing failures by building explicit XML.
+    """
+    if not paths:
+        raise ValueError("The paths iterable cannot be empty.")
 
+    # 1. Setup Disk-less Auth (RAM only)
+    storage_options = {}
+    header_file_path = "/vsimem/gdal_auth.txt"
+
+    if is_remote:
+        token = os.environ.get('EARTHDATA_TOKEN')
+        # Add this sanity check
+        if not token:
+            raise ValueError("CRITICAL: EARTHDATA_TOKEN environment variable is not set or is empty!")
+        storage_options = {
+            "block_size": 1024 * 1024,
+            "headers": {"Authorization": f"Bearer {token}"}
+        }
+        # Inject the header file directly into GDAL's virtual memory
+        gdal.FileFromMemBuffer(header_file_path, f"Authorization: Bearer {token}\r\n".encode('utf-8'))
+
+    hdf_root = "HDFEOS/GRIDS/VIIRS_Grid_DNB_2d/Data_Fields"
+    dataset_path = f"{hdf_root}/{sds_name}"
+
+    tile_vrts = []
+    global_metadata = {}
+    # 2. Process each path to create geographically aware sub-VRTs
+    for i, path in enumerate(paths):
+        # Use fsspec to natively handle both local OS files and HTTP streams
+        with fsspec.open(path, "rb", **(storage_options if is_remote else {})) as f:
+            with h5py.File(f, 'r') as hfile:
+
+                # Extract Extent (Required for EVERY tile to mosaic correctly)
+                def get_val(key):
+                    v = hfile.attrs[key]
+                    return float(v[0]) if isinstance(v, (list, tuple)) or hasattr(v, '__iter__') else float(v)
+
+                west = get_val('WestBoundingCoord')
+                north = get_val('NorthBoundingCoord')
+                east = get_val('EastBoundingCoord')
+                south = get_val('SouthBoundingCoord')
+
+                # Extract Dimension & Metadata ONLY from the FIRST file
+                if i == 0:
+                    try:
+                        target_ds = hfile[dataset_path]
+                    except KeyError as ke:
+                        target_ds = hfile[dataset_path.replace('Data_Fields', 'Data Fields')]
+
+                    height, width = target_ds.shape[-2:]
+
+                    ds_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(target_ds.dtype)
+                    ds_dtype_name = gdal.GetDataTypeName(ds_dtype)
+
+                    for k, v in target_ds.attrs.items():
+                        if isinstance(v, bytes):
+                            v = v.decode('utf-8')
+                        elif hasattr(v, '__iter__') and not isinstance(v, str):
+                            v = v[0].decode('utf-8') if isinstance(v[0], bytes) else str(v[0])
+                        global_metadata[k] = str(v)
+                    raw_fill = target_ds.attrs.get('_FillValue')
+                    nodata_value = target_ds.dtype.type(raw_fill).item()
+
+
+
+        # Calculate Geotransform for THIS specific tile
+        px_w = (east - west) / width
+        px_h = (south - north) / height
+
+        # Construct GDAL connection string
+        if is_remote:
+            encoded = urllib.parse.quote(path, safe="")
+            auth_str = f"&amp;header_file={header_file_path}" if token else ""
+            vsi = f"/vsicurl?empty_dir=yes{auth_str}&amp;url={encoded}"
+            conn_str = f'HDF5:"{vsi}"://{dataset_path}'
+        else:
+            abs_path = os.path.abspath(path)
+            conn_str = f'HDF5:"{abs_path}"://{dataset_path}'
+        _, file_name = os.path.split(path)
+
+        # XML Template (EPSG:4326 is the immutable standard for VIIRS L3/L4)
+        tile_xml = f"""<VRTDataset rasterXSize="{width}" rasterYSize="{height}">
+          <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
+          <GeoTransform>{west}, {px_w}, 0.0, {north}, 0.0, {px_h}</GeoTransform>
+          <VRTRasterBand dataType="{ds_dtype_name}" band="1">
+            <NoDataValue>{nodata_value}</NoDataValue>
+            <SimpleSource>
+              <SourceFilename relativeToVRT="0">{conn_str}</SourceFilename>
+              <SourceBand>1</SourceBand>
+              <SrcRect xOff="0" yOff="0" xSize="{width}" ySize="{height}" />
+              <DstRect xOff="0" yOff="0" xSize="{width}" ySize="{height}" />
+            </SimpleSource>
+          </VRTRasterBand>
+        </VRTDataset>"""
+
+        # Save individual tile VRT to memory
+        tile_vrt_path = f"/vsimem/{file_name}{secrets.token_hex(6)}.vrt"
+        gdal.FileFromMemBuffer(tile_vrt_path, tile_xml.encode('utf-8'))
+        tile_vrts.append(tile_vrt_path)
+
+    # 3. Mosaic all virtual tiles into the final master VRT
+    vrt_opts = gdal.BuildVRTOptions(
+        outputBounds=bbox,
+        outputSRS='EPSG:4326',
+        resolution='highest',
+        resampleAlg=gdal.GRA_NearestNeighbour,
+        srcNodata=nodata_value,
+        VRTNodata=nodata_value
+    )
+
+    master_ds = gdal.BuildVRT(vrt_path, tile_vrts, options=vrt_opts)
+    if master_ds is None:
+        raise RuntimeError("GDAL failed to build the master VRT.")
+
+    # 4. Inject the unified metadata & explicitly set NoData
+    band = master_ds.GetRasterBand(1)
+    band.SetMetadata(global_metadata)
+    band.SetNoDataValue(nodata_value)
+
+    master_ds.FlushCache()
+    master_ds = None
+
+    if is_remote:
+        tile_vrts += [vrt_path, header_file_path]
+
+    else:
+        tile_vrts += [vrt_path]
+    return tile_vrts
+
+
+def extract_bb(image_files: list[str] = None, sds_name:str=None, return_gt=False,
+                     bbox: tuple[float, float, float, float] = None,  progress=None
+                               ):
+    vrt_path = f'/vsimem/{secrets.token_hex(10)}.vrt'
+    to_unlink = []
+    to_unlink += h52vrt(paths=image_files, sds_name=sds_name, is_remote=False, bbox=bbox,vrt_path=vrt_path)
+    to_unlink = [e for e in to_unlink if gdal.VSIStatL(e) is not None]
+    translate_options = dict(
+        format="MEM",
+        outputSRS='EPSG:4326',
+
+    )
+
+    if progress:
+        task = progress.add_task(f'[red]Extracting bbox {bbox} using GDAL')
+        callback_dict = dict(
+            callback=gdal_callback,
+            callback_data=(progress, task, None)
+        )
+        translate_options.update(callback_dict)
+
+    # Pass the dataset object directly instead of the string path
+    ds = gdal.Translate(destName='', srcDS=vrt_path, **translate_options)
+
+    gt = ds.GetGeoTransform()
+    [gdal.Unlink(e) for e in to_unlink]
+    band = ds.GetRasterBand(1)
+    array = band.ReadAsArray()
+
+
+    ds = None
+    if return_gt:
+        return array, gt
+    return array
+
+async def extract(image_files: list[str] = None, sds_name:str=None, product:str=None, dst_dir:str=None,
+                  nominal_date:datetime=None, bbox: tuple[float, float, float, float] = None,  progress=None
+                               ):
+    product_tif_path = os.path.join(dst_dir, f'{product}_{nominal_date:%Y%m%d}_{nominal_date.timestamp()}.tif')
+    _, tif_name = os.path.split(product_tif_path)
+
+    vrt_path = f'/vsimem/{tif_name}.vrt'
+    to_unlink = []
+    to_unlink += h52vrt(paths=image_files, sds_name=sds_name, is_remote=False, bbox=bbox,vrt_path=vrt_path)
+    to_unlink = [e for e in to_unlink if gdal.VSIStatL(e) is not None]
+    translate_options = dict(
+        format="GTiff",
+        creationOptions=[
+            "TILED=YES",  # Optimizes read performance
+            "BIGTIFF=IF_SAFER",
+            "COPY_SRC_MDD=YES"
+        ],
+        outputSRS='EPSG:4326',
+
+    )
+
+    if progress:
+        task = progress.add_task(f'[red]Extracting data using GDAL')
+        callback_dict = dict(
+            callback=gdal_callback,
+            callback_data=(progress, task, None)
+        )
+        translate_options.update(callback_dict)
+
+    # Pass the dataset object directly instead of the string path
+    ds = gdal.Translate(destName=product_tif_path, srcDS=vrt_path, **translate_options)
+    ds = None
+
+    [gdal.Unlink(e) for e in to_unlink]
+    return Path(product_tif_path)
+
+async def download_and_extract(file_urls: list[str] = None, stream: str = None, route=None, processing_level=None,
+                               product: str = None, bbox: tuple[float, float, float, float] = None, vsimem=False,
+                               dst_dir: str = None, progress=None,
+                               ):
+    timestamps = set(file_urls.values())
+    if len(timestamps) > 1:
+        logger.info(
+            f'Got more than one timestamp for for {product} stream {stream} and processing level {processing_level} over route {route} ')
+        return
+    timestamp, = timestamps
+    urls = list(file_urls)
+    sds_name = nasaconst.SUB_DATASETS.get(processing_level)
+    if not sds_name:
+        raise ValueError(f"Processing level '{processing_level}' not found in mapping.")
+    vrt_path = f'/vsimem/{product}_{timestamp}_{secrets.token_hex(6)}.vrt'
+    to_unlink = []
+    if not vsimem:
+        downloaded_files = await download(timestamp=timestamp, product=product, dst_dir=dst_dir, urls=urls,
+                                          progress=progress)
+        to_unlink += h52vrt(paths=downloaded_files, sds_name=sds_name, is_remote=False, bbox=bbox,
+                            vrt_path=vrt_path)
+    else:
+        to_unlink += h52vrt(paths=urls, sds_name=sds_name, is_remote=True, bbox=bbox, vrt_path=vrt_path)
+
+    to_unlink = [e for e in to_unlink if gdal.VSIStatL(e) is not None]
+    _, vrt_name = os.path.split(vrt_path)
+    output_tif_path: str = os.path.join(dst_dir, vrt_name.replace('.vrt', '.tif'))
+
+    translate_options = dict(
+        format="GTiff",
+        creationOptions=[
+            "TILED=YES",  # Optimizes read performance
+            "BIGTIFF=IF_SAFER",
+            "COPY_SRC_MDD=YES"
+        ],
+        outputSRS='EPSG:4326',
+
+    )
+
+    if progress:
+        task = progress.add_task(f'[red]Extracting data using GDAL')
+        callback_dict = dict(
+            callback=gdal_callback,
+            callback_data=(progress, task, None)
+        )
+        translate_options.update(callback_dict)
+
+    # Pass the dataset object directly instead of the string path
+    ds = gdal.Translate(destName=output_tif_path, srcDS=vrt_path, **translate_options)
+    ds = None
+
+    [gdal.Unlink(e) for e in to_unlink]
+    return output_tif_path
+
+
+
+async def download(timestamp: str = None, product: str = None, tile:str=None,
+                   bbox:tuple[float, float, float, float]=None,dst_dir:str=None, urls:list[str]=[], progress:Progress=None):
+
+    assert timestamp not in [None, ''], f'Invalid timestamp={timestamp}'
+    assert product not in [None, ''], f'Invalid product={product}'
+    if bbox is None and tile is None and not urls:
+        raise click.exceptions.BadOptionUsage(message=f'Either bbox ot tile is required for download.')
 
     if not urls:
-        logger.info(f'Failed to locate information in {cache.CACHE_PATH} for {product}-{timestamp}-{tile or ""} \n' \
-                       f'Consider searching first.')
-        return 
+        if tile is None:
+            assert bbox, f'Invalid bbox={bbox}'
+        if tile is None and bbox is not None:
+            tiles = get_intersecting_tiles(bbox=bbox)
+        else:
+            tiles = tile,
+        key = f'{product.upper()}_{timestamp}'
+        for tile in tiles:
+            urls.append(cache.fetch(key=key, tile=tile))
+
+        if not len(urls) == len(tiles):
+            logger.info(f'Failed to locate information in {cache.CACHE_PATH} for {product}-{timestamp}-{tile or ""} \n' \
+                           f'Consider searching first.')
+            return
 
     # EarthAccess token
     ea_token = os.environ.get('EARTHDATA_TOKEN')
@@ -34,9 +323,11 @@ async def download(timestamp: str = None, product: str = None, tile:str=None, ds
         raise ValueError("CRITICAL: EARTHDATA_TOKEN environment variable is not set or is empty!")
 
     headers = {"Authorization": f"Bearer {ea_token}"}
-    return await download_remote_files(
+
+    downloaded_files =  await download_remote_files(
         file_urls=urls,dst_folder=dst_dir, progress=progress, headers=headers
     )
+    return {timestamp:downloaded_files}
 
 
 async def download_tile(

@@ -4,7 +4,7 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-def http_get_json(url=None, timeout=None):
+def http_get_json(url=None, timeout=None, **kwargs):
     """
     Generic HTTP get function using httpx
     :param url: str, the url to be fetched
@@ -12,7 +12,7 @@ def http_get_json(url=None, timeout=None):
     :return: python dict representing the result as parsed json
     """
     assert timeout is not None, f'Invalid timeout={timeout}'
-    with httpx.Client(timeout=timeout) as client:
+    with httpx.Client(timeout=timeout, **kwargs) as client:
         response = client.get(url)
         response.raise_for_status()
         if response.status_code == 200:

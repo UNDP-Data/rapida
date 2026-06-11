@@ -346,7 +346,6 @@ def read_and_align_sdr(sdr_path, geo_path, target_area):
 
 
 
-
 def read_and_align_sdr_and_cmask(sdr_path, geo_path, cmask_path, target_area):
     """
     Loads, crops, and resamples VIIRS SDR (Radiance) and EDR (Cloud Mask)
@@ -380,24 +379,18 @@ def read_and_align_sdr_and_cmask(sdr_path, geo_path, cmask_path, target_area):
         fill_value=dnb_fill
     )
 
+
     # 6. Resample Cloud Mask
     resampled_cmask = cmask_scn.resample(
         target_area,
         resampler='nearest',
-        radius_of_influence=1500,
+        radius_of_influence=1000,
         fill_value=cmask_fill
     )
 
     # 7. Extract raw NumPy arrays and mask
     dnb_array = resampled_sdr['DNB'].values
 
-    # # Safely convert the dynamic fill value to np.nan for math operations
-    # if np.isnan(dnb_fill):
-    #     # Data might already be masked as NaN by Satpy during load
-    #     dnb_array = np.where(np.isnan(dnb_array), np.nan, dnb_array)
-    # else:
-    #     # Mask the explicit file-defined integer/float fill value
-    #     dnb_array = np.where(dnb_array == dnb_fill, np.nan, dnb_array)
 
     dnb_scaled = dnb_array * 1e5  # Scale to match Black Marble nW/cm2/sr
     cmask_array = resampled_cmask['CloudMask'].values

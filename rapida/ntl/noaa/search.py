@@ -415,19 +415,15 @@ class VIIRSNavigator:
                     continue
         if first_file_path is None:
 
-            logger.info(f'No VIIRS operational data was detected for {self.satellite} {target_date.date()} in {" or ".join(SOURCE_NAMES)}. '
+            logger.info(f'No VIIRS operational data was found for {self.satellite} {target_date.date()} in {" or ".join(SOURCE_NAMES)}. '
                         f'Please check manually at  https://noaa-nesdis-{self.satellite.lower()}-pds.s3.amazonaws.com/index.html#VIIRS-JRR-CloudMask/  ')
             return
         _, filename = os.path.split(first_file_path)
-
         m = PRODUCTS_RE['CM'].match(filename)
         if m:
             start_time = parse_noaa_timestamp(m.groupdict()['start'])
-
             # 5. Calculate physical phase (Delta % Granule Duration)
-
             delta = (start_time - t_epoch).total_seconds()
-
             return delta % self.GRANULE_DUR
 
 

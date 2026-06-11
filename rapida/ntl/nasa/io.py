@@ -1,6 +1,6 @@
 from pathlib import Path
 import httpx
-from osgeo import gdal
+from osgeo import gdal, gdal_array
 import fsspec
 import h5py
 import secrets
@@ -83,14 +83,19 @@ def h52vrt(
 
                     height, width = target_ds.shape[-2:]
 
+                    ds_dtype = gdal_array.NumericTypeCodeToGDALTypeCode(target_ds.dtype)
+                    ds_dtype_name = gdal.GetDataTypeName(ds_dtype)
+
                     for k, v in target_ds.attrs.items():
                         if isinstance(v, bytes):
                             v = v.decode('utf-8')
                         elif hasattr(v, '__iter__') and not isinstance(v, str):
                             v = v[0].decode('utf-8') if isinstance(v[0], bytes) else str(v[0])
                         global_metadata[k] = str(v)
+                    raw_fill = target_ds.attrs.get('_FillValue')
+                    nodata_value = target_ds.dtype.type(raw_fill).item()
 
-                    nodata_value = float(global_metadata.get('_FillValue', -999.9))
+
 
         # Calculate Geotransform for THIS specific tile
         px_w = (east - west) / width
@@ -111,7 +116,7 @@ def h52vrt(
         tile_xml = f"""<VRTDataset rasterXSize="{width}" rasterYSize="{height}">
           <SRS dataAxisToSRSAxisMapping="2,1">EPSG:4326</SRS>
           <GeoTransform>{west}, {px_w}, 0.0, {north}, 0.0, {px_h}</GeoTransform>
-          <VRTRasterBand dataType="Float32" band="1">
+          <VRTRasterBand dataType="{ds_dtype_name}" band="1">
             <NoDataValue>{nodata_value}</NoDataValue>
             <SimpleSource>
               <SourceFilename relativeToVRT="0">{conn_str}</SourceFilename>
@@ -167,10 +172,11 @@ def extract_bb(image_files: list[str] = None, sds_name:str=None, return_gt=False
     translate_options = dict(
         format="MEM",
         outputSRS='EPSG:4326',
+
     )
 
     if progress:
-        task = progress.add_task(f'[red]Extracting data using GDAL')
+        task = progress.add_task(f'[red]Extracting bbox {bbox} using GDAL')
         callback_dict = dict(
             callback=gdal_callback,
             callback_data=(progress, task, None)
@@ -182,7 +188,10 @@ def extract_bb(image_files: list[str] = None, sds_name:str=None, return_gt=False
 
     gt = ds.GetGeoTransform()
     [gdal.Unlink(e) for e in to_unlink]
-    array = ds.GetRasterBand(1).ReadAsArray()
+    band = ds.GetRasterBand(1)
+    array = band.ReadAsArray()
+
+
     ds = None
     if return_gt:
         return array, gt

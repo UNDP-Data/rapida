@@ -3,12 +3,14 @@ import numpy as np
 import rasterio
 from rasterio.transform import Affine
 from rasterio.enums import ColorInterp
-from scipy.ndimage import uniform_filter, gaussian_filter
+from scipy.ndimage import uniform_filter, gaussian_filter, generic_filter
 import logging
 from scipy.ndimage import label
 from scipy.ndimage import convolve
 from rapida.util.http_get_json import http_get_json
 logger = logging.getLogger('rapida')
+
+
 
 
 def get_custom_bbox_label(bbox: tuple[float, float, float, float]) -> str:
@@ -31,7 +33,7 @@ def get_custom_bbox_label(bbox: tuple[float, float, float, float]) -> str:
         zoom = 12  # City/Town/Village level (Small localized bboxes)
 
     # 3. Add the zoom parameter to the URL
-    url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&zoom={zoom}&format=json"
+    url = f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&zoom={zoom}&format=json&accept-language=en"
 
     headers = {'User-Agent': 'UNDP/RAPIDA'}
 
@@ -76,6 +78,50 @@ def disk_filter(image: np.ndarray, radius: int = 1) -> np.ndarray:
 
     # 3. Convolve the image with the circular kernel
     return convolve(image, kernel, mode='reflect')
+def get_haze_attenuation_mask(
+        log_diff_raw: np.ndarray,
+        radius: int = 7,  # # Radius 7 creates a 15x15 diameter circle
+        max_allowed_std: float = 0.35,  # Max variance to be considered "uniform weather"
+        dimming_threshold: float = -0.5  # Minimum regional drop to trigger the check
+) -> np.ndarray:
+    """
+    Identifies unmasked clouds and haze by detecting regions
+    that are uniformly dimming without sharp spatial gradients.
+    """
+    mean_of_sq = disk_filter(log_diff_raw ** 2, radius=radius)
+    sq_of_mean = disk_filter(log_diff_raw, radius=radius) ** 2
+
+    # Prevent negative zeros from floating point precision issues
+    local_variance = np.maximum(mean_of_sq - sq_of_mean, 0.0)
+    local_std = np.sqrt(local_variance)
+
+    # 2. Regional mean difference
+    local_mean_diff = disk_filter(log_diff_raw, radius=radius)
+
+    # 3. Haze classification logic
+    # It must be dropping regionally AND the drop must be extremely uniform
+    is_dropping = local_mean_diff < dimming_threshold
+    is_uniform = local_std < max_allowed_std
+
+
+    # Haze is true ONLY if it's dropping, uniform, AND NOT catastrophic
+    haze_mask = is_dropping & is_uniform
+
+    return haze_mask
+
+
+def sobel(image: np.ndarray) -> np.ndarray:
+    """
+    Applies a Sobel filter using numpy arrays and scipy convolution.
+    """
+    kernel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]], dtype=np.float64)
+    kernel_y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]], dtype=np.float64)
+
+    gx = convolve(image, kernel_x, mode='reflect')
+    gy = convolve(image, kernel_y, mode='reflect')
+
+    # Calculate hypotenuse: sqrt(gx**2 + gy**2)
+    return np.hypot(gx, gy)
 
 
 def noaa_outage(
@@ -352,7 +398,6 @@ def logdiff_outage_orig(
     return log_diff, outage_map
 
 
-from scipy.ndimage import generic_filter
 
 
 def logdiff_outage(
@@ -360,7 +405,7 @@ def logdiff_outage(
         log_daily_data: np.ndarray,
         analysis_mask: np.ndarray,  # Boolean array: True where mask wil be applied
         percentage_drop: float = 50.0,
-        z_threshold: float = -2.5,
+        z_threshold: float = -2,
         relative_noise_floor: float = 0.15
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
@@ -401,12 +446,12 @@ def logdiff_outage(
 
     # 3. Spatial Smoothing (Using 1-pixel radius disk equivalent / uniform 3x3)
     # Using generic_filter or uniform_filter here keeps dependencies clean
-    from scipy.ndimage import uniform_filter
-    base_smooth = uniform_filter(base_filled, size=3)
-    nrt_smooth = uniform_filter(nrt_filled, size=3)
+    base_smooth = disk_filter(base_filled, radius=2)
+    nrt_smooth = disk_filter(nrt_filled, radius=2)
 
     # 4. Direct Log Difference (Physical Ratio Estimation)
     log_diff_raw = nrt_smooth - base_smooth
+
 
     # 5. Dynamic Local Spatial Noise Floor Estimation
     # Calculates standard deviation inside a 3x3 window on the smoothed baseline
@@ -416,6 +461,7 @@ def logdiff_outage(
     # log_std approx std / (linear_val + 1)
     baseline_linear = np.expm1(base_smooth)
     log_std = np.maximum(local_baseline_std / (baseline_linear + 1.0), relative_noise_floor)
+    #log_std = np.maximum(local_baseline_std, relative_noise_floor)
 
     # 6. Calculate Spatial Z-Score
     z_score_raw = log_diff_raw / log_std

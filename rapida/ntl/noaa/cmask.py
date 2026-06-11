@@ -138,7 +138,8 @@ def bbox_in_hdf(hdf_url: str, bbox: Iterable[float]):
                 return False, 0
             intersection_poly = working_bbox.intersection(working_bounds)
             perc_intersection = round(intersection_poly.area/working_bbox.area * 100)
-
+            # with open(os.path.join('/tmp', filename.replace('.nc', '.geojson')), "w") as f:
+            #     f.write(to_geojson(bounds_poly))
             return True, perc_intersection
 
 

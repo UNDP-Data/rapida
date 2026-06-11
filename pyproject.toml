@@ -63,6 +63,8 @@ dependencies = [
     "matplotlib>=3.10.9",
     "netcdf4>=1.7.3",
     "h5netcdf>=1.8.1",
+    "spacetrack>=1.4.0"
+
 ]
 
 [project.optional-dependencies]

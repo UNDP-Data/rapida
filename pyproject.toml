@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "rapida"
 dynamic = ["version"]
 description = "python tools that facilitate the assessment of natural hazards over various domains like population, landuse, infrastructure, etc"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 authors = [
     { name = 'Ioan Ferencik'},
     { name = 'Joseph Thuha'},
@@ -63,8 +63,8 @@ dependencies = [
     "matplotlib>=3.10.9",
     "netcdf4>=1.7.3",
     "h5netcdf>=1.8.1",
-    "spacetrack>=1.4.0"
-
+    "spacetrack>=1.4.0",
+    "pyvalhalla>=3.7.0",
 ]
 
 [project.optional-dependencies]

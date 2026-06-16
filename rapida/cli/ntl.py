@@ -1,11 +1,9 @@
 import logging
-import numbers
 import os.path
 from datetime import datetime
 from typing import Iterable
 import click
 import tempfile
-
 
 from rapida.cli import RapidaCommandGroup
 from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
@@ -113,7 +111,7 @@ def search():
 
 
 @click.pass_context
-async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, satellites:list[str] = [], cmask:bool=None):
+async def search_noaa(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, satellites:list[str] = [], cmask:bool=None):
 
     progress = ctx.obj.get('progress')
     table = Table(title=f"VIIRS satellites granules for the night of  {nominal_date.date()} covering {bbox}",
@@ -186,7 +184,7 @@ async def search_noaa(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetim
     )
 
 @click.pass_context
-def search_nasa(ctx, bbox:tuple[numbers.Number, numbers.Number, numbers.Number, numbers.Number]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
+def search_nasa(ctx, bbox:tuple[tuple[float, float, float, float]]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
 
     progress = ctx.obj.get('progress')
 
@@ -390,7 +388,7 @@ async def download_noaa(ctx, satellite:str=None, timestamp:str=None, products:It
 
 
 @click.pass_context
-async def bulk_download(ctx, bbox:tuple[numbers.Number]=None, start_date:datetime=None, end_date:datetime=None,
+async def bulk_download(ctx, bbox:tuple[float, float, float, float]=None, start_date:datetime=None, end_date:datetime=None,
                             products:str=None, dst_dir:str=None):
     progress = ctx.obj.get('progress')
 
@@ -455,7 +453,7 @@ async def bulk_download(ctx, bbox:tuple[numbers.Number]=None, start_date:datetim
 
 
 @click.pass_context
-async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None, dst_dir:str=None):
+async def fetch(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, deliverable:str=None, dst_dir:str=None):
 
     progress = ctx.obj.get('progress')
     return await fetch_ntl(bbox=bbox,nominal_date=nominal_date, deliverable=deliverable, progress=progress, dst_dir=dst_dir )
@@ -525,7 +523,7 @@ async def fetch(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None
 )
 
 @click.pass_context
-async def detect(ctx, bbox:tuple[numbers.Number]=None, nominal_date:datetime=None, deliverable:str=None,
+async def detect(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, deliverable:str=None,
                  mask_clouds:bool=True, dst_dir:str=None, percentage_drop:int=None, display:bool=False):
     progress = ctx.obj.get('progress')
     return await detect_outage(

@@ -9,10 +9,19 @@ from pathlib import Path
 import asyncio
 import logging
 from rich.progress import Progress
+import json
+from shapely.geometry import shape, mapping
+from osgeo import gdal
+from shapely.wkb import loads as load_wkb
+from shapely.ops import orient, transform
+import numpy as np
+from pyproj import Transformer
 
+gdal.UseExceptions()
 logger = logging.getLogger(__name__)
 
-
+project_to_meters = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True).transform
+project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
 
 
 async def fetch_geofabrik_index(client: httpx.AsyncClient) -> dict:
@@ -57,23 +66,24 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
         tasks = []
         semaphore = asyncio.Semaphore(max_concurrency)
         pbf_urls = intersecting['urls'].apply(lambda x: x['pbf']).tolist()
-
         for url in pbf_urls:
-            file_name = os.path.basename(urlparse(url).path)
+            fr_url = url.replace("https://download.geofabrik.de", "http://download.openstreetmap.fr/extracts")
+            purl = urlparse(fr_url)
+            file_name = os.path.basename(purl.path)
             filepath = dest_path / file_name
 
             tasks.append(asyncio.Task(
-                download_tile(client, url, filepath, semaphore, progress=progress), name=file_name
+                download_tile(client, fr_url, filepath, semaphore, progress=progress), name=file_name
             ))
 
-        if progress:
-            progress_task = progress.add_task(description=f'Downloading {len(tasks)} pbf(s)...', total=len(tasks))
+        if progress and pbf_urls:
+            progress_task = progress.add_task(description=f'[red]Downloading {len(tasks)} pbf(s)...', total=len(tasks))
 
         for task in asyncio.as_completed(tasks, timeout=1800 * len(tasks)):
             try:
                 downloaded_file = await task
-                if progress and progress_task is not None:
-                    progress.update(progress_task, description=f'[green]🡇 {downloaded_file.name}', advance=1)
+                if progress and progress_task is not None and pbf_urls:
+                    progress.update(progress_task, description=f'[green]🡇 Downloaded {downloaded_file.name}', advance=1)
                 downloaded_files.append(str(downloaded_file))
             except Exception as e:
                 logger.error(e)
@@ -105,3 +115,237 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
     #     os.remove(input_source)
 
     return final_output_pbf
+
+
+
+async def extract_health_sites(pbf_path: str, dst_dir: str, progress=None) -> str:
+    """
+    Extracts multi-category health infrastructure by filtering and exporting
+    via Osmium, processing polygon centroids cleanly via Shapely.
+    """
+    dst_path = Path(dst_dir)
+    filtered_pbf = dst_path / "health_sites.osm.pbf"
+    raw_geojson = dst_path / "raw_health_sites.geojson"
+    final_geojson = dst_path / "health_sites.geojson"
+
+    tags_to_keep = [
+        "nwr/amenity=hospital,clinic,doctors,pharmacy,dentist",
+        "nwr/healthcare"
+    ]
+
+    if progress:
+        progress.console.print("[cyan]Filtering OSM graph and exporting to GeoJSON via Osmium...[/cyan]")
+
+    # Step 1: Filter the PBF down to the required health elements
+    run_cli(["osmium", "tags-filter", pbf_path] + tags_to_keep + ["-o", str(filtered_pbf), "--overwrite"])
+
+    # Step 2: Export directly to GeoJSON (handles all geometries and nested tags natively)
+    run_cli(["osmium", "export", "--overwrite", str(filtered_pbf), "-o", str(raw_geojson)])
+
+    # Step 3: Compute centroids and flatten properties in a background thread
+    def process_geometries():
+        with open(raw_geojson, "r") as f:
+            data = json.load(f)
+
+        processed_features = []
+        for i, feature in enumerate(data.get("features", []), start=1):
+            # Parse geometry using shapely
+            geom = shape(feature["geometry"])
+
+            # Force everything (Polygons, MultiPolygons, Lines) to a Point centroid
+            if geom.geom_type != "Point":
+                geom = geom.centroid
+
+            # Osmium export nests all attributes under a clean 'tags' dictionary
+            tags = feature["properties"].get("tags", {})
+
+            processed_features.append({
+                "type": "Feature",
+                "geometry": mapping(geom),
+                "properties": {
+                    "osm_id": feature["properties"].get("id", i),
+                    "osm_type": feature["properties"].get("type"),
+                    "name": tags.get("name"),
+                    "amenity": tags.get("amenity"),
+                    "healthcare": tags.get("healthcare")
+                }
+            })
+
+        data["features"] = processed_features
+
+        with open(final_geojson, "w") as f:
+            json.dump(data, f)
+
+    if progress:
+        progress.console.print("[cyan]Computing centroids and matching schemas...[/cyan]")
+
+    await asyncio.to_thread(process_geometries)
+
+    # Clean up intermediates safely
+    for path in [filtered_pbf, raw_geojson]:
+        if path.exists():
+            path.unlink()
+
+    if progress:
+        progress.console.print(f"[bold green]✓ Health sites successfully extracted to: {final_geojson}[/bold green]")
+
+    return str(final_geojson)
+
+
+def extract_origins_from_geojson(geojson_path: str) -> list[tuple[float, float]]:
+    """
+    Extracts a list of (longitude, latitude) tuples from a GeoJSON FeatureCollection.
+    """
+    with open(geojson_path, "r") as f:
+        data = json.load(f)
+
+    origins = []
+    for feature in data.get("features", []):
+        geom = feature.get("geometry", {})
+        #if feature['properties']['osm_id'] != 80:continue
+
+        # Ensure we are only grabbing valid Points
+        if geom.get("type") == "Point":
+            coords = geom.get("coordinates")
+            if coords and len(coords) >= 2:
+                # Append as (lon, lat)
+                origins.append((float(coords[0]), float(coords[1])))
+
+    return origins
+
+
+def read_barriers_grid(src_path: str, src_layer: str = None, barriers_buffer:float=None) -> list:
+    """Reads a vector source and cuts features into micro-tiles to stay under Valhalla's limit."""
+    if not src_path:
+        return []
+
+    if src_layer is None:
+        src_layer = "0"
+
+    exclude_polygons = []
+    GRID_SIZE = 0.01  # ~1.1 km step size in degrees. Guarantees perimeters stay tiny.
+
+    with (gdal.OpenEx(str(src_path), gdal.OF_VECTOR | gdal.OF_READONLY) as src_ds):
+        if src_ds is None:
+            raise FileNotFoundError(f"GDAL could not open data source: {src_path}")
+
+        try:
+            lyr = src_ds.GetLayer(int(src_layer))
+        except ValueError:
+            lyr = src_ds.GetLayerByName(str(src_layer))
+
+        if lyr is None:
+            raise ValueError(f"Layer '{src_layer}' could not be found in the dataset.")
+
+        lyr.ResetReading()
+        for feat in lyr:
+            geom_ogr = feat.GetGeometryRef()
+            if geom_ogr is None or geom_ogr.IsEmpty():
+                continue
+
+
+            wkb_output = geom_ogr.ExportToWkb()
+            if isinstance(wkb_output, int) or wkb_output is None:
+                continue
+
+            raw_geom = load_wkb(bytes(wkb_output))
+            # buffer lines
+
+            if 'line' in raw_geom.geom_type.lower():
+                assert barriers_buffer is not None, f'Invalid barriers_buffer={barriers_buffer}'
+                raw_geom = transform(project_to_degrees, transform(project_to_meters, raw_geom).buffer(distance=barriers_buffer))
+
+            # Add this block to handle giant natural polygons??? in v
+            # elif 'polygon' in raw_geom.geom_type.lower():
+            #     raw_geom = transform(
+            #         project_to_degrees,
+            #         # Simplify by 5-10 meters to drastically reduce coordinate count
+            #         transform(project_to_meters, raw_geom).simplify(5.0)
+            #     )
+
+            geoms_to_process = [raw_geom] if raw_geom.geom_type == "Polygon" else list(raw_geom.geoms)
+
+
+            for geom in geoms_to_process:
+                minx, miny, maxx, maxy = geom.bounds
+
+                # Create a uniform grid over the polygon's bounding box extent
+                x_coords = np.arange(minx, maxx + GRID_SIZE, GRID_SIZE)
+                y_coords = np.arange(miny, maxy + GRID_SIZE, GRID_SIZE)
+
+                for i in range(len(x_coords) - 1):
+                    for j in range(len(y_coords) - 1):
+                        grid_cell = box(x_coords[i], y_coords[j], x_coords[i + 1], y_coords[j + 1])
+
+                        # Only intersection geometry inside this 1km micro-cell
+                        if geom.intersects(grid_cell):
+                            intersected_part = geom.intersection(grid_cell)
+
+                            if not intersected_part.is_empty and intersected_part.geom_type in (
+                            "Polygon", "MultiPolygon"):
+                                sub_polys = [intersected_part] if intersected_part.geom_type == "Polygon" else list(
+                                    intersected_part.geoms)
+
+                                for sub_poly in sub_polys:
+                                    # Ensure ring winding order is correct
+                                    ccw_poly = orient(sub_poly, sign=1.0)
+                                    ring_coords = [[float(pt[0]), float(pt[1])] for pt in ccw_poly.exterior.coords]
+
+                                    # Nest inside an extra array for the Isochrone engine
+                                    exclude_polygons.append(ring_coords)
+
+        lyr = None
+
+    return exclude_polygons
+
+
+def read_barriers(src_path: str, src_layer: str = None, barriers_buffer: float = None) -> list:
+    if not src_path:
+        return []
+
+    src_layer = str(src_layer) if src_layer is not None else "0"
+    exclude_polygons = []
+
+    with gdal.OpenEx(str(src_path), gdal.OF_VECTOR | gdal.OF_READONLY) as src_ds:
+        if src_ds is None:
+            raise FileNotFoundError(f"GDAL could not open data source: {src_path}")
+
+        try:
+            lyr = src_ds.GetLayer(int(src_layer))
+        except ValueError:
+            lyr = src_ds.GetLayerByName(src_layer)
+
+        if lyr is None:
+            raise ValueError(f"Layer '{src_layer}' could not be found.")
+
+        lyr.ResetReading()
+        for feat in lyr:
+            geom_ogr = feat.GetGeometryRef()
+            if geom_ogr is None or geom_ogr.IsEmpty():
+                continue
+
+            wkb_output = geom_ogr.ExportToWkb()
+            if wkb_output is None or isinstance(wkb_output, int):
+                continue
+
+            raw_geom = load_wkb(bytes(wkb_output))
+
+            if 'line' in raw_geom.geom_type.lower():
+                assert barriers_buffer is not None, f'Invalid barriers_buffer={barriers_buffer}'
+                # Buffer and simplify to prevent exceeding Valhalla limits
+                raw_geom = transform(
+                    project_to_degrees,
+                    transform(project_to_meters, raw_geom).buffer(distance=barriers_buffer).simplify(5.0)
+                )
+
+            geoms_to_process = [raw_geom] if raw_geom.geom_type == "Polygon" else list(getattr(raw_geom, 'geoms', []))
+
+            for sub_poly in geoms_to_process:
+                if sub_poly.geom_type not in ("Polygon", "MultiPolygon"):
+                    continue
+
+                ccw_poly = orient(sub_poly, sign=1.0)
+                ring_coords = [[float(pt[0]), float(pt[1])] for pt in ccw_poly.exterior.coords]
+                exclude_polygons.append(ring_coords)
+
+    return exclude_polygons

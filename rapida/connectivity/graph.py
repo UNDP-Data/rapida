@@ -67,6 +67,17 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
             tile_extract=tar_path,
             verbose=False
         )
+        # ---------------------------------------------------------
+        # INJECT CUSTOM LIMITS BEFORE SAVING THE BUILD CONFIG
+        # ---------------------------------------------------------
+        if "service_limits" not in valhalla_conf:
+            valhalla_conf["service_limits"] = {}
+        if "isochrone" not in valhalla_conf["service_limits"]:
+            valhalla_conf["service_limits"]["isochrone"] = {}
+
+        # Expand the max_locations limit to allow system-wide bulk routing
+        valhalla_conf["service_limits"]["isochrone"]["max_locations"] = 5000
+        # ---------------------------------------------------------
 
     with open(config_path, "w") as f:
         json.dump(valhalla_conf, f, indent=4)
@@ -84,7 +95,7 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
         # 2. Build the Routing Tiles
         # This generates the actual mathematical DAG and writes it to the 'valhalla_tiles' folder
         if progress:
-            progress.console.print("[cyan]Building routing graph (this is the heavy step)...[/cyan]")
+            progress.console.print("[cyan]Building routing graph ...[/cyan]")
         run_cli([
             "valhalla_build_tiles", "-c", config_path, pbf_path
         ])
@@ -92,14 +103,14 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
         # 3. Compress into the Extract
         # This reads the generated folder and packs it into the high-performance memory-mapped .tar file
         if progress:
-            progress.console.print("[cyan]Compressing graph into memory-mapped tarball...[/cyan]")
+            progress.console.print("[cyan]Compressing graph into a tarball...[/cyan]")
         run_cli([
             "valhalla_build_extract", "-c", config_path, "-v", "--overwrite"
         ])
 
     # 3. Offload compilation to a worker thread
     if progress:
-        progress.console.print("[cyan]Compiling binary DAG (this may take a moment)...[/cyan]")
+        progress.console.print("[cyan]Compiling binary DAG ...[/cyan]")
 
     await asyncio.to_thread(run_compiler)
 

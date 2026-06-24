@@ -13,6 +13,7 @@ from rapida.cli.download import download
 from rapida.cli.publish import publish
 from rapida.cli.h3id import addh3id
 from rapida.cli.ntl import ntl
+from rapida.cli.connectivity import connectivity
 from rich.progress import Progress
 import click
 import nest_asyncio
@@ -74,6 +75,7 @@ cli.add_command(delete)
 cli.add_command(addh3id)
 cli.add_command(population)
 cli.add_command(ntl)
+cli.add_command(connectivity)
 
 if __name__ == '__main__':
     cli()

@@ -247,10 +247,17 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
 
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
+
     # 1. Initialize GDAL environment INSIDE the worker process
     gdal.UseExceptions()
     gdal.PushErrorHandler('CPLQuietErrorHandler')
-    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '300')  # Prevents hanging vsicurl requests
+    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '600')  # Prevents hanging vsicurl requests
+    gdal.SetConfigOption('GDAL_HTTP_MULTIPLEX', 'YES')  #
+    gdal.SetConfigOption('GDAL_HTTP_VERSION', '2')  #
+    gdal.SetConfigOption('VSI_CACHE', 'TRUE')
+    gdal.SetConfigOption('VSI_CACHE_SIZE', '50000000')  # 50 MB cache per process
+    gdal.SetConfigOption('GDAL_DISABLE_READDIR_ON_OPEN', 'EMPTY_DIR')
+    gdal.SetConfigOption('CPL_VSIL_CURL_ALLOWED_EXTENSIONS', '.nc')
 
     _, file_name = os.path.split(hdf_url)
     cc = cache.fetch(key=file_name)
@@ -281,8 +288,10 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     if valid_data.size == 0:
         raise Exception(f'Failed to compute cloud coverage for {hdf_url}. No valid data.')
     cc = int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
+
     cache.store(key=file_name, value=cc)
     return cc
+
 
 
 def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: int = 5, progress: Progress = None):
@@ -303,7 +312,7 @@ def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: in
             for url in urls
         }
 
-        for future in concurrent.futures.as_completed(future_to_url, timeout=60):
+        for future in concurrent.futures.as_completed(future_to_url, timeout=660):
             url = future_to_url[future]
             try:
                 results[url] = future.result()

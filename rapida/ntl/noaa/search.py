@@ -257,123 +257,6 @@ class VIIRSNavigator:
 
         return tle_data
 
-    # def fetch_tle(self):
-    #     """
-    #     Surgically fetches VIIRS TLEs one-by-one to avoid query errors
-    #     and IP bans. Merges them into a single in-memory string.
-    #     """
-    #     # 37849: Suomi-NPP | 43013: NOAA-20 | 54234: NOAA-21
-    #     targets = {
-    #         "37849": "SNPP",
-    #         "43013": "N20",
-    #         "54234": "N21"
-    #     }
-    #
-    #     merged_tle = ""
-    #
-    #     # Using the .org domain directly to avoid the 301 redirect penalty
-    #     base_url = "https://celestrak.org/NORAD/elements/gp.php"
-    #
-    #     # A professional User-Agent is your best shield against bans
-    #     headers = {
-    #         'User-Agent': 'UNDP RAPIDA-Engine)',
-    #         'Accept': 'text/plain'
-    #     }
-    #
-    #     with Progress(disable=False, console=None, transient=True) as progress:
-    #
-    #         total_task = progress.add_task("[cyan]Initializing TLE io...", total=len(targets))
-    #
-    #         with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-    #             for catnr, name in targets.items():
-    #                 params = {
-    #                     'CATNR': catnr,
-    #                     'FORMAT': 'TLE'
-    #                 }
-    #
-    #                 try:
-    #                     response = client.get(base_url, params=params, headers=headers)
-    #
-    #                     # RULE: If we hit an error, STOP. Don't hammer the server.
-    #                     if response.status_code != 200:
-    #                         progress.console.log(f"🛑 Error {response.status_code} for {name}. Aborting to avoid IP ban.")
-    #                         break
-    #
-    #                     # Validate that we actually got a TLE (should start with name or '1 ')
-    #                     data = response.text.strip()
-    #                     if "1 " in data:
-    #                         # Split the response into lines
-    #                         lines = [l.strip() for l in response.text.strip().splitlines() if l.strip()]
-    #
-    #                         # CelesTrak usually returns 3 lines (Name, L1, L2)
-    #                         # or 2 lines (L1, L2) if CATNR is used.
-    #                         # We only care about the last two lines (the TLE data)
-    #                         if len(lines) >= 2 and lines[-2].startswith("1 "):
-    #                             tle_l1 = lines[-2]
-    #                             tle_l2 = lines[-1]
-    #
-    #                             # We MANUALLY prepend our clean name
-    #                             merged_tle += f"{name}\n{tle_l1}\n{tle_l2}\n"
-    #                             progress.advance(total_task)
-    #                             progress.console.log(f"[green]✅ Successfully fetched TLE for {name}")
-    #
-    #                     else:
-    #                         progress.console.log(f"[yellow]⚠️ Received invalid data for {name}.")
-    #
-    #                 except Exception as e:
-    #                     progress.console.log(f"[red]❌ Network error on {name}: {e}")
-    #                     break
-    #
-    #                 # THE "GOOD CITIZEN" DELAY:
-    #                 # CelesTrak specifically asks for breaks between requests.
-    #                 # Advance the bar and update description for the "Good Citizen" sleep
-    #
-    #                 if catnr != list(targets.keys())[-1]:  # Don't sleep after the last target
-    #                     progress.update(total_task,
-    #                                     description=f"[dim white]Respecting CelesTrak rate limits (2s)...")
-    #                     time.sleep(2.0)
-    #
-    #     if not merged_tle:
-    #         raise RuntimeError("🚨 Failed to io any TLE data. Probably IP-blocked. Should reset in two ours.\
-    #          Alternatively download manually 'https://celestrak.org/NORAD/elements/gp.php?GROUP=weather' to /tmp/rapida_tle.txt")
-    #
-    #     return merged_tle
-    #
-    # def get_tle(self, tle_file ):
-    #     # Pathlib handles the '/' vs '\' slash drama automatically
-    #     cache_file = Path(tle_file)
-    #
-    #     # 1. Does it exist and is it fresh? (7200 seconds = 2 hours)
-    #     if cache_file.exists() and cache_file.stat().st_size > 0:
-    #         age = time.time() - cache_file.stat().st_mtime
-    #         if age < 12*3600:
-    #             return cache_file
-    #
-    #     # 2. If not, io and save (This only happens once every 2 hours)
-    #     with open(cache_file, 'wt+') as tfile:
-    #         tle_content = self.fetch_tle()
-    #         tfile.write(tle_content)
-    #     return cache_file
-    #
-    #
-    #
-    # def get_phase_for_date(self, target_date):
-    #     """Calculates exact phase using the continuous spacecraft clock and physical drift."""
-    #     if isinstance(target_date, datetime):
-    #         target_date = target_date.date()
-    #
-    #     target_midnight = datetime.combine(target_date, dtime(0, 0, 0))
-    #     ref_midnight = datetime.combine(self.cfg["ref"], dtime(0, 0, 0))
-    #     delta_seconds = (target_midnight - ref_midnight).total_seconds()
-    #
-    #     # FIXED MATH: Apply the daily drift rate to the exact seconds elapsed
-    #     drift_per_second = self.cfg["drift"] / 86400.0
-    #     accumulated_drift = delta_seconds * drift_per_second
-    #
-    #     # Add the accumulated drift, NOT the raw delta_seconds
-    #     predicted = (self.cfg["phase"] + accumulated_drift) % self.GRANULE_DUR
-    #
-    #     return predicted
 
 
     def get_orbital(self, target_date:date=None):
@@ -385,7 +268,7 @@ class VIIRSNavigator:
 
 
 
-    def get_phase_for_date_new(self, target_date:datetime.date=None):
+    def get_phase_for_date(self, target_date:datetime.date=None):
         orb = self.get_orbital(target_date=target_date)
         t_epoch = orb.orbit_elements.epoch
         # FIXED MATH: Force pyorbital's numpy.datetime64 into a standard Python datetime
@@ -441,26 +324,9 @@ class VIIRSNavigator:
 
         return midlon, midlat, maxlat
 
-    # def pass2granule(self, p:DescendingPass=None, midlon:float=None, midlat:float=None, elevation:float=None ):
-    #     orb = self.get_orbital()
-    #     phase = self.get_phase_for_date(p.target_date)
-    #     sat_lon, _, _ = self.orb.get_lonlatalt(p.max_elev_time)
-    #     deg_offset = abs(midlon - sat_lon)
-    #     # Physical distance in km at this latitude
-    #     offset_km = int(deg_offset * 111.32 * math.cos(math.radians(midlat)))
-    #     # Anchor to Midnight UTC of the target day
-    #     t_midnight = datetime.combine(p.target_date.date(), dtime(0, 0, 0))
-    #     delta_seconds = (p.max_elev_time - t_midnight).total_seconds()
-    #
-    #     # 2. Pulse-Sync Math
-    #     pulse_index = math.floor((delta_seconds - phase) / self.GRANULE_DUR)
-    #     start_time = t_midnight + timedelta(seconds=(pulse_index * self.GRANULE_DUR) + phase)
-    #
-    #
-    #     return Granule(sat=self.satellite,start_time=start_time,offset=offset_km, elevation=elevation)
 
     def pass2granule(self, p:DescendingPass=None, midlon:float=None, midlat:float=None, elevation:float=None ):
-        phase = self.get_phase_for_date_new(target_date=p.target_date)
+        phase = self.get_phase_for_date(target_date=p.target_date)
         if phase is None:
             return
         orb = self.get_orbital(p.target_date)
@@ -533,6 +399,8 @@ class VIIRSNavigator:
             granule = self.pass2granule(p=p,midlon=midlon, midlat=midlat, elevation=elevation,)
             if granule:
                 granules.append(granule) # return noe in case no data is available with hyper-scalers
+            else:
+                logger.info(f'Could not convert pass {p} to granule. Skipping.')
 
 
 
@@ -687,7 +555,7 @@ if __name__ == '__main__':
             n = VIIRSNavigator(satellite=s)
             print(n)
             phase = n.get_phase_for_date(target_date)
-            new_phase = n.get_phase_for_date_new(target_date=target_date)
+            new_phase = n.get_phase_for_date(target_date=target_date)
             print(s, phase, new_phase)
             break
 

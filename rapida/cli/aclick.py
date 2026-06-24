@@ -2,8 +2,17 @@ import inspect
 import click
 from functools import wraps
 import asyncio
+import logging
 
-
+def setup_debug_logging(ctx, param, value):
+    """Callback that switches the log level to DEBUG instantly."""
+    if value:
+        logger = logging.getLogger('rapida')
+        logger.setLevel(logging.DEBUG)
+        for handler in logger.handlers:
+            handler.setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled globally.")
+    return value
 class AsyncCommand(click.Command):
     """
     Async wrapper designed to work alongside nest_asyncio in Jupyter
@@ -34,16 +43,32 @@ class AsyncCommand(click.Command):
             self.callback = wrapped_callback
 class RapidaCommandGroup(click.Group):
     """
-    Combined group that handles async subcommands and lists keys.
+    Combined group that handles async subcommands, forces help on no arguments,
+    and lists keys accurately.
     """
 
     def list_commands(self, ctx):
         return self.commands.keys()
 
+    def add_command(self, cmd: click.Command, name: str = None) -> None:
+        # Catch-all: forces help display if a subcommand is run empty
+        cmd.no_args_is_help = True
+        # 2. Automatically inject --debug into every registered subcommand
+        cmd.params.append(
+            click.Option(
+                ['--debug'],
+                is_flag=True,
+                help='Enable debug logging.',
+                expose_value=False,
+                callback=setup_debug_logging
+            )
+        )
+        super().add_command(cmd, name)
+
     def command(self, *args, **kwargs):
-        # Automatically wrap all @group.command() calls in AsyncCommand
+        # Automatically wrap all inline @group.command() calls in AsyncCommand
         kwargs.setdefault('cls', AsyncCommand)
-        return super().command(*args, no_args_is_help=True, **kwargs)
+        return super().command(*args, **kwargs)
 
     def group(self, *args, **kwargs):
         # Ensure nested groups inherit this behavior

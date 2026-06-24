@@ -352,8 +352,17 @@ async def download_tile(
 
                     # Initialize progress bar for this specific file
                     total_bytes = int(response.headers.get("Content-Length", 0))
+
                     if progress:
                         progress_task = progress.add_task(f'Downloading {url}', total=total_bytes,)
+
+                    if dest_path.exists() and 0 < total_bytes == dest_path.stat().st_size:
+                        if progress and progress_task is not None:
+                            progress.update(progress_task,
+                                            description=f'[green]Reused {dest_path.name} from local folder {dest_path.parent}',
+                                            advance=1)
+                        return dest_path
+
                     tmp_path = dest_path.with_suffix(dest_path.suffix + ".tmp")
                     with open(tmp_path, "wb") as f:
                         async for chunk in response.aiter_bytes():
@@ -370,8 +379,7 @@ async def download_tile(
                 if attempt == max_retries - 1:
                     if progress and progress_task:
                         progress.update(progress_task, description=f"[red]✗ {dest_path.name} (Failed)[/red]")
-                    #progress.console.print(f"[red]Error downloading {url}: {e}[/red]")
-                    return dest_path
+                    raise Exception(f"Failed to download {url} after {max_retries} attempts: {e}")
 
                 # Exponential backoff before retry (1s, 2s, 4s...)
                 await asyncio.sleep(2 ** attempt)

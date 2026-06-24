@@ -65,6 +65,7 @@ dependencies = [
     "h5netcdf>=1.8.1",
     "spacetrack>=1.4.0",
     "pyvalhalla>=3.7.0",
+    "reverse-geocoder>=1.5.1",
 ]
 
 [project.optional-dependencies]

@@ -114,35 +114,36 @@ def search():
 async def search_noaa(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, satellites:list[str] = [], cmask:bool=None):
 
     progress = ctx.obj.get('progress')
-    table = Table(title=f"VIIRS satellites granules for the night of  {nominal_date.date()} covering {bbox}",
-                  title_style="bold yellow")
-    table.add_column("Position", justify="center", style="white")
-    table.add_column("Satellite", style="green", justify='center')
-    table.add_column("Timestamp (UTC)", style="cyan", justify='center')
-    # table.add_column("Scan Start Date and Time (UTC)", style="red", justify='center')
-    table.add_column("Bbox offset from SSP (km)", justify="center", style="white")
-    table.add_column("Elevation above bbox (degrees)", justify="center", style="white")
-    if cmask:
-        table.add_column("Cloud coverage in bbox (%)", justify="center", style="white")
-    table.add_column("Score (%)", justify="center", style="white")
-    table.add_column("BBOX intersection (%)", justify="center", style="white")
+    with progress:
+        table = Table(title=f"VIIRS satellites granules for the night of  {nominal_date.date()} covering {bbox}",
+                      title_style="bold yellow")
+        table.add_column("Position", justify="center", style="white")
+        table.add_column("Satellite", style="green", justify='center')
+        table.add_column("Timestamp (UTC)", style="cyan", justify='center')
+        # table.add_column("Scan Start Date and Time (UTC)", style="red", justify='center')
+        table.add_column("Bbox offset from SSP (km)", justify="center", style="white")
+        table.add_column("Elevation above bbox (degrees)", justify="center", style="white")
+        if cmask:
+            table.add_column("Cloud coverage in bbox (%)", justify="center", style="white")
+        table.add_column("Score (%)", justify="center", style="white")
+        table.add_column("BBOX intersection (%)", justify="center", style="white")
 
-    granules = await async_search_granules(
-        satellites=satellites, nominal_date=nominal_date, bbox=bbox,
-        cmask=cmask, progress=progress)
-    if granules:
-        for i, granule in enumerate(granules, start=1):
-            if cmask:
-                values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.cloud_cover}', f'{granule.rank}', f'{granule.pint}'
-            else:
-                values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.rank}', f'{granule.pint}'
-            table.add_row(*values)
+        granules = await async_search_granules(
+            satellites=satellites, nominal_date=nominal_date, bbox=bbox,
+            cmask=cmask, progress=progress)
+        if granules:
+            for i, granule in enumerate(granules, start=1):
+                if cmask:
+                    values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.cloud_cover}', f'{granule.rank}', f'{granule.pint}'
+                else:
+                    values = f'{i}', granule.sat, granule.timestamp, f'{granule.offset}', f'{granule.elevation:.2f}', f'{granule.rank}', f'{granule.pint}'
+                table.add_row(*values)
 
-    if table.row_count == 0:
-        progress.console.print("[bold red]No granules found for this criteria.[/bold red]")
-    else:
-        progress.console.print(table)
-        progress.console.print(f"\n[dim]Note: Each granule represents {1025 / 12:.2f}s of instrument data.[/dim]")
+        if table.row_count == 0:
+            progress.console.print("[bold red]No granules found for this criteria.[/bold red]")
+        else:
+            progress.console.print(table)
+            progress.console.print(f"\n[dim]Note: Each granule represents {1025 / 12:.2f}s of instrument data.[/dim]")
 
 
 @search.command(name='nasa', short_help=f'Search for available NTL science data from NASA source')
@@ -187,7 +188,6 @@ async def search_noaa(ctx, bbox:tuple[float, float, float, float]=None, nominal_
 def search_nasa(ctx, bbox:tuple[tuple[float, float, float, float]]=None, nominal_date:datetime=None, stream:str = None, processing_level:str=None, route:str=None):
 
     progress = ctx.obj.get('progress')
-
     urls = nasa_search(processing_level=processing_level, nominal_date=nominal_date,
                        bbox=bbox, stream=stream, route=route, progress=progress, push_to_cache=True)
 
@@ -259,28 +259,29 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
     if tile and bbox:
         raise click.UsageError("Illegal usage: `--tile` and `--bbox` are mutually exclusive.")
 
-    downloaded_files = await download_from_nasa(timestamp=timestamp, product=product,
-                                                tile=tile, bbox=bbox, dst_dir=dst_dir,progress=progress)
+    with progress:
+        downloaded_files = await download_from_nasa(timestamp=timestamp, product=product,
+                                                    tile=tile, bbox=bbox, dst_dir=dst_dir,progress=progress)
 
 
 
-    if downloaded_files:
-        table = Table(title=f"Downloaded files for {product.upper()} {timestamp} ", title_style="bold yellow")
+        if downloaded_files:
+            table = Table(title=f"Downloaded files for {product.upper()} {timestamp} ", title_style="bold yellow")
 
-        table.add_column("Path", style="red", justify='center')
-        table.add_column("Timestamp", style="red", justify='center')
-        table.add_column("Tile", style="red", justify='center')
-        table.add_column("Size", style="green", justify='center')
-        for timestamp, files in downloaded_files.items():
-            for local_file_path in files:
-                _, file_name = os.path.split(local_file_path)
-                file_size = os.path.getsize(local_file_path)
-                m = NTL_FILENAME_PATTERN.match(file_name)
-                meta = m.groupdict()
-                tile = meta['tile']
-                table.add_row(local_file_path, timestamp, tile, f'{file_size}')
+            table.add_column("Path", style="red", justify='center')
+            table.add_column("Timestamp", style="red", justify='center')
+            table.add_column("Tile", style="red", justify='center')
+            table.add_column("Size", style="green", justify='center')
+            for timestamp, files in downloaded_files.items():
+                for local_file_path in files:
+                    _, file_name = os.path.split(local_file_path)
+                    file_size = os.path.getsize(local_file_path)
+                    m = NTL_FILENAME_PATTERN.match(file_name)
+                    meta = m.groupdict()
+                    tile = meta['tile']
+                    table.add_row(local_file_path, timestamp, tile, f'{file_size}')
 
-        progress.console.print(table)
+            progress.console.print(table)
 
 
 @download.command(name='noaa', short_help=f'Download operational NTL data from NOAA')
@@ -325,22 +326,23 @@ async def download_nasa(ctx, timestamp:str = None, product:str=None, tile:str=No
 @click.pass_context
 async def download_noaa(ctx, satellite:str=None, timestamp:str=None, products:Iterable[str]=None, source:str=None, dst_dir:str=None ):
     progress = ctx.obj.get('progress')
-    downloaded_files = await download_from_noaa(satellite=satellite,timestamp=timestamp,
-                           source=source, products=products,dest_dir=dst_dir, progress=progress)
+    with progress:
+        downloaded_files = await download_from_noaa(satellite=satellite,timestamp=timestamp,
+                               source=source, products=products,dest_dir=dst_dir, progress=progress)
 
-    if downloaded_files:
-        table = Table(title=f"VIIRS satellites images for the night of  {timestamp} ",
-                      title_style="bold yellow")
+        if downloaded_files:
+            table = Table(title=f"VIIRS satellites images for the night of  {timestamp} ",
+                          title_style="bold yellow")
 
-        table.add_column("Satellite", style="green", justify='center')
-        table.add_column("Timestamp (UTC)", style="cyan", justify='center')
-        table.add_column("Downloaded file", justify="left", style="red")
-        table.add_column("File size", justify="center", style="white")
+            table.add_column("Satellite", style="green", justify='center')
+            table.add_column("Timestamp (UTC)", style="cyan", justify='center')
+            table.add_column("Downloaded file", justify="left", style="red")
+            table.add_column("File size", justify="center", style="white")
 
-        for _, local_file_path, file_size in downloaded_files:
-            values = satellite, timestamp, f'{local_file_path}', f'{bytesto(file_size, "m"):.2f} MB'
-            table.add_row(*values)
-        progress.console.print(table)
+            for _, local_file_path, file_size in downloaded_files:
+                values = satellite, timestamp, f'{local_file_path}', f'{bytesto(file_size, "m"):.2f} MB'
+                table.add_row(*values)
+            progress.console.print(table)
 
 
 
@@ -391,28 +393,28 @@ async def download_noaa(ctx, satellite:str=None, timestamp:str=None, products:It
 async def bulk_download(ctx, bbox:tuple[float, float, float, float]=None, start_date:datetime=None, end_date:datetime=None,
                             products:str=None, dst_dir:str=None):
     progress = ctx.obj.get('progress')
+    with progress:
+        if start_date > end_date:
+            raise click.UsageError(f'--from {start_date} must be smaller or equal then --to {end_date}')
 
-    if start_date > end_date:
-        raise click.UsageError(f'--from {start_date} must be smaller or equal then --to {end_date}')
+        if 'nrt' in products[0].lower():
+            stream = OPERATIONAL
+            now = datetime.now()
 
-    if 'nrt' in products[0].lower():
-        stream = OPERATIONAL
-        now = datetime.now()
+            start_days_difference = abs((now - start_date).days)
+            if start_days_difference > 7:
+                raise ValueError(f'Invalid start_date={start_date}.{stream} stream holds max 7 days of data. ')
+            end_days_difference = abs((now - end_date).days)
+            if end_days_difference > 7:
+                raise ValueError(f'Invalid start_date={end_date}.{stream} stream holds max 7 days of data. ')
 
-        start_days_difference = abs((now - start_date).days)
-        if start_days_difference > 7:
-            raise ValueError(f'Invalid start_date={start_date}.{stream} stream holds max 7 days of data. ')
-        end_days_difference = abs((now - end_date).days)
-        if end_days_difference > 7:
-            raise ValueError(f'Invalid start_date={end_date}.{stream} stream holds max 7 days of data. ')
-
-    else:
-        stream = ARCHIVE
-    downloaded_files = await bdownload(
-        bbox=bbox, start_date=start_date, end_date=end_date,
-        stream=stream, products=products,
-        dst_dir=dst_dir,progress=progress
-    )
+        else:
+            stream = ARCHIVE
+        downloaded_files = await bdownload(
+            bbox=bbox, start_date=start_date, end_date=end_date,
+            stream=stream, products=products,
+            dst_dir=dst_dir,progress=progress
+        )
 
 
 
@@ -457,7 +459,8 @@ async def bulk_download(ctx, bbox:tuple[float, float, float, float]=None, start_
 async def fetch(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, deliverable:str=None, dst_dir:str=None):
 
     progress = ctx.obj.get('progress')
-    return await fetch_ntl(bbox=bbox,nominal_date=nominal_date, deliverable=deliverable, progress=progress, dst_dir=dst_dir )
+    with progress:
+        return await fetch_ntl(bbox=bbox,nominal_date=nominal_date, deliverable=deliverable, progress=progress, dst_dir=dst_dir )
 
 
 @ntl.command(short_help=f'Execute crisis impact detection (48h Alerts / 72h Assessments)')
@@ -527,10 +530,11 @@ async def fetch(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:d
 async def detect(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, deliverable:str=None,
                  mask_clouds:bool=True, dst_dir:str=None, percentage_drop:int=None, display:bool=False):
     progress = ctx.obj.get('progress')
-    return await detect_outage(
-        bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
-        progress=progress, mask_clouds=mask_clouds, percentage_drop=percentage_drop, display=display
-    )
+    with progress:
+        return await detect_outage(
+            bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
+            progress=progress, mask_clouds=mask_clouds, percentage_drop=percentage_drop, display=display
+        )
 
 
 

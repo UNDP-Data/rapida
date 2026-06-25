@@ -3,9 +3,7 @@ import click
 import logging
 from rapida.az.fileshare import download_project
 from rich.progress import Progress
-
 from rapida.session import is_rapida_initialized
-from rapida.util.setup_logger import setup_logger
 from rapida.project.project import Project
 
 logger = logging.getLogger(__name__)
@@ -24,11 +22,8 @@ logger = logging.getLogger(__name__)
               is_flag=True,
               default=False,
               help="Whether to overwrite the project in case it already exists locally.")
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug")
-def download(project_name=None, destination_folder=None, max_concurrency=None,force=None, debug: bool =False ):
+
+def download(project_name=None, destination_folder=None, max_concurrency=None,force=None):
     """
     Download a project from Azure File Share.
 
@@ -51,7 +46,6 @@ def download(project_name=None, destination_folder=None, max_concurrency=None,fo
     To use `-f/--force`, project data will be overwritten if it already exists in local storage.
 
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

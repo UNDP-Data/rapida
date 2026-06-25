@@ -34,7 +34,6 @@ def delete(project: str, no_input: bool = False, ):
         rapida delete --project=<project folder path>: If you are not in a project folder
 
     """
-    #setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

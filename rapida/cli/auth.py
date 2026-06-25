@@ -1,7 +1,7 @@
 import logging
 from rapida.az.surgeauth import SurgeTokenCredential
 import click
-from rapida.util.setup_logger import setup_logger
+
 
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,6 @@ def auth(cache_dir):
     """
     Authenticate with  UNDP account
     """
-    # setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     credential = SurgeTokenCredential(cache_dir=cache_dir)
     token, exp_ts = credential.get_token("https://storage.azure.com/.default",)

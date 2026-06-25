@@ -391,7 +391,6 @@ async def download_tile(
 async def bulk_download(bbox:tuple[numbers.Number]=None, start_date:datetime=None, end_date:datetime=None,
                            stream:str = None, products:str=None, dst_dir:str=None, progress=None):
 
-
     results = stac_search(stream=stream, products=products,
                        dt=[start_date, end_date], bbox=bbox,push_to_cache=False)
 
@@ -407,6 +406,7 @@ async def bulk_download(bbox:tuple[numbers.Number]=None, start_date:datetime=Non
     tasks = []
     semaphore = asyncio.Semaphore(5)
     progress_task = None
+    downloaded_file = None
     if results:
         dest_path = Path(dst_dir)
         dest_path.mkdir(parents=True, exist_ok=True)
@@ -433,7 +433,7 @@ async def bulk_download(bbox:tuple[numbers.Number]=None, start_date:datetime=Non
 
                     if progress and progress_task is not None:
                         progress.update(progress_task,description=f'[green]🡇 {downloaded_file.name}', advance=1)
-                    downloaded_files.append(str(downloaded_file))
+                    downloaded_files.append(downloaded_file)
                 except Exception as e:
                     logger.error(e)
 
@@ -443,3 +443,19 @@ async def bulk_download(bbox:tuple[numbers.Number]=None, start_date:datetime=Non
                             atask.cancel()
                     await asyncio.gather(*tasks, return_exceptions=True)
                     raise
+            files = {}
+            for df in downloaded_files:
+                m = nasaconst.NTL_FILENAME_PATTERN.match(df.name)
+                meta = m.groupdict()
+                if '_' in meta['product']:
+                    product = meta['product'].split('_')
+                else:
+                    product = meta['product']
+                _, level = product.split('46')
+
+
+            # if len(products) == 1:
+            #     product = len(produ)
+            #     return extract(image_files=downloaded_files,sds_name=nasaconst.SUB_DATASETS[level])
+
+    return downloaded_file

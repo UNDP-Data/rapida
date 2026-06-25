@@ -28,11 +28,8 @@ logger = logging.getLogger(__name__)
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug")
-def upload(project=None, max_concurrency=4, force=False, no_input: bool = False, debug: bool =False):
+
+def upload(project=None, max_concurrency=4, force=False, no_input: bool = False):
     """
     Upload an entire project folder to Azure File Share
 
@@ -46,8 +43,6 @@ def upload(project=None, max_concurrency=4, force=False, no_input: bool = False,
 
     Use `--no-input` to disable prompting. Default is False.
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
-
     if not is_rapida_initialized():
         return
 

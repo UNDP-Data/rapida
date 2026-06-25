@@ -26,7 +26,7 @@ asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 
-@click.group(cls=RapidaCommandGroup, context_settings=dict(help_option_names=['-h', '--help']))
+@click.group(cls=RapidaCommandGroup, )
 
 @click.pass_context
 def cli(ctx):
@@ -36,8 +36,7 @@ def cli(ctx):
     representing exposure and vulnerability aspects of geospatial risk induced
     by natural hazards.
     """
-    # 1. Initialize your structured logging engine
-    logger = setup_logger(name='rapida', make_root=False)
+
 
     # 2. Ensure ctx.obj is initialized as a container dictionary
     ctx.ensure_object(dict)

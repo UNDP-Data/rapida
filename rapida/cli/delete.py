@@ -18,11 +18,8 @@ logger = logging.getLogger(__name__)
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug")
-def delete(project: str, no_input: bool = False, debug: bool =False):
+
+def delete(project: str, no_input: bool = False, ):
     """
     Delete a project from local storage and Azure File Share if it was uploaded.
 
@@ -37,7 +34,7 @@ def delete(project: str, no_input: bool = False, debug: bool =False):
         rapida delete --project=<project folder path>: If you are not in a project folder
 
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+    #setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

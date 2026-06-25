@@ -52,7 +52,7 @@ class RapidaCommandGroup(click.Group):
 
     def add_command(self, cmd: click.Command, name: str = None) -> None:
         # Catch-all: forces help display if a subcommand is run empty
-        cmd.no_args_is_help = True
+        #cmd.no_args_is_help = True
         # 2. Automatically inject --debug into every registered subcommand
         cmd.params.append(
             click.Option(

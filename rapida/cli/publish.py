@@ -56,12 +56,8 @@ def validate_layers(ctx, param, value):
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug"
-              )
-def publish(project: str, no_input: bool = False, debug: bool =False, layer=None):
+
+def publish(project: str, no_input: bool = False,  layer=None):
     """
     Publish project data to Azure and open GeoHub registration page URL.
 
@@ -80,7 +76,6 @@ def publish(project: str, no_input: bool = False, debug: bool =False, layer=None
         rapida publish -l stats.elegrid -l elegrid: publish only two layers from geopackage
 
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

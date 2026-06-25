@@ -88,7 +88,8 @@ async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_
     ):
     logger.info(f'Running connectivity analysis ')
     progress = ctx.obj.get('progress')
-    return await run_connectivity_analysis(
-        bbox=bbox, dst_dir=dst_dir, travel_mode=travel_mode, time_intervals=time_intervals,
-        barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer, progress=progress
-    )
+    with progress:
+        return await run_connectivity_analysis(
+            bbox=bbox, dst_dir=dst_dir, travel_mode=travel_mode, time_intervals=time_intervals,
+            barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer, progress=progress
+        )

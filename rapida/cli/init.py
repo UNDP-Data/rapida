@@ -79,13 +79,13 @@ def setup_prompt(session: Session):
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
 
-def init(no_input: bool = False, debug=False):
+def init(no_input: bool = False):
     """
     Initialize RAPIDA tool. This command will creates a config file under user home directory (~/.rapida/config.json) to setup RAPIDA tool.
 
     Use `--no-input` to disable prompting. Default is False.
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
 
     click.echo("Welcome to rapida CLI tool!")
     with Session() as session:

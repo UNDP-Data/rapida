@@ -2,20 +2,16 @@ import logging
 import click
 from rapida.az.fileshare import list_projects
 from rapida.session import is_rapida_initialized
-from rapida.util.setup_logger import setup_logger
 
 
 logger = logging.getLogger(__name__)
 
 
 @click.command(short_help=f'list RAPIDA projects/folders located in default Azure file share')
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug"
-              )
-def list_project(debug=False):
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
+
+
+def list_project():
+
 
     if not is_rapida_initialized():
         return

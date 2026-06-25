@@ -53,7 +53,7 @@ def cli(ctx):
     progress = Progress(disable=False, console=None, transient=True)
 
     # 4. Spin up the progress display canvas
-    progress.start()
+    #progress.start()
 
     # 5. Inject it into Click's shared context object
     ctx.obj['progress'] = progress

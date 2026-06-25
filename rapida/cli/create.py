@@ -3,7 +3,6 @@ import os
 import click
 import sys
 from rapida.session import is_rapida_initialized
-from rapida.util.setup_logger import setup_logger
 from rapida.project.project import Project
 
 logger = logging.getLogger(__name__)

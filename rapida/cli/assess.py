@@ -179,13 +179,9 @@ def build_variable_help():
               help="Optional. A project folder with rapida.json can be specified. If not, current directory is considered as a project folder.")
 @click.option('--force', '-f', default=False, show_default=True,is_flag=True,
               help=f'Force assess components. Downloaded data or computed data will be ignored and recomputed.')
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug"
-              )
+
 @click.pass_context
-def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, outage_date=None, cloud_cover=None, project: str = None, force=False, debug=False):
+def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, outage_date=None, cloud_cover=None, project: str = None, force=False):
     """
     Assess/evaluate a specific geospatial exposure components/variables
 
@@ -214,7 +210,6 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
     rapida assess -c landuse -dt 2025-02-01/2025-05-31 -cc 10: Search Sentinel 2 item which is less than 10% of cloud cover from February to May 2025.
 
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

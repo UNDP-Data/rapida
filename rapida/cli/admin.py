@@ -76,12 +76,7 @@ def admin():
     default=False,
     help="Keep admin polygons that are disputed areas with invalid country code"
 )
-@click.option('--debug',
 
-    is_flag=True,
-    default=False,
-    help="Set log level to debug"
-)
 def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7, destination_path=None, debug=False, keep_disputed_areas=None):
     """
     Fetch admin boundaries from OSM
@@ -141,12 +136,8 @@ def osm(bbox=None,admin_level=None, osm_level=None, clip=False, h3id_precision=7
     default=False,
     help="Keep admin polygons that are disputed areas with invalid country code"
 )
-@click.option('--debug',
-    is_flag=True,
-    default=False,
-    help="Set log level to debug"
-)
-def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=False, keep_disputed_areas=None, h3id_precision=None):
+
+def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None,  keep_disputed_areas=None, h3id_precision=None):
     """
     Fetch admin boundaries from CGAZ
 
@@ -161,7 +152,6 @@ def cgaz(bbox=None,admin_level=None,  clip=False, destination_path=None, debug=F
     Rapida admin cgaz --bbox 33.681335,-0.131836,35.966492,1.158979 -l 2 --clip /data/admin2_cgaz.gpkg
 
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

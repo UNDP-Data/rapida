@@ -78,19 +78,28 @@ async def detect_outage(
                 cmask_path=product_files[noaa_const.CM], target_area=target_area
             )
 
+
             # 3. Create a STRICTLY DAILY invalid mask
             # It inherits the base analysis_mask (water/bg), but does NOT inherit yesterday's clouds
             daily_invalid_mask = np.isnan(daily_data) | analysis_mask
-
+            daily_data_label = f'{noaa_const.SDR}_{timestamp}'
             if mask_clouds is True:
                 is_cloudy = cloud_mask > 1
-                daily_invalid_mask |= is_cloudy
+                cloudy_percentage = is_cloudy[is_cloudy].size/is_cloudy.size *100
+                if round(cloudy_percentage ) >= 95:
+                    logger.info(f'There are too many clouds in the bbox: {cloudy_percentage:.2f}%. Skipping cloud mask' )
+                else:
+                    daily_invalid_mask |= is_cloudy
+            daily_invalid_percentage = daily_invalid_mask[daily_invalid_mask].size/daily_invalid_mask.size*100
+            if round(daily_invalid_percentage) >= 97:
+                logger.info(f'There are too many masked/invalid pixels in the bbox for {daily_data_label}: {daily_invalid_percentage}%. It will be skipped' )
+                continue
 
             log_daily_data = np.zeros_like(daily_data)
             log_daily_data[~daily_invalid_mask] = np.log1p(daily_data[~daily_invalid_mask])
 
             # Save individual daily raw data if needed
-            daily_data_label = f'{noaa_const.SDR}_{timestamp}'
+
             arrays[daily_data_label] = log_daily_data
 
             # Run the NTL statistics engine on today's clear pixels
@@ -114,8 +123,7 @@ async def detect_outage(
             # Update our tracking mask to protect these pixels from future overlaps
             valid_mask |= daily_valid
 
-            # Update our tracking mask to remember we saw these pixels
-            valid_mask |= daily_valid
+
 
         ts = f'{nominal_date:%Y%m%d}'
 

@@ -18,12 +18,8 @@ logger = logging.getLogger(__name__)
               help='Full path to the mask dataset in any GDAL/OGR supported format. Can be vector or raster' )
 @click.option('-c', '--comment', required=False, type=str,
               help='Any comment you might want to add into the project config' )
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug"
-              )
-def create(project_name: str, destination_folder: str = None, polygons=None, mask=None, comment=None, debug=False):
+
+def create(project_name: str, destination_folder: str = None, polygons=None, mask=None, comment=None, ):
     """
     Create a RAPIDA project in a new folder. As default, it creates a project folder with the same name as user specified.
 
@@ -42,7 +38,6 @@ def create(project_name: str, destination_folder: str = None, polygons=None, mas
         Second positional argument is optional. If skipped, current directory is used.
 
     """
-    setup_logger(name='rapida', level=logging.DEBUG if debug else logging.INFO)
 
     if not is_rapida_initialized():
         return

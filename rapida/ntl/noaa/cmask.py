@@ -83,6 +83,7 @@ def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progre
     try:
         if progress:
             progress_task = progress.add_task(description=f'Selecting best granules tha cover {bbox}', total=None)
+        combos = {}
         for combo_size in range(2, len(sorted_granules) + 1):
             if progress and progress_task:
                 progress.update(progress_task, description=f'Evaluating granules by pairs of {combo_size} ')
@@ -94,13 +95,16 @@ def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progre
                 # 3. FLOATING-POINT SAFE COVERAGE CHECK
                 # We use difference() because .within() can fail on microscopic 1e-15 gap artifacts
                 uncovered = boxpoly.difference(merged_poly)
-
+                combos[int((boxpoly.area-uncovered.area)/boxpoly.area*100)] = combo
                 if uncovered.is_empty or uncovered.area < 1e-6:
                     logger.debug(f"Success: BBOX covered perfectly by {combo_size} granule(s).")
                     return combo  # Exits immediately with the absolute minimum required set
 
         logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
-        return tuple()
+        logger.warning(f"Selecting max of {combos}.")
+
+        w = max(combos)
+        return combos[w]
     finally:
         if progress and progress_task:
             progress.remove_task(progress_task)

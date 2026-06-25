@@ -1,4 +1,7 @@
 import os.path
+
+from sympy.physics.units import minute, second
+
 from rapida.ntl import cache
 from rapida.ntl.nasa import const
 from rapida.ntl.utils import timestamp_format
@@ -290,6 +293,14 @@ def stac_search(stream:str=None, processing_level:Optional[str]=None, products:l
     catalog_collections = const.COLLECTIONS[catalog_name]
     catalog_processing_levels = catalog_collections.keys()
 
+    try:
+        s,e = dt
+        s = s.replace(hour=0, minute=0, second=0)
+        e = e.replace(hour=23, minute=59, second=59)
+        dt = [dt.isoformat() + "Z" for dt in (s, e)]
+
+    except TypeError:
+        pass
     if not products:
 
         available_collections = sorted(catalog_collections[processing_level], reverse=True)

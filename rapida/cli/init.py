@@ -78,11 +78,7 @@ def setup_prompt(session: Session):
               is_flag=True,
               default=False,
               help="Optional. If True, it will automatically answer yes to prompts. Default is False.")
-@click.option('--debug',
-              is_flag=True,
-              default=False,
-              help="Set log level to debug"
-              )
+
 def init(no_input: bool = False, debug=False):
     """
     Initialize RAPIDA tool. This command will creates a config file under user home directory (~/.rapida/config.json) to setup RAPIDA tool.

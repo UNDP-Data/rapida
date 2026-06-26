@@ -33,8 +33,7 @@ async def detect_outage(
         logger.info(f'No imagery was found for {nominal_date:"%Y%m%d"} over {bbox} {deliverable.split("_")[0]}')
         logger.info(f'Consider adjusting source, date or the bounding box')
         return
-    for timestamp, product_files in daily_results.items():
-        print(timestamp, product_files)
+
 
     arrays = {}
     # --- 1. FETCH & PROCESS MONTHLY BASELINE ---

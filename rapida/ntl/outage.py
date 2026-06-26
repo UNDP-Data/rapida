@@ -33,8 +33,7 @@ async def detect_outage(
         logger.info(f'No imagery was found for {nominal_date:"%Y%m%d"} over {bbox} {deliverable.split("_")[0]}')
         logger.info(f'Consider adjusting source, date or the bounding box')
         return
-    for timestamp, product_files in daily_results.items():
-        print(timestamp, product_files)
+
 
     arrays = {}
     # --- 1. FETCH & PROCESS MONTHLY BASELINE ---
@@ -72,6 +71,7 @@ async def detect_outage(
         valid_mask = np.zeros_like(analysis_mask, dtype=bool)
 
         for timestamp, product_files in daily_results.items():
+
 
             daily_data, cloud_mask = read_and_align_sdr_and_cmask(
                 sdr_path=product_files[noaa_const.SDR], geo_path=product_files[noaa_const.GEO],

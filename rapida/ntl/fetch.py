@@ -62,7 +62,6 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
                 download_and_track(granule, dst_dir, progress)
             )
             tasks.append(task)
-
         downloaded_files = {}
 
         for coro in asyncio.as_completed(tasks, timeout=100 * 3 * len(tasks)):
@@ -81,7 +80,7 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
 
-        return downloaded_files
+        return {g.timestamp:downloaded_files[g.timestamp] for g in selected_granules if g.timestamp in downloaded_files}
 
     expected_tiles = get_intersecting_tiles(bbox=bbox)
     routes = nasaconst.ROUTES
@@ -151,7 +150,7 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
             # Break out of the 'routes' loop to stop searching for this processing_level
             break
 
-
+    print(downloaded_files)
     return downloaded_files
 
 

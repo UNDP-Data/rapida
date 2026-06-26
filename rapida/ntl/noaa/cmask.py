@@ -103,8 +103,8 @@ def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progre
         logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
         logger.warning(f"Selecting max of {combos}.")
 
-        w = max(combos)
-        return combos[w]
+        max_cov = max(combos)
+        return combos[max_cov]
     finally:
         if progress and progress_task:
             progress.remove_task(progress_task)

@@ -73,6 +73,7 @@ async def detect_outage(
 
         for timestamp, product_files in daily_results.items():
 
+
             daily_data, cloud_mask = read_and_align_sdr_and_cmask(
                 sdr_path=product_files[noaa_const.SDR], geo_path=product_files[noaa_const.GEO],
                 cmask_path=product_files[noaa_const.CM], target_area=target_area

@@ -32,7 +32,7 @@ AGGREGATE = 'total'
 UNDP_AZURE_WPOP_PATH = f'az:{{account_name}}:{{stac_container_name}}/worldpop/{{year}}/{{country}}'
 
 
-def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
+def generate_variables_2020(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
     """
     Generate population variables dict
     :param root:
@@ -92,7 +92,23 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
     return variables
 
 
-
+def generate_variables():
+    """
+    Generate population variables dict
+    :param root:
+    :param aggregate:
+    :param sexes:
+    :param age_groups:
+    :return:
+    """
+    license = "Creative Commons Attribution 4.0 International"
+    attribution = "WorldPop"
+    variables = dict()
+    #dependencies
+    variables['dependency'] = dict(title='Total dependency ratio', sources='((child_total+elderly_total)/active_total)*100', license=license, attribution=attribution)
+    variables['child_dependency'] = dict(title='Child dependency ratio', sources='(child_total/active_total)*100', license=license, attribution=attribution)
+    variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100', license=license, attribution=attribution)
+    return variables
 
 
 if __name__ == '__main__':

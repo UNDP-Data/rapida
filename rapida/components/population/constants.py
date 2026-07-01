@@ -12,6 +12,7 @@ SEX_MAPPING = {
     "F": "female",
 }
 
+
 DATA_YEAR = 2020
 
 AGESEX_STRUCTURE_COMBINATIONS = [

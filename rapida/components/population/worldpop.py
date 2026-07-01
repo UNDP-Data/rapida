@@ -359,7 +359,7 @@ async def run_download(country_code=None, year=DATA_YEAR, download_path=None, se
 
 
 
-async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=False, download_path=None, all_data=False):
+async def population_sync(country_code=None, year=None, force_reprocessing=False, download_path=None, all_data=False):
     """
     Download all available data for a given country and year.
     Args:
@@ -374,6 +374,7 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
     """
     logging.info("Starting data download")
     available_data = await get_available_data(country_code=country_code, year=year)
+    print(available_data)
     session = Session()
     async with session.get_blob_service_client(account_name=session.get_account_name()) as blob_service_client:
         container_client = blob_service_client.get_container_client(container=session.get_stac_container_name())
@@ -384,6 +385,9 @@ async def population_sync(country_code=None, year=DATA_YEAR, force_reprocessing=
             file_links = await get_links_from_table(data_id=country_id)
             for i, file_urls_chunk in enumerate(chunker(iterable=file_links, size=4)):
                 logging.info("Processing chunk %d for country: %s", i + 1, country_code)
+                for u in file_urls_chunk:
+                    print(u)
+                continue
                 # Create a fresh list of tasks for each file chunk
                 tasks = [process_single_file(file_url=url,
                                              container_client=container_client,
@@ -553,6 +557,7 @@ async def process_aggregates(country_code: str, sex: Optional[str] = None, age_g
                     if not blobs:
                         logging.warning("No blobs found for paths: %s", paths)
                         return
+
 
                     # Download blobs and sum them
                     local_files = []

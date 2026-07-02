@@ -1,7 +1,4 @@
 import os.path
-
-from sympy.physics.units import minute, second
-
 from rapida.ntl import cache
 from rapida.ntl.nasa import const
 from rapida.ntl.utils import timestamp_format

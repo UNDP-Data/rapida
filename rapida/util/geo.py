@@ -9,6 +9,7 @@ import os
 import tempfile
 from rich.progress import Progress
 import logging
+import xml.etree.ElementTree as ET
 logger = logging.getLogger('rapida')
 gdal.UseExceptions()
 
@@ -313,3 +314,75 @@ def clip_raster_with_mask(source: str,
         progress.remove_task(mask_task)
 
     return output_path
+
+
+def pixel_func_vrt(sources:list[str] = None, operator:str=None, dst:str=None):
+    """
+    Creates a VRT file that applies a pixel-wise operator across multiple URLs.
+
+    :param urls: List of raster URLs (HTTP/S)
+    :param operator: The pixel function name (e.g., 'sum', 'mul', 'add', 'average')
+    :param output_vrt_path: Path where the output .vrt file will be saved
+    """
+    # 1. Sanitize URLs to ensure they use /vsicurl/
+    srcs = [f'/vsicurl_streaming/{s}' if s.startswith('http') else s for s in sources ]
+
+    x_size = y_size = geo_transform = wkt_projection = data_type = None
+
+    # 2. Open the first dataset to extract spatial metadata (Size, Geotransform, Projection)
+    with gdal.OpenEx(srcs[0], gdal.OF_RASTER ) as first_ds:
+        x_size = first_ds.RasterXSize
+        y_size = first_ds.RasterYSize
+        geo_transform = first_ds.GetGeoTransform()
+        wkt_projection = first_ds.GetProjectionRef()
+
+        # Extract data type from Band 1 (e.g., 'Float32')
+        band1 = first_ds.GetRasterBand(1)
+        data_type = gdal.GetDataTypeName(band1.DataType)
+        nodata_value = band1.GetNoDataValue()
+
+
+    # 3. Build the VRT XML Structure
+    vrt_root = ET.Element("VRTDataset", rasterXSize=str(x_size), rasterYSize=str(y_size))
+
+    # Add SRS
+    srs_elem = ET.SubElement(vrt_root, "SRS")
+    srs_elem.text = wkt_projection
+
+    # Add GeoTransform
+    gt_elem = ET.SubElement(vrt_root, "GeoTransform")
+    gt_elem.text = ", ".join(map(str, geo_transform))
+
+    # Add Derived Raster Band
+    band_elem = ET.SubElement(
+        vrt_root,
+        "VRTRasterBand",
+        dataType=data_type,
+        band="1",
+        subClass="VRTDerivedRasterBand"
+    )
+
+    if nodata_value is not None:
+        nodata_elem = ET.SubElement(band_elem, "NoDataValue")
+        nodata_elem.text = str(nodata_value)
+
+    # Add pixel function metadata
+    pix_func_elem = ET.SubElement(band_elem, "PixelFunctionType")
+    pix_func_elem.text = operator
+
+    # 4. Append each URL as a SimpleSource inside the band
+    for url in srcs:
+        source_elem = ET.SubElement(band_elem, "SimpleSource")
+
+        filename_elem = ET.SubElement(source_elem, "SourceFilename", relativeToVRT="0")
+        filename_elem.text = url
+
+        sub_band_elem = ET.SubElement(source_elem, "SourceBand")
+        sub_band_elem.text = "1"
+
+    # 5. Write out the formatted XML file
+    tree = ET.ElementTree(vrt_root)
+    ET.indent(tree, space="  ", level=0)  # Make it human-readable
+    tree.write(dst, encoding="utf-8", xml_declaration=False)
+    print(f"Successfully created VRT at: {dst}")
+    return dst

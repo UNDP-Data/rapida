@@ -1,10 +1,15 @@
-import asyncio
 
 import click
+from aenum import no_arg
 
+from rapida.cli import RapidaCommandGroup
 from rapida.components.population import run_download, process_aggregates, population_sync
+from rapida.components.population.wpopstac import stac_search
+from rapida.components.population import constants as wpopconst
+from rapida.util.bbox_param_type import BboxParamType
+import tempfile
 
-@click.group()
+@click.group(cls=RapidaCommandGroup, no_args_is_help=True)
 def population():
     """
     Population data management commands.
@@ -15,12 +20,13 @@ def population():
     pass
 
 
-@population.command(no_args_is_help=True, short_help="Synchronize population data from world pop with data stored in our Azure Storage")
+@population.command(short_help="Synchronize population data from world pop with data stored in our Azure Storage")
 @click.option('--force-reprocessing', help='Force reprocessing of data even if the data specified already exists', is_flag=True)
 @click.option('--country', help='The ISO3 code of the country to process the data for')
 @click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
+@click.option('--year', help='target year', type=int, default=2020)
 @click.option('--all-data', help='Sync all datasets for all countries. It should not be used together with --country flag', is_flag=True, default=False)
-def sync(force_reprocessing, country, download_path, all_data):
+async def sync(force_reprocessing, country, download_path, year, all_data):
     """
     Download population data (sex and age structures) from worldpop,
     then do additional processing to convert them to Cloud Optimised GeoTiff and aggregate them for our needs.
@@ -47,10 +53,10 @@ def sync(force_reprocessing, country, download_path, all_data):
     """
     if all_data and country:
         raise click.UsageError("The --country flag should not be used together with --all-data flag")
-    asyncio.run(population_sync(force_reprocessing=force_reprocessing, country_code=country, download_path=download_path, all_data=all_data))
+    await population_sync(force_reprocessing=force_reprocessing, country_code=country, download_path=download_path, all_data=all_data, year=year)
 
 
-@population.command(no_args_is_help=True, short_help="Download population data (Cloud Optimised GeoTiff format) from UNDP Azure Blob Storage.")
+@population.command(short_help="Download population data (Cloud Optimised GeoTiff format) from UNDP Azure Blob Storage.")
 @click.option('--country',
               help='The ISO3 code of the country to process the data for')
 @click.option('--download-path',
@@ -65,7 +71,7 @@ def sync(force_reprocessing, country, download_path, all_data):
               help='Download only non aggregated files (original worldpop data). Default is to download only aggregated data.',
               is_flag=True,
               default=False)
-def download(country, download_path, age_group, sex, non_aggregates):
+async def download(country, download_path, age_group, sex, non_aggregates):
     """
     Download population data (Cloud Optimised GeoTiff format) from UNDP Azure Blob Storage.
 
@@ -96,15 +102,15 @@ def download(country, download_path, age_group, sex, non_aggregates):
 
     If you would like to download original data for specific conditions, use --sex or --age-group together. `--age-group=total` is not supported for non-aggregate data.
     """
-    asyncio.run(run_download(country_code=country, download_path=download_path, age_group=age_group, sex=sex, non_aggregates=non_aggregates))
+    await run_download(country_code=country, download_path=download_path, age_group=age_group, sex=sex, non_aggregates=non_aggregates)
 
-@population.command(no_args_is_help=True, short_help="Download original worldpop data and aggregate them")
+@population.command(short_help="Download original worldpop data and aggregate them")
 @click.option('--country', help='The ISO3 code of the country to process the data for')
 @click.option('--age-group', help='The age group (child, active or elderly) to process the data for', type=click.Choice(['child', 'active', 'elderly']))
 @click.option('--sex', help='The sex (male or female) to process the data for', type=click.Choice(['male', 'female']))
 @click.option('--download-path', help='The local path to save the data to. If not provided, it will automatically save to the provided azure container that was set when initializing with `rapida init`', required=False)
 @click.option('--force-reprocessing', help='Force reprocessing of data even if the data specified already exists', is_flag=True)
-def aggregate(country, age_group, sex, download_path, force_reprocessing):
+async def aggregate(country, age_group, sex, download_path, force_reprocessing):
     """
     Download original worldpop data and aggregate them
 
@@ -114,4 +120,78 @@ def aggregate(country, age_group, sex, download_path, force_reprocessing):
 
     You can only aggregate for a specific age group or sex by using `--age-group` or `--sex` options.
     """
-    asyncio.run(process_aggregates(country_code=country, age_group=age_group, sex=sex, download_path=download_path, force_reprocessing=force_reprocessing))
+    await process_aggregates(country_code=country, age_group=age_group, sex=sex, download_path=download_path, force_reprocessing=force_reprocessing)
+
+
+
+
+
+@population.command( short_help=f'Search world population data from STAC server')
+
+@click.option('-b', '--bbox',
+              required=True,
+              type=BboxParamType(),
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              )
+
+
+@click.option("--year", "year",
+              type=int,
+              required=False,
+              help='Year for which to search population'
+              )
+@click.option("--sex-category", "sex_category",
+                type=click.Choice(list(wpopconst.SEX_MAPPING.values()) + ['total'], case_sensitive=False),
+                required=True,
+                default='total',
+                help=f'Aggregate population based on sex category'
+    )
+
+@click.option( "--age-group", "age_group",
+                type=click.Choice(list(wpopconst.WORLDPOP_AGE_MAPPING) + ['total'], case_sensitive=False),
+                required=True,
+                default='total',
+                help=f'Sex of the population'
+    )
+
+# @click.option(
+#     "--dst-dir",
+#     "dst_dir",     # Function argument name
+#     type=click.Path(
+#         exists=False,      # Set to True if you want Click to fail if the dir doesn't exist yet
+#         file_okay=False,   # Strictly enforce that this is a directory, not a file
+#         dir_okay=True,
+#         resolve_path=True  # Resolves relative paths (like '.') to absolute paths automatically
+#     ),
+#     default=tempfile.gettempdir(),           # Defaults to the current working directory
+#     show_default=True,     # Tells the user what the default is in the --help menu
+#     help="Destination directory to save the downloaded the images."
+# )
+
+
+
+
+# @click.option(
+#     '--cmask', '-cm', "mask_clouds",
+#     is_flag=True,
+#     help=(
+#             "Enable strict Cloud Masking (ignores pixels with NASA quality flags of 3). "
+#             "Disable this flag during major storm events to prevent atmospheric noise "
+#             "from erroneously masking out legitimate blackout signals."
+#     ),
+#     default=False
+# )
+
+
+
+@click.pass_context
+def search(ctx, bbox:tuple[float, float, float, float]=None, year:int=None, sex_category:str=None, age_group:str=None):
+    progress = ctx.obj.get('progress')
+    with progress:
+        urls = stac_search(bbox=bbox, year=year, sex_category=sex_category,age_group=age_group)
+
+
+
+
+
+

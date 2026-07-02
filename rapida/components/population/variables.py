@@ -1,11 +1,8 @@
 import json
 import os.path
-from rapida import util
-from collections import OrderedDict
 import logging
-
 from rapida.session import Session
-from rapida.util.setup_logger import setup_logger
+from rapida.components.population import constants as const
 
 logger = logging.getLogger(__name__)
 '''
@@ -32,7 +29,7 @@ AGGREGATE = 'total'
 UNDP_AZURE_WPOP_PATH = f'az:{{account_name}}:{{stac_container_name}}/worldpop/{{year}}/{{country}}'
 
 
-def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
+def generate_variables_2020(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
     """
     Generate population variables dict
     :param root:
@@ -51,7 +48,7 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
 
     aggregate_root = os.path.join(root, 'aggregate')
 
-    variables = OrderedDict()
+    variables = dict()
     for sex in sexes:
         for age_item in age_groups:
             age_group, age_seq = age_item
@@ -92,13 +89,64 @@ def generate_variables(root=UNDP_AZURE_WPOP_PATH, aggregate=AGGREGATE, sexes=SEX
     return variables
 
 
+def generate_variables(stac_root=const.WPOP_STAC_URL, aggregate=AGGREGATE, sexes=SEXES, age_groups=AGE_GROUPS):
+    """
+    Generate population variables dict
+    :param root:
+    :param aggregate:
+    :param sexes:
+    :param age_groups:
+    :return:
+    """
+    license = "Creative Commons Attribution 4.0 International"
+    attribution = "WorldPop"
+    variables = dict()
+
+    for sex in sexes:
+        for age_item in age_groups:
+            age_group, age_seq = age_item
+            name = f'{sex}_{age_group}'
+            title = f'{sex.capitalize()} {age_group} population'
+            variables[name] = dict(title=title, source=stac_root, sources=stac_root, operator='sum', license=license, attribution=attribution)
+
+            #age group aggregates
+            name = f'{age_group}_{aggregate}'
+            title = f'{age_group.capitalize()} population'
+            variables[name] = dict(title=title, source=stac_root, sources=stac_root, operator='sum', license=license, attribution=attribution)
+        # sex group aggregates
+        name = f'{sex}_{aggregate}'
+        title = f'{sex.capitalize()} population'
+        variables[name] = dict(title=title, source=stac_root, sources=stac_root, operator='sum', license=license, attribution=attribution)
+
+    name = aggregate
+    title = f'{aggregate.capitalize()} population'
+    sources = '+'.join([f'{e}_{aggregate}' for e in SEXES])
+    variables[name] = dict(title=title, source=stac_root, sources=sources, operator='sum', license=license,
+                           attribution=attribution)
+    #dependencies
+    variables['dependency'] = dict(title='Total dependency ratio', sources='((child_total+elderly_total)/active_total)*100', license=license, attribution=attribution)
+    variables['child_dependency'] = dict(title='Child dependency ratio', sources='(child_total/active_total)*100', license=license, attribution=attribution)
+    variables['elderly_dependency'] = dict(title='Elderly dependency ratio', sources='(elderly_total/active_total)*100', license=license, attribution=attribution)
+    return variables
+
+
+
+
+logger = logging.getLogger(__name__)
+
+
+
+
+
+
 
 
 
 if __name__ == '__main__':
-    logger = setup_logger(name='rapida', level=logging.INFO)
+
 
     variables = generate_variables()
+    print(len(variables))
     print(json.dumps(variables, indent=2))
 
     # with Session() as ses:

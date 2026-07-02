@@ -8,6 +8,8 @@ from pyogrio import write_dataframe
 from pyproj import Transformer
 from rasterio.windows import from_bounds
 
+
+from rapida.components.population.wpopstac import stac_search
 from rapida.constants import POLYGONS_LAYER_NAME,GTIFF_CREATION_OPTIONS
 from rapida.util import geo
 from rapida.core.component import Component
@@ -59,7 +61,6 @@ class PopulationComponent(Component):
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
-
         if not variables:
             variables = self.variables
         else:
@@ -84,7 +85,8 @@ class PopulationComponent(Component):
                 )
 
                 #assess
-                v(year=self.base_year,**kwargs)
+                #v(year=self.base_year,**kwargs)
+                v(**kwargs)
                 kwargs['computed'] |= set([var_name] + (v.dep_vars or []))
 
 
@@ -94,7 +96,7 @@ class PopulationVariable(Variable):
 
 
 
-    def __call__(self, *args, **kwargs):
+    def __call__old(self, *args, **kwargs):
         """
                 Assess a variable. Essentially this means a series of steps in a specific order:
                     - download
@@ -122,7 +124,7 @@ class PopulationVariable(Variable):
                     progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
             else:
                 # logger.debug(f'Computing {self.name} using gdal_calc from sources')
-                self.compute(**kwargs)
+                self.download_compute(**kwargs)
                 if progress is not None and variable_task is not None:
                     progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}', )
 
@@ -137,7 +139,7 @@ class PopulationVariable(Variable):
                     #     progress.update(variable_task, description=f'[blue]Downloaded {self.component}->{self.name}')
                 else:
                     logger.debug(f'Computing {self.name}={self.sources} using GDAL')
-                    self.compute(**kwargs)
+                    self.download_compute(**kwargs)
                     # if progress is not None and variable_task is not None:
                     #     progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}')
             else:
@@ -145,6 +147,46 @@ class PopulationVariable(Variable):
                 logger.debug(f'Resolving {self.name}={self.sources}')
                 sources = self.resolve(**kwargs)
 
+        self.evaluate(**kwargs)
+
+        if progress is not None and variable_task is not None:
+            progress._tasks[variable_task].total = 100
+            progress.update(variable_task, description=f'[green]Assessed {self.component}->{self.name}', advance=100)
+
+    def __call__(self, *args, **kwargs):
+        """
+                Assess a variable. Essentially this means a series of steps in a specific order:
+                    - download
+                    - preprocess
+                    - analysis/zonal stats
+
+                :param kwargs:
+                :return:
+                """
+
+
+        progress = kwargs.get('progress', None)
+
+        if progress is not None:
+            variable_task = progress.add_task(
+                description=f'[blue]Assessing {self.component}->{self.name}', total=None)
+
+        if not self.dep_vars:  # simple variable,
+            logger.debug(f'Computing {self.name} using gdal_calc from sources')
+            self.download_compute(**kwargs)
+            if progress is not None and variable_task is not None:
+                progress.update(variable_task, description=f'[blue]Computed {self.component}->{self.name}', )
+
+        else:
+            logger.debug(f'Formula based eval {self.operator}  for {self.name}')
+
+            if self.operator:
+                logger.debug(f'Computing {self.name}={self.sources} using GDAL')
+                self.download_compute(**kwargs)
+
+            else:
+                logger.debug(f'Resolving {self.name}={self.sources}')
+                sources = self.resolve(**kwargs)
         self.evaluate(**kwargs)
 
         if progress is not None and variable_task is not None:
@@ -241,8 +283,7 @@ class PopulationVariable(Variable):
         dst_layer = f'stats.{self.component}'
         progress = kwargs.get('progress', None)
         year = kwargs.get('year')
-        target_year = kwargs.get('target_year')
-        varname = f'{self.name}_{target_year}'
+        varname = f'{self.name}_{year}'
         with Session() as s:
             project = Project(path=os.getcwd())
             layers = geopandas.list_layers(project.geopackage_file_path)
@@ -252,6 +293,7 @@ class PopulationVariable(Variable):
             else:
                 polygons_layer='polygons'
             if self.operator:
+
                 assert os.path.exists(self.local_path), f'{self.local_path} does not exist'
                 logger.debug(f'Evaluating variable {self.name} using zonal stats')
                 # raster variable, run zonal stats
@@ -268,15 +310,6 @@ class PopulationVariable(Variable):
                                   polygon_ds=project.geopackage_file_path,
                                   polygon_layer=polygons_layer, vars_ops=var_ops, progress=progress
                                   )
-                assert 'year' in kwargs, f'Need year kword to compute pop coeff'
-                assert 'target_year' in kwargs, f'Need target_year keyword to compute pop coeff'
-
-                countries = set(gdf['iso3'])
-                for country in countries:
-                    coeff = get_pop_coeff(base_year=year, target_year=target_year, country_code=country)
-                    gdf.loc[gdf['iso3'] == country, f'{varname}'] *= coeff
-                    if project.raster_mask is not None:
-                        gdf.loc[gdf['iso3'] == country, f'{varname}_affected'] *= coeff
             else:
                 # we eval inside GeoDataFrame
 
@@ -284,7 +317,7 @@ class PopulationVariable(Variable):
                 gdf = geopandas.read_file(filename=project.geopackage_file_path,layer=dst_layer)
                 sources = None
                 for vname in self.dep_vars:
-                    yvname = f'{vname}_{target_year}'
+                    yvname = f'{vname}_{year}'
                     lsources = sources or self.sources
                     sources = lsources.replace(vname, f'{yvname}')
                 expr = f'{varname}={sources}'
@@ -295,7 +328,7 @@ class PopulationVariable(Variable):
                 if project.raster_mask is not None:
                     affected_sources = ''
                     for vname in self.dep_vars:
-                        yvname = f'{vname}_{target_year}'
+                        yvname = f'{vname}_{year}'
                         v = affected_sources or self.sources
                         affected_sources = v.replace(vname, f'{yvname}_affected')
 
@@ -321,6 +354,79 @@ class PopulationVariable(Variable):
                                               srcDS=src,options=options)
 
                 gdal.Unlink(fpath)
+
+    def download_compute(self, **kwargs):
+
+        logger.debug(f'Downloading {self.name}')
+        force = kwargs.get('force')
+        project = Project(os.getcwd())
+        progress = kwargs.get('progress', None)
+        year = kwargs.get('year')
+        self.local_path = os.path.join(self._source_folder_, f'{self.name}_{year}.tif')
+
+
+        if os.path.exists(self.local_path) and not force:
+            if project.raster_mask is not None:
+                assert os.path.exists(self.affected_path), f'{self.affected_path} does not exist'
+            return self.local_path
+        var_path = os.path.join(self._source_folder_, f'{self.name}_{year}.tif')
+
+
+        if not self.dep_vars:
+            if '_' in self.name:
+                sex_category, age_group = self.name.split('_')
+            else:
+                sex_category, age_group = self.name, self.name
+
+
+            var_urls = stac_search(stac_url=self.source, collections=project.countries, year=year,sex_category=sex_category, age_group=age_group)
+            sources = []
+            for var_name, urls in var_urls.items():
+                for country, country_urls in urls.items():
+                    dst = self.local_path.replace('.tif', f'_{country}.tif')
+                    downloaded_files = asyncio.run(download_remote_files(file_urls=country_urls, dst_folder=self._source_folder_, progress=progress, force=force))
+                    if len(downloaded_files) > 1 and self.operator == 'sum':
+                        country_tif = sumup(src_rasters=downloaded_files, dst_raster=dst, overwrite=True)
+                        sources.append(country_tif)
+                    else:
+                        sources.append(downloaded_files[0])
+
+            vrt_path = self.local_path.replace('.tif', '.vrt')
+            vrt_options = gdal.BuildVRTOptions(
+                resolution='highest',
+                resampleAlg='nearest',
+                allowProjectionDifference=False,
+                outputBounds=project.geobounds
+            )
+            with gdal.BuildVRT(destName=vrt_path, srcDSOrSrcDSTab=sources, options=vrt_options) as vrtds:
+                vrtds.FlushCache()
+            with gdal.Translate(destName=var_path, srcDS=vrt_path, options=['-q']) as ds:
+                ds.FlushCache()
+
+
+        else:
+
+            logger.info(f'Going to compute {self.name}={self.sources}')
+            if not os.path.exists(self._source_folder_):
+                os.makedirs(self._source_folder_)
+            sources = self.resolve(**kwargs)
+            ds = Calc(calc=self.sources, outfile=var_path, projectionCheck=True, format='GTiff',
+                      creation_options=GTIFF_CREATION_OPTIONS, quiet=True, overwrite=True, **sources)
+            ds = None
+            assert os.path.exists(var_path), f'The computed file: {var_path} does not exists'
+
+        # import and compute affected version
+        imported_file_path = self.import_raster(source=var_path)
+        assert imported_file_path == self.local_path, f'var_path differs from {imported_file_path}'
+
+        self._compute_affected_(**kwargs)
+
+
+
+
+
+
+
 
     def download(self, **kwargs):
         logger.debug(f'Downloading {self.name}')

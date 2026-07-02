@@ -1,6 +1,6 @@
 from rapida.cli.aclick import RapidaCommandGroup
 from rapida.cli.population import population
-from rapida.util.setup_logger import setup_logger
+
 from rapida.cli.admin import admin
 from rapida.cli.auth import auth
 from rapida.cli.init import init
@@ -16,10 +16,11 @@ from rapida.cli.ntl import ntl
 from rapida.cli.connectivity import connectivity
 from rich.progress import Progress
 import click
-import nest_asyncio
-nest_asyncio.apply()
+# import nest_asyncio
+# nest_asyncio.apply()
 import uvloop
 import asyncio
+
 asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 

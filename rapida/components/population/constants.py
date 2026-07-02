@@ -11,7 +11,7 @@ SEX_MAPPING = {
     "M": "male",
     "F": "female",
 }
-
+WPOP_STAC_URL = 'https://api.stac.worldpop.org/'
 
 DATA_YEAR = 2020
 

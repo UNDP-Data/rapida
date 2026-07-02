@@ -147,6 +147,7 @@ def build_variable_help():
         if vars_list:
             vars_str = ", ".join(vars_list)
             parts.append(f"{comp} ({vars_str})")
+        if comp == 'population': print(len(vars_list))
     return "The variable/s to be assessed. Will be filtered by selected components. Available variables per component:\n\n" + "\n\n".join(parts)
 
 
@@ -262,7 +263,8 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
 
                 component(progress=progress,
                           variables=variables,
-                          target_year=year,
+                          #target_year=year,
+                          year=year,
                           datetime_range=datetime_range,
                           outage_date=outage_date,
                           cloud_cover=cloud_cover,

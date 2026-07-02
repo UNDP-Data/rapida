@@ -61,7 +61,6 @@ class PopulationComponent(Component):
 
     def __call__(self, variables: List[str] = None, **kwargs) -> str:
 
-        print(sorted(self.variables))
         if not variables:
             variables = self.variables
         else:

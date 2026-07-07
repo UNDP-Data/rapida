@@ -16,7 +16,7 @@ import pyogrio
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
 from azure.storage.fileshare import ShareClient
-
+import reverse_geocoder as rg
 from rapida import constants
 from rapida.az.blobstorage import check_blob_exists, delete_blob
 from rapida.session import Session
@@ -159,12 +159,17 @@ class Project:
                     iso3_codes = []
                     for lat, lon in zip(lats, lons):
                         try:
-                            iso3_codes.append(fetch_ccode(lat=lat, lon=lon))
+                            result = rg.search((lat, lon))[0]
+                            iso2_cc = result.get('cc', '')
+                            country = coco.convert(names=iso2_cc, to='ISO3')
+                            iso3_codes.append(country)
                         except Exception as e:
                             logger.warning(f"Failed to fetch ISO3 for point ({lat}, {lon}): {e}")
                             iso3_codes.append(None)
                     gdf["iso3"] = iso3_codes
+
                     self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, gdf["iso3"]))))
+
                     gdf.to_file(
                         filename=self.geopackage_file_path,
                         driver="GPKG",

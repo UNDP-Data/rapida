@@ -257,4 +257,5 @@ def zst(src_rasters:Iterable[str] = None, polygon_ds=None, polygon_layer=None,
             if vname in egdf.columns.tolist():
                 egdf.drop(columns=[vname], inplace=True)
         combined = egdf.merge(combined, on='geometry', how='inner')
+        combined = combined.sort_values(by='geometry', key=lambda geom: geom.to_geo_index().area, ascending=False)
         return combined

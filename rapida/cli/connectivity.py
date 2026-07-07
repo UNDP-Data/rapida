@@ -9,14 +9,14 @@ from rapida.cli.aclick import AsyncCommand
 from rapida.connectivity.isochrone import MODE_MAP
 from rapida.cli.assess import get_variables_by_components
 logger = logging.getLogger(__name__)
-valid_vars = get_variables_by_components(['population'])['population']
+
 
 
 def validate_variables(ctx, param, value):
     """
     click callback function to validate  polulation
     """
-
+    valid_vars = get_variables_by_components(['population'])['population']
     invalid = [v for v in value if v not in valid_vars]
     if invalid:
         raise click.BadParameter(f"Invalid variable{'s' if len(invalid) > 1 else ''}: {', '.join(invalid)} for population . Valid options: {', '.join(valid_vars)}")

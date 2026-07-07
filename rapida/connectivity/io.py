@@ -11,7 +11,7 @@ import logging
 from rich.progress import Progress
 import json
 from shapely.geometry import shape, mapping
-from osgeo import gdal
+from osgeo import gdal, ogr, osr
 from shapely.wkb import loads as load_wkb
 from shapely.ops import orient, transform
 import numpy as np
@@ -58,6 +58,7 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
 
         # Perform quick spatial overlay check
         gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+
         intersecting = gdf[gdf.intersects(bbox_geom)]
 
         if intersecting.empty:
@@ -212,6 +213,67 @@ def extract_origins_from_geojson(geojson_path: str) -> list[tuple[float, float]]
                 origins.append((float(coords[0]), float(coords[1])))
 
     return origins
+
+
+def extract_origins(sites_dataset: str=None, src_layer: str = None) -> list[tuple[float, float]]:
+    """
+    Extracts a list of (longitude, latitude) tuples from a spatial file using OGR.
+    Handles reprojection to WGS84 (EPSG:4326) if the source is not in lat/lon.
+    """
+    # Open the dataset
+    with gdal.OpenEx(sites_dataset, gdal.OF_VECTOR) as src_ds:
+
+        try:
+            layer = src_ds.GetLayer(int(src_layer))
+        except ValueError:
+            layer = src_ds.GetLayerByName(str(src_layer))
+
+        if layer is None:
+            raise ValueError(f"Layer '{src_layer}' could not be found in the dataset {sites_dataset}.")
+
+
+
+        # Set up coordinate transformation to WGS84 (EPSG:4326)
+        source_srs = layer.GetSpatialRef()
+        target_srs = osr.SpatialReference()
+        target_srs.ImportFromEPSG(4326)
+
+        # OGR 3+ strict axis mapping strategy (ensures Longitude/Latitude order)
+        target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+
+        transform = None
+        if source_srs and not source_srs.IsSame(target_srs):
+            transform = osr.CoordinateTransformation(source_srs, target_srs)
+
+        origins = []
+        layer.ResetReading()
+        # Iterate through features
+        for feature in layer:
+            # If you still need the filter: if feature.GetField("osm_id") != 80: continue
+
+            geom = feature.GetGeometryRef()
+            if geom is not None:
+                # Clone geometry to avoid modifying original layer data during transform
+                geom_clone = geom.Clone()
+
+                # Reproject if necessary
+                if transform:
+                    geom_clone.Transform(transform)
+
+                # Helper function to recursively extract points from nested collections
+                def extract_points(g):
+                    name = g.GetGeometryName()
+                    if name == "POINT":
+                        origins.append((g.GetX(), g.GetY()))
+                    elif name in ("MULTIPOINT", "GEOMETRYCOLLECTION"):
+                        for i in range(g.GetGeometryCount()):
+                            sub_geom = g.GetGeometryRef(i)
+                            if sub_geom is not None:
+                                extract_points(sub_geom)
+
+                extract_points(geom_clone)
+
+        return origins
 
 
 def read_barriers_grid(src_path: str, src_layer: str = None, barriers_buffer:float=None) -> list:

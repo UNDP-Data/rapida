@@ -147,7 +147,7 @@ def build_variable_help():
         if vars_list:
             vars_str = ", ".join(vars_list)
             parts.append(f"{comp} ({vars_str})")
-        if comp == 'population': print(len(vars_list))
+
     return "The variable/s to be assessed. Will be filtered by selected components. Available variables per component:\n\n" + "\n\n".join(parts)
 
 
@@ -211,7 +211,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
     rapida assess -c landuse -dt 2025-02-01/2025-05-31 -cc 10: Search Sentinel 2 item which is less than 10% of cloud cover from February to May 2025.
 
     """
-
+    progress = ctx.obj.get('progress')
     if not is_rapida_initialized():
         return
 
@@ -231,7 +231,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
         sys.exit(0)
 
     logger.info(f'Current project/folder: {prj.path}')
-    with Progress(disable=False, console=None) as progress:
+    with progress:
         with Session() as session:
             all_components = session.get_components()
             target_components = components

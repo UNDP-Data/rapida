@@ -1,4 +1,4 @@
-from typing import Union
+from typing import Union, Iterable
 
 import click
 import logging
@@ -7,9 +7,20 @@ from rapida.util.bbox_param_type import BboxParamType
 from rapida.connectivity import run_connectivity_analysis
 from rapida.cli.aclick import AsyncCommand
 from rapida.connectivity.isochrone import MODE_MAP
-
+from rapida.cli.assess import get_variables_by_components
 logger = logging.getLogger(__name__)
+valid_vars = get_variables_by_components(['population'])['population']
 
+
+def validate_variables(ctx, param, value):
+    """
+    click callback function to validate  polulation
+    """
+
+    invalid = [v for v in value if v not in valid_vars]
+    if invalid:
+        raise click.BadParameter(f"Invalid variable{'s' if len(invalid) > 1 else ''}: {', '.join(invalid)} for population . Valid options: {', '.join(valid_vars)}")
+    return value
 
 def parse_intervals(ctx, param, value):
     """Parses a comma-separated string of numbers into a list of integers."""
@@ -46,6 +57,20 @@ def parse_intervals(ctx, param, value):
     help="Comma-separated time intervals in minutes for the catchment areas."
 )
 
+
+@click.option(
+    '-sd', '--sites-dataset',
+    type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
+    default=None,
+    help="Path to an OGR-supported vector data source (e.g., GPKG, Shapefile) containing sites."
+)
+@click.option(
+    '-sl', '--sites-layer',
+    type=str,
+    default="0",
+    help="Name or index of the layer to use from sites dataset. Defaults to the first layer (layer 0)."
+)
+
 @click.option(
     '-bd', '--barriers-dataset',
     type=click.Path(exists=True, file_okay=True, dir_okay=False, readable=True),
@@ -59,12 +84,19 @@ def parse_intervals(ctx, param, value):
     help="Name or index of the layer to use from barriers dataset. Defaults to the first layer (layer 0)."
 )
 
+
 @click.option('-bb', "--barriers-buffer",
     type=int,
     default=5,
     required=False,
     help="The value in meters to used to buffer the geometries in barriers/dataset/layer in case the barriers are lines"
 )
+
+@click.option('--popvar', required=False, multiple=True,
+              type=str, callback=validate_variables,
+              help=f"Open or more RAPIDA population variable to compute zonal stats for withing the connectivity zones"
+              )
+
 @click.option(
     "--dst-dir",
     "-d",           # Short option
@@ -84,12 +116,15 @@ def parse_intervals(ctx, param, value):
 @click.pass_context
 async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_mode:str=None,
                        time_intervals:list[int] =None, dst_dir:str=None,
-                       barriers_dataset:str=None, barriers_layer:str=None, barriers_buffer:int=None
+                       barriers_dataset:str=None, barriers_layer:str=None, barriers_buffer:int=None,
+                       sites_dataset:str=None, sites_layer:str=None,popvar:str|tuple[str]=None
     ):
-    logger.info(f'Running connectivity analysis ')
+    logger.info(f'Running connectivity analysis')
     progress = ctx.obj.get('progress')
     with progress:
         return await run_connectivity_analysis(
             bbox=bbox, dst_dir=dst_dir, travel_mode=travel_mode, time_intervals=time_intervals,
-            barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer, progress=progress
+            barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer,
+            sites_dataset=sites_dataset, sites_layer=sites_layer, pop_vars=popvar,
+            progress=progress
         )

@@ -13,6 +13,8 @@ def setup_debug_logging(ctx, param, value):
             handler.setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled globally.")
     return value
+
+
 class AsyncCommand(click.Command):
     """
     Async wrapper designed to work alongside nest_asyncio in Jupyter
@@ -29,16 +31,20 @@ class AsyncCommand(click.Command):
                 actual_func = inspect.unwrap(orig_callback)
 
                 if inspect.iscoroutinefunction(actual_func):
-                    # Safely get or create the event loop
+                    is_new_loop = False
                     try:
                         loop = asyncio.get_event_loop()
                     except RuntimeError:
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
+                        is_new_loop = True
 
-                    return loop.run_until_complete(orig_callback(*c_args, **c_kwargs))
-
-                return orig_callback(*c_args, **c_kwargs)
+                    try:
+                        return loop.run_until_complete(orig_callback(*c_args, **c_kwargs))
+                    finally:
+                        if is_new_loop:
+                            loop.close()
+                            asyncio.set_event_loop(None)
 
             self.callback = wrapped_callback
 class RapidaCommandGroup(click.Group):
@@ -51,22 +57,19 @@ class RapidaCommandGroup(click.Group):
         return self.commands.keys()
 
     def add_command(self, cmd: click.Command, name: str = None) -> None:
-        # Catch-all: forces help display if a subcommand is run empty
-        has_required_params = any(param.required for param in cmd.params)
-        is_grp = isinstance(cmd, click.Group) or issubclass(cmd.__class__, self.__class__)
-        #print(cmd.name, has_required_params, is_grp, cmd.params)
-        # if not is_grp and has_required_params:
-        #     cmd.no_args_is_help = True
-        # 2. Automatically inject --debug into every registered subcommand
-        cmd.params.append(
-            click.Option(
-                ['--debug'],
-                is_flag=True,
-                help='Enable debug logging.',
-                expose_value=False,
-                callback=setup_debug_logging
+        # Check if the --debug option is already injected
+        has_debug = any(param.name == 'debug' for param in cmd.params)
+
+        if not has_debug:
+            cmd.params.append(
+                click.Option(
+                    ['--debug'],
+                    is_flag=True,
+                    help='Enable debug logging.',
+                    expose_value=False,
+                    callback=setup_debug_logging
+                )
             )
-        )
         super().add_command(cmd, name)
 
     def command(self, *args, **kwargs):

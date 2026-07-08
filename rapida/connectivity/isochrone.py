@@ -1,6 +1,8 @@
 import json
 import asyncio
 from pathlib import Path
+
+import geopandas
 from valhalla import Actor
 from shapely.geometry import shape, mapping, JOIN_STYLE
 from pyproj import Transformer
@@ -21,6 +23,30 @@ project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=Tr
 
 
 
+def make_isochrones_disjoint(gdf, time_col="time", group_col=None):
+    """Converts overlapping concentric isochrones into mutually exclusive rings."""
+    # Ensure data is sorted by travel time (smallest/inner first)
+    sort_cols = [group_col, time_col] if group_col else [time_col]
+    gdf = gdf.sort_values(sort_cols).reset_index(drop=True)
+
+    # Copy to store the result
+    result_gdf = gdf.copy()
+
+    # Iterate backwards to subtract the smaller inner polygon from the larger outer one
+    for i in range(len(gdf) - 1, 0, -1):
+        # If tracking multiple starting points, ensure they belong to the same group
+        if group_col and gdf.loc[i, group_col] != gdf.loc[i - 1, group_col]:
+            continue
+
+        # Subtract the inner geometry from the outer geometry
+        result_gdf.loc[i, "geometry"] = gdf.loc[i, "geometry"].difference(
+            gdf.loc[i - 1, "geometry"]
+        )
+
+    return result_gdf
+
+
+
 
 async def connectivity_areas(
         tar_path: str,
@@ -30,6 +56,7 @@ async def connectivity_areas(
         barriers_dataset:str=None,
         barriers_layer:str=None,
         barriers_buffer:int=None,
+        disjoint:bool=False,
         progress=None
 ) -> dict:
     tar_file = Path(tar_path)
@@ -95,7 +122,7 @@ async def connectivity_areas(
             isochrone_geojson = json.loads(response_str)
 
             # 3. Intercept Valhalla's output and apply Shapely smoothing
-            for feature in isochrone_geojson.get("features", []):
+            for fid, feature in enumerate(isochrone_geojson.get("features", []), start=1):
                 raw_geom_wgs84 = shape(feature["geometry"])
 
                 # 1. Get the bounding box of the raw WGS84 polygon
@@ -143,15 +170,16 @@ async def connectivity_areas(
 
                 # 6. Convert back to WGS84 degrees so the GeoJSON renders on a map properly
                 final_geom_wgs84 = transform(project_to_degrees, smooth_geom_meters)
-
+                feature["id"] = fid
                 feature["geometry"] = mapping(final_geom_wgs84)
 
-                #feature["geometry"] = mapping(raw_geom_wgs84)
+
 
                 feature["properties"].update({
                     "mode": travel_mode,
                     "type": "system_catchment",
-                    "facility_count": len(locations)
+                    "facility_count": len(locations),
+                    "id": fid
                 })
                 results["features"].append(feature)
 
@@ -168,4 +196,12 @@ async def connectivity_areas(
 
         return results
 
-    return await asyncio.to_thread(run_routing)
+    isos = await asyncio.to_thread(run_routing)
+
+    if disjoint:
+
+        # Example Usage:
+        gdf = geopandas.GeoDataFrame.from_features(isos, crs='EPSG:4326')
+        r_gdf = make_isochrones_disjoint(gdf, time_col='contour')
+        isos = r_gdf.to_geo_dict()
+    return isos

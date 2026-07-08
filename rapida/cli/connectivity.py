@@ -36,9 +36,9 @@ def parse_intervals(ctx, param, value):
 @click.command(short_help='run connectivity analysis', cls=AsyncCommand)
 
 @click.option('-b', '--bbox',
-              required=True,
+              required=False,
               type=BboxParamType(),
-              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north'
+              help='Bounding box xmin/west, ymin/south, xmax/east, ymax/north. If not supplied bbox is derived from the site dataset'
               )
 @click.option(
         '-m', "--mode", "travel_mode",
@@ -113,11 +113,22 @@ def parse_intervals(ctx, param, value):
 )
 
 
+@click.option(
+    '--disjoint',
+    is_flag=True,
+    help=(
+            "By default Valhalla routing engine create isochrones as overlapping polygons."
+            "Use this flag to separate the isochrones areas or make them disjoint"
+    ),
+    default=False
+)
+
 @click.pass_context
 async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_mode:str=None,
                        time_intervals:list[int] =None, dst_dir:str=None,
                        barriers_dataset:str=None, barriers_layer:str=None, barriers_buffer:int=None,
-                       sites_dataset:str=None, sites_layer:str=None,popvar:str|tuple[str]=None
+                       sites_dataset:str=None, sites_layer:str=None,popvar:str|tuple[str]=None,
+                       disjoint:bool=False
     ):
     logger.info(f'Running connectivity analysis')
     progress = ctx.obj.get('progress')
@@ -126,5 +137,5 @@ async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_
             bbox=bbox, dst_dir=dst_dir, travel_mode=travel_mode, time_intervals=time_intervals,
             barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer,
             sites_dataset=sites_dataset, sites_layer=sites_layer, pop_vars=popvar,
-            progress=progress
+            progress=progress, disjoint=disjoint
         )

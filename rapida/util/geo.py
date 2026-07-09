@@ -146,15 +146,23 @@ def polygonize_raster_mask(raster_ds=None, band=1, dst_dataset=None, dst_layer=N
 
     with gdal.OpenEx(raster_ds, gdal.OF_RASTER|gdal.OF_READONLY) as rds:
         with gdal.OpenEx(dst_dataset, gdal.OF_VECTOR | gdal.OF_UPDATE) as vds:
-            logger.info(f'Polygonizing {raster_ds} ')
+            logger.info(f'Polygonizing {raster_ds} into {dst_dataset}:{dst_layer} ')
             mband = rds.GetRasterBand(band)
-            mask_lyr = vds.CreateLayer(dst_layer, geom_type=geom_type, srs=rds.GetSpatialRef())
+            layer_index = vds.GetLayerByName(dst_layer)
+            rsrs = rds.GetSpatialRef()
+            if layer_index is not None:
+                vds.DeleteLayer(dst_layer)
+            mask_lyr = vds.CreateLayer(dst_layer, geom_type=geom_type, srs=rsrs)
 
             r = gdal.Polygonize(srcBand=mband, maskBand=mband,outLayer=mask_lyr,iPixValField=-1)
 
             assert r == 0, f'Failed to polygonize {raster_ds}'
+
             for feature in mask_lyr:
+                if rsrs is None:continue
+                if rsrs.IsGeographic():continue
                 geom = feature.GetGeometryRef()
+
                 simplified_geom = geom.Simplify(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)  # Use SimplifyPreserveTopology(tolerance) if needed
                 smoothed_geom = simplified_geom.Buffer(constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER).Buffer(-constants.DEFAULT_MASK_POLYGONIZATION_SMOOTHING_BUFFER)
                 feature.SetGeometry(smoothed_geom)

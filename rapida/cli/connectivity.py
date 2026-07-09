@@ -94,7 +94,7 @@ def parse_intervals(ctx, param, value):
 
 @click.option('--popvar', required=False, multiple=True,
               type=str, callback=validate_variables,
-              help=f"Open or more RAPIDA population variable to compute zonal stats for withing the connectivity zones"
+              help=f"One or more RAPIDA population variable to compute zonal stats for withing the connectivity zones"
               )
 
 @click.option(

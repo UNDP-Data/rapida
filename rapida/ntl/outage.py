@@ -12,15 +12,23 @@ from rapida.ntl.noaa import const as noaa_const
 import numpy as np
 import os
 from rapida.ntl import utils
-from rapida.admin.util import bbox_to_geojson_polygon
+from rapida.util.bbox_param_type import get_best_semantic_label
+from osgeo import gdal, gdal_array, ogr
+from rapida.util.geo import polygonize_raster_mask
+from rapida.cli.assess import assess
+import click
+from rapida.project.project import Project
+from tempfile import TemporaryDirectory
+import geopandas as gpd
+import datetime
 logger = logging.getLogger('rapida')
-
+gdal.UseExceptions()
 
 
 async def detect_outage(
         bbox: tuple[numbers.Number] = None, nominal_date: datetime = None, deliverable: str = None,
-        dst_dir: str = None, mask_clouds:bool = True, percentage_drop:int = None,
-        display: bool = False, progress: Progress = None):
+        dst_dir: str = None, mask_clouds:bool = True, percentage_drop:int = None, pop_vars:str|tuple[str]=None,
+        display: bool = False, progress: Progress = None, year=datetime.datetime.now().year):
 
     logger.info(f'Fetching best imagery for {deliverable} {bbox}-{nominal_date} ')
     # with open(os.path.join('/tmp', 'bbox.geojson'), "w") as ff:
@@ -44,7 +52,7 @@ async def detect_outage(
     monthly_timestamp, monthly_files = next(iter(monthly_results.items()))
     monthly_product, monthly_image_files = next(iter(monthly_files.items()))
 
-    monthly_data, gt = extract_bb(image_files=monthly_image_files, sds_name=nasa_const.SUB_DATASETS['A3'],
+    monthly_data, gt, rsrs = extract_bb(image_files=monthly_image_files, sds_name=nasa_const.SUB_DATASETS['A3'],
                                     bbox=bbox, progress=progress, return_gt=True)
 
     monthly_data_label = f'{monthly_product}_{monthly_timestamp}'
@@ -165,11 +173,92 @@ async def detect_outage(
                 arrays[f'{daily_data_label}_ZSCORE'] = zscore
                 arrays[f'{daily_data_label}_OUTAGE'] = outage
 
-
-    file_name = utils.get_custom_bbox_label(bbox)
-    outage_tif_path = os.path.join(dst_dir, f'{deliverable}_{file_name}.tif')
-    write_outage_tif(src_arrays=arrays, gt=gt, dst_path=outage_tif_path)
     # --- 5. UNIFIED DISPLAY & EXPORT ---
+    #file_name = utils.get_custom_bbox_label(bbox)
+    file_name = get_best_semantic_label(bbox=bbox)
+    outage_tif_path = os.path.join(dst_dir, f'{deliverable}_{file_name}.tif')
+    outage_gpkg_path = os.path.join(dst_dir, f'{deliverable}_{file_name}.gpkg')
+    write_outage_tif(src_arrays=arrays, gt=gt, dst_path=outage_tif_path)
+
+    if pop_vars:
+        # vectorize outage
+        gtiff_driver = gdal.GetDriverByName("GTiff")
+
+        # Ensure parent directory exists
+        os.makedirs(os.path.dirname(os.path.abspath(outage_gpkg_path)), exist_ok=True)
+
+        if not os.path.exists(outage_gpkg_path):
+            # 1. Ask GDAL to sniff out the right driver name based on the path structure/extension
+            v_driver = ogr.GetDriverByName('GPKG')
+
+            # 2. Use the driver to initialize the empty file header
+            with v_driver.CreateDataSource(outage_gpkg_path) as init_ds:
+                pass  # Successfully generated empty stub container
+        for k, arr in arrays.items():
+            if 'outage' in k.lower():
+                # Ensure data type is compatible (e.g., forcing int64/bool to int32/uint8 if needed)
+                if arr.dtype == bool:
+                    arr = arr.astype("uint8")
+                elif arr.dtype == "int64":
+                    arr = arr.astype("int32")  # GDAL standard doesn't always love 64-bit ints
+                gdal_dt = gdal_array.NumericTypeCodeToGDALTypeCode(arr.dtype)
+                rows, cols = arr.shape
+                # Generate a unique virtual memory path
+                vsimem_path = f"/vsimem/{k}.tif"
+
+
+                try:
+                    # Create, write, and safely close the dataset within the context manager
+                    with gtiff_driver.Create(vsimem_path, cols, rows, 1, gdal_dt) as ds:
+                        ds.SetGeoTransform(gt)
+                        ds.SetSpatialRef(rsrs)
+                        band = ds.GetRasterBand(1)
+                        band.WriteArray(arr)
+                        band.FlushCache()
+
+                    # The dataset is now closed, but the file exists in /vsimem/
+                    polygonize_raster_mask(
+                        raster_ds=vsimem_path,  # Passes the string path
+                        dst_dataset=outage_gpkg_path,
+                        dst_layer=k,
+                        geom_type=ogr.wkbPolygon
+                    )
+
+                    with TemporaryDirectory(dir=dst_dir, delete=True) as project_folder:
+                        project = Project(path=project_folder, polygons=outage_gpkg_path,
+                                          comment='temp project for outage zonal stats')
+                        with click.Context(assess) as ctx:
+                            ctx.ensure_object(dict)
+                            ctx.obj['progress'] = progress
+                            # 2. Use invoke. Do NOT pass 'ctx' manually here.
+                            # Click intercepts this and injects it as the first argument automatically.
+                            ctx.invoke(
+                                assess,
+                                components=('population',),
+                                variables=pop_vars,
+                                year=year,
+                                project=project.path,
+                                force=False
+                            )
+                            stat_gpkg_path = os.path.join(project_folder, 'data', f'{project.name}.gpkg')
+                            pop_stat_gdf = gpd.read_file(stat_gpkg_path, layer='stats.population')
+
+                            pop_stat_gdf = pop_stat_gdf.to_crs('EPSG:4326')
+
+                            pop_stat_gdf.to_file(
+                                filename=outage_gpkg_path,
+                                driver="gpkg",
+                                engine="pyogrio",
+                                mode="w",
+                                layer=k,
+                                promote_to_multi=True,
+                                index=False
+                            )
+
+
+                finally:
+                    # Unlink (delete) the virtual file to free up system memory
+                    gdal.Unlink(vsimem_path)
     if display:
         from rapida.ntl import vis
         vis.display2(data=arrays,

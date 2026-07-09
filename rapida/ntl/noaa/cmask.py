@@ -101,7 +101,7 @@ def select_required_granules(sorted_granules: list, bbox: tuple, progress:Progre
                     return combo  # Exits immediately with the absolute minimum required set
 
         logger.warning("Exhausted all combinations. BBOX cannot be fully covered by available data.")
-        logger.warning(f"Selecting max of {combos}.")
+
 
         max_cov = max(combos)
         return combos[max_cov]

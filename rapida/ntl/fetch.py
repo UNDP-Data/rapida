@@ -150,7 +150,6 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
             # Break out of the 'routes' loop to stop searching for this processing_level
             break
 
-    print(downloaded_files)
     return downloaded_files
 
 

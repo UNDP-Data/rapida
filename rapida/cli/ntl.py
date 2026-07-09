@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Iterable
 import click
 import tempfile
-
+from rapida.cli.assess import get_variables_by_components
 from rapida.cli import RapidaCommandGroup
 from rapida.ntl.nasa.const import ARCHIVE, OPERATIONAL, PROCESSING_LEVEL_NAMES, PRODUCT_NAMES, NTL_FILENAME_PATTERN, ROUTES, COLLECTIONS
 from rapida.ntl.nasa.search import search as nasa_search
@@ -16,9 +16,24 @@ from rapida.ntl.noaa.io import download as download_from_noaa, bytesto
 from rich.table import Table
 from rapida.ntl.fetch import DELIVERABLES, fetch as fetch_ntl
 from rapida.ntl.outage import detect_outage
+from rapida.cli.assess import assess
+from rapida.project.project import Project
+from tempfile import TemporaryDirectory
+
 
 logger = logging.getLogger(__name__)
 
+
+
+def validate_variables(ctx, param, value):
+    """
+    click callback function to validate  polulation
+    """
+    valid_vars = get_variables_by_components(['population'])['population']
+    invalid = [v for v in value if v not in valid_vars]
+    if invalid:
+        raise click.BadParameter(f"Invalid variable{'s' if len(invalid) > 1 else ''}: {', '.join(invalid)} for population . Valid options: {', '.join(valid_vars)}")
+    return value
 
 class ProcessingLevelChoiceOption(click.Option):
     """
@@ -499,6 +514,11 @@ async def fetch(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:d
     )
 
 
+@click.option('--popvar', required=False, multiple=True,
+              type=str, callback=validate_variables,
+              help=f"One or more RAPIDA population variable to compute zonal stats for outages"
+              )
+
 @click.option('-ot', "--percentage_drop",
     type=int,
     default=50,
@@ -528,12 +548,13 @@ async def fetch(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:d
 
 @click.pass_context
 async def detect(ctx, bbox:tuple[float, float, float, float]=None, nominal_date:datetime=None, deliverable:str=None,
-                 mask_clouds:bool=True, dst_dir:str=None, percentage_drop:int=None, display:bool=False):
+                 mask_clouds:bool=True, dst_dir:str=None, popvar:str|tuple[str]=None, percentage_drop:int=None, display:bool=False):
     progress = ctx.obj.get('progress')
     with progress:
         return await detect_outage(
             bbox=bbox, nominal_date=nominal_date, deliverable=deliverable, dst_dir=dst_dir,
-            progress=progress, mask_clouds=mask_clouds, percentage_drop=percentage_drop, display=display
+            progress=progress, mask_clouds=mask_clouds, percentage_drop=percentage_drop, display=display,
+            pop_vars=popvar
         )
 
 

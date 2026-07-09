@@ -189,6 +189,7 @@ def extract_bb(image_files: list[str] = None, sds_name:str=None, return_gt=False
     ds = gdal.Translate(destName='', srcDS=vrt_path, **translate_options)
 
     gt = ds.GetGeoTransform()
+    srs = ds.GetSpatialRef()
     [gdal.Unlink(e) for e in to_unlink]
     band = ds.GetRasterBand(1)
     array = band.ReadAsArray()
@@ -196,7 +197,7 @@ def extract_bb(image_files: list[str] = None, sds_name:str=None, return_gt=False
 
     ds = None
     if return_gt:
-        return array, gt
+        return array, gt, srs
     return array
 
 async def extract(image_files: list[str] = None, sds_name:str=None, product:str=None, dst_dir:str=None,

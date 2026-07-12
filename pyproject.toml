@@ -84,7 +84,7 @@ platforms = ["linux-64", "win-64", "osx-arm64"]
 [tool.pixi.dependencies]
 # Python interpreter version pin
 python = "3.12.*"
-numpy = "<= 2"
+numpy = "<=2"
 # Heavy binary geospatial drivers and libraries pulled directly from conda-forge
 gdal = ">=3.12.0"
 fiona = "*"

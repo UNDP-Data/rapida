@@ -14,13 +14,13 @@ authors = [
     { name = "United Nations Development Programme", email = "data@undp.org" }
 ]
 readme = "README.md"
+
+# 1. PURE PYTHON DEPENDENCIES (Managed by internal uv via PyPI)
 dependencies = [
     "httpx",
     "osm2geojson",
-    "shapely",
     "h3",
     "tqdm",
-    #"GDAL",
     "azure-storage-blob",
     "overturemaps",
     "uvloop",
@@ -29,14 +29,9 @@ dependencies = [
     "requests",
     "azure-storage-file-share",
     "asyncclick",
-    "rio-cogeo",
-    "exactextract",
     "pycountry",
     "click",
-    "pyarrow",
     "azure-core",
-    "rasterio",
-    "geopandas",
     "azure-identity",
     "rich",
     "sympy",
@@ -47,8 +42,6 @@ dependencies = [
     "pystac_client",
     "requests-oauthlib",
     "python-dateutil",
-    "fiona",
-    "nest_asyncio",
     "tensorflow-cpu==2.16.2; platform_machine == 'x86_64'",
     "tensorflow==2.16.2; platform_machine == 'aarch64'",
     "psutil",
@@ -57,19 +50,12 @@ dependencies = [
     "ratelimit",
     "obstore>=0.9.5",
     "pyorbital>=1.12.1",
-    "h5py>=3.16.0",
     "fsspec>=2026.4.0",
-    "satpy>=0.59.0",
-    "matplotlib>=3.10.9",
-    "netcdf4>=1.7.3",
-    "h5netcdf>=1.8.1",
     "spacetrack>=1.4.0",
-    "pyvalhalla>=3.7.0",
     "reverse-geocoder>=1.5.1",
 ]
 
 [project.optional-dependencies]
-# dependencies required for development
 dev = [
     "pytest"
 ]
@@ -82,11 +68,37 @@ Homepage = "https://github.com/UNDP-Data/rapida"
 Documentation = "https://github.com/UNDP-Data/rapida"
 Repository = "https://github.com:UNDP-Data/rapida.git"
 Issues = "https://github.com/UNDP-Data/rapida/issues"
-#Changelog = "https://github.com/UNDP-Data/rapida/blob/master/CHANGELOG.md"
 
-# Configure setuptools to find your package
 [tool.setuptools.packages.find]
 include = ["rapida*"]
 
-# Initialize SCM to calculate versions from Git tags
 [tool.setuptools_scm]
+
+# --- 2. PIXI WORKSPACE CONFIGURATION (Manages Binary C-Deps) ---
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "win-64", "osx-arm64"]
+
+[tool.pixi.dependencies]
+# Python interpreter version pin
+python = "3.12.*"
+# Heavy binary geospatial drivers and libraries pulled directly from conda-forge
+gdal = ">=3.12.0"
+fiona = "*"
+rasterio = "*"
+geopandas = "*"
+shapely = "*"
+exactextract = "*"
+rio-cogeo = "*"
+pyarrow = "*"
+h5py = ">=3.16.0"
+satpy = ">=0.59.0"
+matplotlib = ">=3.10.9"
+netcdf4 = ">=1.7.3"
+h5netcdf = ">=1.8.1"
+pyvalhalla = ">=3.7.0"
+
+[tool.pixi.pypi-dependencies]
+# Tells Pixi to install your local package in editable mode via uv
+rapida = { path = ".", editable = true }

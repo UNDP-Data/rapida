@@ -23,7 +23,8 @@ curl.exe -O https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/d
 ```
 
 ## .env  file
-
+Create a .env file and define following environmental variables.
+Alternatively ensure the environmental variables defined below exists in your system
 ```shell
 # for uploading to azure
 TENANT_ID=

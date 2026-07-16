@@ -60,6 +60,10 @@ flowchart LR
 ... and others
 
 
+## [Deploy](deploy.md)
+
+---
+
 ## Data sources
 
 > [!IMPORTANT]

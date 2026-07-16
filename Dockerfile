@@ -16,7 +16,8 @@ ENV UV_LINK_MODE=copy
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install heavy C++ compilers required for building python wheels
-RUN apt-get update && \
+RUN grep -lr 'apache.jfrog.io' /etc/apt/sources.list.d/ | xargs -r rm -f && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
       python3-pip python3-dev gcc g++ git cmake libgeos-dev
 

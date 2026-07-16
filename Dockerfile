@@ -16,7 +16,8 @@ ENV UV_LINK_MODE=copy
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 # Install heavy C++ compilers required for building python wheels
-RUN apt-get update && \
+RUN grep -lr 'apache.jfrog.io' /etc/apt/sources.list.d/ | xargs -r rm -f && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
       python3-pip python3-dev gcc g++ git cmake libgeos-dev
 
@@ -61,7 +62,8 @@ COPY --from=python-builder --chown=1000:1000 /rapida/.venv /rapida/.venv
 
 # Install ONLY runtime dependencies (Playwright needs system UI libraries for Chromium)
 # We do this in one layer and immediately purge the apt cache
-RUN apt-get update && \
+RUN grep -lr 'apache.jfrog.io' /etc/apt/sources.list.d/ | xargs -r rm -f && \
+    apt-get update && \
     playwright install chromium --with-deps && \
     apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/*
 

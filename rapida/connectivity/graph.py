@@ -1,7 +1,6 @@
 import os
 import json
 import asyncio
-import shutil
 from rapida.connectivity.runcli import run_cli
 from valhalla import get_config
 from valhalla.config import _sanitize_config, default_config

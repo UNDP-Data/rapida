@@ -1,0 +1,30 @@
+[workspace]
+name = "rapida"
+channels = ["conda-forge"]
+platforms = ["linux-64", "win-64", "osx-arm64"]
+
+[dependencies]
+# Heavy binary geospatial drivers and libraries
+python = ">=3.12"
+numpy = "<2"
+gdal = ">=3.12.0"
+fiona = "*"
+rasterio = "*"
+geopandas = "*"
+shapely = "*"
+exactextract = "*"
+rio-cogeo = "*"
+pyarrow = "*"
+h5py = ">=3.16.0"
+satpy = ">=0.59.0"
+matplotlib = ">=3.10.9"
+netcdf4 = ">=1.7.3"
+h5netcdf = ">=1.8.1"
+
+[pypi-dependencies]
+# Pixi natively understands Git URLs in the pypi section!
+rapida = { git = "https://github.com/UNDP-Data/rapida.git", branch = "main" }
+dotenv-cli="*"
+
+[tasks]
+rapida = "dotenv -e .env rapida"

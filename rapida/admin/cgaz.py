@@ -61,57 +61,91 @@ def fetch_admin(bbox=None, admin_level=None, clip=False, destination_path=None, 
         progress.remove_task(translate_task)
 
         progress.update(task, advance=1, description="[green]Downloaded admin data", refresh=True)
-        with gdal.OpenEx(destination_path, gdal.OF_VECTOR|gdal.OF_UPDATE) as ds:
+        with gdal.OpenEx(destination_path, gdal.OF_VECTOR | gdal.OF_UPDATE) as ds:
             layer = ds.GetLayerByName(dst_layer_name or f'admin{admin_level}')
+
+            # Guard against empty results
+            if layer is None:
+                logger.error(f"Layer not found. BBOX {bbox} likely resulted in 0 features.")
+                progress.update(task, description="[red]No features found in BBOX", refresh=True)
+                ds = None
+                return None
+
+            # Define feature_count here
+            feature_count = layer.GetFeatureCount()
+
             iso3_field_index = layer.GetLayerDefn().GetFieldIndex("iso3")
 
-            if iso3_field_index >=0:
+            if iso3_field_index >= 0:
                 countries = set([f.GetField("iso3") for f in layer])
                 if len(countries) == 0:
                     raise Exception(f"No countries were found in {bbox}")
+                layer.ResetReading()
             else:
                 raise Exception(f'{url} does not contain iso3 field!')
 
+            # --- 1. BATCH ALL SCHEMA ALTERATIONS FIRST ---
             h3id_field_index = layer.GetLayerDefn().GetFieldIndex("h3id")
-            if h3id_field_index < 0:
-                h3id_field = ogr.FieldDefn("h3id", ogr.OFTInteger64)
-                layer.CreateField(h3id_field)
-                for feature in layer:
-                    geom = feature.GetGeometryRef()
-                    centroid = geom.Centroid()
-                    h3id = h3.latlng_to_cell(lat=centroid.GetY(), lng=centroid.GetX(),
-                                      res=h3id_precision)
-                    feature.SetField("h3id", h3id)
-                    layer.SetFeature(feature)
-            name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
-            source_name_field = f"admin{admin_level}_name"
-            source_name_index = layer.GetLayerDefn().GetFieldIndex(source_name_field)
+            needs_h3 = h3id_field_index < 0
+            if needs_h3:
+                layer.CreateField(ogr.FieldDefn("h3id", ogr.OFTInteger64))
 
-            if source_name_index < 0:
+            source_name_field = f"admin{admin_level}_name"
+            if layer.GetLayerDefn().GetFieldIndex(source_name_field) < 0:
                 raise Exception(f"Source {url} does not contain expected name field: {source_name_field}")
 
-            if name_field_index < 0:
-                name_field = ogr.FieldDefn("name", ogr.OFTString)
-                layer.CreateField(name_field)
-                name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
-                if name_field_index < 0:
-                    raise Exception("Error: 'name' field was not created!")
-                layer.ResetReading()
-                for feature in layer:
-                    fid = feature.GetFID()
-                    name_value = feature.GetField(source_name_field)
-                    feature.SetField("name", name_value)
-                    if layer.SetFeature(feature) != 0:
-                        raise Exception(f"Failed to update feature {fid} with name '{name_value}'")
+            name_field_index = layer.GetLayerDefn().GetFieldIndex("name")
+            needs_name = name_field_index < 0
+            if needs_name:
+                layer.CreateField(ogr.FieldDefn("name", ogr.OFTString))
 
-            if not keep_disputed_areas:
-                layer.ResetReading()
-                for feature in layer:
-                    iso3_country_code = feature.GetField("iso3")
-                    if iso3_country_code not in COUNTRY_CODES:
-                        layer.DeleteFeature(feature.GetFID())
+            # --- 2. SINGLE PASS FOR ALL ROW UPDATES ---
+            layer.ResetReading()
+            fids_to_delete = []
+
+            update_task = progress.add_task("[yellow]Updating features...", total=feature_count)
+
+            for feature in layer:
+                update_needed = False
+
+                if not keep_disputed_areas and feature.GetField("iso3") not in COUNTRY_CODES:
+                    fids_to_delete.append(feature.GetFID())
+                else:
+                    if needs_h3:
+                        geom = feature.GetGeometryRef()
+                        if geom is not None and not geom.IsEmpty():
+                            centroid = geom.Centroid()
+                            if centroid is not None:
+                                h3id = h3.latlng_to_cell(lat=centroid.GetY(), lng=centroid.GetX(),
+                                                         res=h3id_precision)
+                                feature.SetField("h3id", h3id)
+                                update_needed = True
+
+                    if needs_name:
+                        name_value = feature.GetField(source_name_field)
+                        safe_name = str(name_value) if name_value is not None else ""
+                        feature.SetField("name", safe_name)
+                        update_needed = True
+
+                    if update_needed:
+                        if layer.SetFeature(feature) != 0:
+                            logger.warning(f"Failed to update feature {feature.GetFID()}")
+
+                progress.advance(update_task)
+
+            progress.remove_task(update_task)
+
+            # --- 3. EXECUTE DELETIONS ---
+            if fids_to_delete:
+                del_task = progress.add_task("[red]Deleting disputed areas...", total=len(fids_to_delete))
+                for fid in fids_to_delete:
+                    layer.DeleteFeature(fid)
+                    progress.advance(del_task)
+                progress.remove_task(del_task)
 
             ds.FlushCache()
-        progress.update(task, advance=1, description="[green]Download Completed", refresh=True)
-        return None
+
+
+            progress.update(task, advance=1, description="[green]Download completed.", refresh=True)
+            return None
 

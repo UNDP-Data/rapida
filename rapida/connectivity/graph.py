@@ -135,9 +135,15 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
             valhalla_conf["service_limits"]["isochrone"] = {}
 
         # Expand the max_locations limit to allow system-wide bulk routing
-        valhalla_conf["service_limits"]["isochrone"]["max_locations"] = 5000
-        # ---------------------------------------------------------
-
+        valhalla_conf["service_limits"]["isochrone"]["max_locations"] = 50000
+        # # ---------------------------------------------------------
+        # #Override the 100km limit for isochrones (e.g., set to 2000km)
+        # valhalla_conf["service_limits"]["isochrone"]["max_distance"] = 2000000
+        # # Also bump the limits for standard routing/matrix profiles to prevent downstream crashes
+        # for profile in ["auto", "pedestrian", "bicycle", "truck", "bus", "motor_scooter"]:
+        #     if profile not in valhalla_conf["service_limits"]:
+        #         valhalla_conf["service_limits"][profile] = {}
+        #     valhalla_conf["service_limits"][profile]["max_distance"] = 2000000  # 2,000km
     # ---------------------------------------------------------
     # APPLY AUTOMATED JSON SPEED OVERRIDES
     # ---------------------------------------------------------

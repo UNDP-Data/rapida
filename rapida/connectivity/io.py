@@ -1,5 +1,6 @@
 from urllib.parse import urlparse
 import geopandas as gpd
+import pandas as pd
 from shapely.geometry import box
 import os
 import httpx
@@ -31,7 +32,7 @@ async def fetch_geofabrik_index(client: httpx.AsyncClient) -> dict:
     return response.json()
 
 
-async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str = "/tmp", progress: Progress = None,
+async def prepare_osm_pbf_old(bbox: tuple[float, float, float, float], dst_dir: str = "/tmp", progress: Progress = None,
                           max_concurrency: int = 5) -> str:
     """
     Orchestrates the entire top-down OSM extraction pipeline.
@@ -118,6 +119,131 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
     return final_output_pbf
 
 
+async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str = "/tmp", progress: Progress = None,
+                          max_concurrency: int = 5, use_geofabrik: bool = False) -> str:
+    """
+    Orchestrates the entire top-down OSM extraction pipeline, supporting both Geofabrik and Movisda.
+    """
+    minx, miny, maxx, maxy = bbox
+    bbox_geom = box(minx, miny, maxx, maxy)
+    bbox_str = f"{minx},{miny},{maxx},{maxy}"
+
+    dest_path = Path(dst_dir)
+    dest_path.mkdir(parents=True, exist_ok=True)
+    final_output_pbf = str(dest_path / "local_routing.osm.pbf")
+    downloaded_files = []
+
+    async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
+        if use_geofabrik:
+            response = await client.get("https://download.geofabrik.de/index-v1.json")
+            response.raise_for_status()
+            features = [
+                f for f in response.json().get('features', [])
+                if f['properties'].get('iso3166-1:alpha2') or f['properties'].get('iso3166-2')
+            ]
+        else:
+            response = await client.get("https://osm.download.movisda.io/admin/Admin-latest.geojson")
+            response.raise_for_status()
+            features = [
+                f for f in response.json().get('features', [])
+                if str(f['properties'].get('admin_level')) == "2"
+            ]
+
+        gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+        intersecting = gdf[gdf.intersects(bbox_geom)]
+
+        if intersecting.empty:
+            source = "Geofabrik" if use_geofabrik else "Movisda"
+            raise ValueError(f"No valid {source} footprints cover the bbox: {bbox}")
+
+        pbf_urls = []
+        if use_geofabrik:
+            for url in intersecting['urls'].apply(lambda x: x.get('pbf')).dropna():
+                # Routing to the French mirror as originally specified
+                fr_url = url.replace("https://download.geofabrik.de", "http://download.openstreetmap.fr/extracts")
+                pbf_urls.append(fr_url)
+        else:
+            for _, row in intersecting.iterrows():
+                name = row.get('name')
+                prefix = row.get('prefix')
+                timestamp = row.get('timestamp')
+
+                actual_prefix = prefix if pd.notna(prefix) and prefix else f"{name}-"
+                pbf_urls.append(f"https://osm.download.movisda.io/admin/{actual_prefix}{timestamp}.osm.pbf")
+
+        tasks = []
+        semaphore = asyncio.Semaphore(max_concurrency)
+
+        for url in pbf_urls:
+            file_name = os.path.basename(urlparse(url).path)
+            filepath = dest_path / file_name
+
+            tasks.append(asyncio.Task(
+                download_tile(client, url, filepath, semaphore, progress=progress), name=file_name
+            ))
+
+        if progress and pbf_urls:
+            progress_task = progress.add_task(description=f'[red]Downloading {len(tasks)} pbf(s)...', total=len(tasks))
+
+        for task in asyncio.as_completed(tasks, timeout=1800 * len(tasks)):
+            try:
+                downloaded_file = await task
+                if progress and progress_task is not None and pbf_urls:
+                    progress.update(progress_task, description=f'[green]🡇 Downloaded {downloaded_file.name}', advance=1)
+                downloaded_files.append(str(downloaded_file))
+            except Exception as e:
+                logger.error(e)
+                raise
+            except asyncio.CancelledError:
+                for atask in tasks:
+                    if not atask.done():
+                        atask.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+    if progress and pbf_urls:
+        progress.remove_task(progress_task)
+    # ---------------------------------------------------------
+    # NEW LOGIC: Extract FIRST, Merge SECOND
+    # ---------------------------------------------------------
+    extracted_files = []
+
+    # 1. Extract the bounding box from each downloaded country file individually
+    for i, dl_file in enumerate(downloaded_files):
+        ext_file = os.path.join(dst_dir, f"ext_chunk_{i}.osm.pbf")
+
+        run_cli([
+            "osmium", "extract", "--overwrite", "-b", bbox_str, dl_file, "-o", ext_file
+        ])
+
+        extracted_files.append(ext_file)
+        #os.remove(dl_file)  # Clean up the massive country file immediately to save disk space
+
+    # 2. Merge the small bounding box chunks together
+    if len(extracted_files) > 1:
+        run_cli(["osmium", "merge", "--overwrite"] + extracted_files + ["-o", final_output_pbf])
+
+        # Clean up the intermediate chunks
+        for path in extracted_files:
+            os.remove(path)
+    else:
+        # If there was only one file, just rename it to the final output target
+        os.rename(extracted_files[0], final_output_pbf)
+
+    return final_output_pbf
+    # if len(downloaded_files) > 1:
+    #     merged_pbf = os.path.join(dst_dir, "merged_source.osm.pbf")
+    #     run_cli(["osmium", "merge", "--overwrite"] + downloaded_files + ["-o", merged_pbf])
+    #     for path in downloaded_files:
+    #         os.remove(path)
+    #     input_source = merged_pbf
+    # else:
+    #     input_source = downloaded_files[0]
+    #
+    # run_cli([
+    #     "osmium", "extract", "--overwrite", "-b", bbox_str, input_source, "-o", final_output_pbf
+    # ])
+    #
+    # return final_output_pbf
 
 async def extract_health_sites(pbf_path: str, dst_dir: str, progress=None) -> str:
     """

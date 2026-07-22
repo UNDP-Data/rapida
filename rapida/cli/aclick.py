@@ -45,7 +45,8 @@ class AsyncCommand(click.Command):
                         if is_new_loop:
                             loop.close()
                             asyncio.set_event_loop(None)
-
+                else:
+                    return orig_callback(*c_args, **c_kwargs)
             self.callback = wrapped_callback
 class RapidaCommandGroup(click.Group):
     """

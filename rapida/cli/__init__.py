@@ -18,11 +18,11 @@ from rich.progress import Progress
 import click
 import nest_asyncio
 nest_asyncio.apply()
-#import uvloop
-# import asyncio
-#
-# asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
-#
+import uvloop
+import asyncio
+
+asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
+
 
 
 
@@ -79,4 +79,5 @@ cli.add_command(ntl)
 cli.add_command(connectivity)
 
 if __name__ == '__main__':
+
     cli()

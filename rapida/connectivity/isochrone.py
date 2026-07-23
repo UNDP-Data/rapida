@@ -75,6 +75,7 @@ async def connectivity_areas(
     # Update top-level orchestration limits
     valhalla_config["service_limits"]["isochrone"]["max_locations"] = 50000
     valhalla_config["service_limits"]["isochrone"]["max_distance"] = 2000000
+    valhalla_config["service_limits"]["isochrone"]["max_contours"] = 20
 
 
     # THE EXACT MATCHING KEY FROM YOUR CONFIG:
@@ -87,7 +88,8 @@ async def connectivity_areas(
 
     contours = [{"time": int(mins)} for mins in intervals_minutes]
     barriers_coords = read_barriers(src_path=barriers_dataset, src_layer=barriers_layer, barriers_buffer=barriers_buffer)
-    locations = [{"lon": float(lon), "lat": float(lat), "radius": 30000} for lon, lat in origins]
+    locations = [{"lon": float(lon), "lat": float(lat), "radius": 5000} for lon, lat in origins]
+    #locations = [{"lon": float(lon), "lat": float(lat)} for lon, lat in origins]
 
     if progress:
         routing_task_id = progress.add_task(
@@ -112,10 +114,11 @@ async def connectivity_areas(
             "denoise": 0.2,  # Valhalla's native pre-smoothing
             "show_holes": True,  # <-- CRITICAL: Prevents intervals from swallowing each other
             "reverse":True,
-            "radius": "30000"
+
 
         }
-
+        if travel_mode == 'drive':
+            request['costing_options'] = {"auto":{"use_tracks":1, "use_unpaved":1}}
         if barriers_coords:
             request['exclude_polygons'] = barriers_coords
         try:
@@ -172,7 +175,7 @@ async def connectivity_areas(
                 # 6. Convert back to WGS84 degrees so the GeoJSON renders on a map properly
                 final_geom_wgs84 = transform(project_to_degrees, smooth_geom_meters)
                 feature["id"] = fid
-                feature["geometry"] = mapping(final_geom_wgs84)
+                #feature["geometry"] = mapping(final_geom_wgs84)
 
 
 

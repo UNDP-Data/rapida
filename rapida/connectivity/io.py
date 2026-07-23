@@ -120,7 +120,7 @@ async def prepare_osm_pbf_old(bbox: tuple[float, float, float, float], dst_dir: 
 
 
 async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str = "/tmp", progress: Progress = None,
-                          max_concurrency: int = 5, use_geofabrik: bool = False) -> str:
+                          max_concurrency: int = 5, use_geofabrik: bool = True) -> str:
     """
     Orchestrates the entire top-down OSM extraction pipeline, supporting both Geofabrik and Movisda.
     """
@@ -160,8 +160,14 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
         if use_geofabrik:
             for url in intersecting['urls'].apply(lambda x: x.get('pbf')).dropna():
                 # Routing to the French mirror as originally specified
-                fr_url = url.replace("https://download.geofabrik.de", "http://download.openstreetmap.fr/extracts")
-                pbf_urls.append(fr_url)
+                try:
+                    r = await client.head(url=url, follow_redirects=True)
+                    r.raise_for_status()
+                    pbf_urls.append(url)
+                except httpx.HTTPError:
+                    fr_url = url.replace("https://download.geofabrik.de", "http://download.openstreetmap.fr/extracts")
+                    pbf_urls.append(fr_url)
+
         else:
             for _, row in intersecting.iterrows():
                 name = row.get('name')
@@ -202,48 +208,52 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
                 raise
     if progress and pbf_urls:
         progress.remove_task(progress_task)
-    # ---------------------------------------------------------
-    # NEW LOGIC: Extract FIRST, Merge SECOND
-    # ---------------------------------------------------------
-    extracted_files = []
+        # ---------------------------------------------------------
+        # THE FIX: Extract FIRST, Filter Empty, Merge SECOND
+        # ---------------------------------------------------------
+        extracted_chunks = []
 
-    # 1. Extract the bounding box from each downloaded country file individually
-    for i, dl_file in enumerate(downloaded_files):
-        ext_file = os.path.join(dst_dir, f"ext_chunk_{i}.osm.pbf")
+        # 1. Extract the bounding box from each downloaded country file individually
+        for i, dl_file in enumerate(downloaded_files):
+            ext_file = os.path.join(dst_dir, f"ext_chunk_{i}.osm.pbf")
 
-        run_cli([
-            "osmium", "extract", "--overwrite", "-b", bbox_str, dl_file, "-o", ext_file
-        ])
+            # Explicitly use complete_ways to ensure boundary routing integrity
+            run_cli([
+                "osmium", "extract", "--overwrite", "-s", "complete_ways",
+                "-b", bbox_str, dl_file, "-o", ext_file
+            ])
 
-        extracted_files.append(ext_file)
-        #os.remove(dl_file)  # Clean up the massive country file immediately to save disk space
+            # Guard: Check if the extracted file actually contains data.
+            # An empty osmium PBF header is usually ~105-150 bytes.
+            if os.path.exists(ext_file) and os.path.getsize(ext_file) > 250:
+                extracted_chunks.append(ext_file)
+            else:
+                logger.info(f"Chunk for {dl_file} is empty (no OSM data in this bbox). Discarding.")
+                if os.path.exists(ext_file):
+                    os.remove(ext_file)
 
-    # 2. Merge the small bounding box chunks together
-    if len(extracted_files) > 1:
-        run_cli(["osmium", "merge", "--overwrite"] + extracted_files + ["-o", final_output_pbf])
+        # 2. Merge the valid chunks
+        if len(extracted_chunks) > 1:
+            run_cli(["osmium", "merge", "--overwrite"] + extracted_chunks + ["-o", final_output_pbf])
 
-        # Clean up the intermediate chunks
-        for path in extracted_files:
-            os.remove(path)
-    else:
-        # If there was only one file, just rename it to the final output target
-        os.rename(extracted_files[0], final_output_pbf)
+            # Clean up the intermediate chunks
+            for path in extracted_chunks:
+                os.remove(path)
 
-    return final_output_pbf
-    # if len(downloaded_files) > 1:
-    #     merged_pbf = os.path.join(dst_dir, "merged_source.osm.pbf")
-    #     run_cli(["osmium", "merge", "--overwrite"] + downloaded_files + ["-o", merged_pbf])
-    #     for path in downloaded_files:
-    #         os.remove(path)
-    #     input_source = merged_pbf
-    # else:
-    #     input_source = downloaded_files[0]
-    #
-    # run_cli([
-    #     "osmium", "extract", "--overwrite", "-b", bbox_str, input_source, "-o", final_output_pbf
-    # ])
-    #
-    # return final_output_pbf
+        elif len(extracted_chunks) == 1:
+            # If there was only one valid chunk, just rename it to the final output target
+            os.rename(extracted_chunks[0], final_output_pbf)
+
+        else:
+            raise ValueError(f"No OSM data found in the provided bbox: {bbox}")
+
+        # Optional: Clean up the massive downloaded country files to save disk space
+        # for dl_file in downloaded_files:
+        #     if os.path.exists(dl_file):
+        #         os.remove(dl_file)
+
+        return final_output_pbf
+
 
 async def extract_health_sites(pbf_path: str, dst_dir: str, progress=None) -> str:
     """

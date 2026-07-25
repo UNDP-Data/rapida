@@ -242,17 +242,12 @@ class RoadsVariable(Variable):
 
             if self.operator == 'density':
                 df_polygon['area'] = df_polygon.geometry.area
-                length_sum = df_line.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))
-                length_sum_df = length_sum.reset_index(name='total_length')
-                length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
-
-
-
-                # merge with area
-                df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')
-
-                df_polygon[self.name] = df_polygon['total_length'] / df_polygon['area']
-                df_polygon.drop(columns=['total_length', 'area'], inplace=True)
+                length_by_polyid = df_line.groupby("polyid")["geometry"].apply(lambda x: x.length.sum())
+                total_length = df_polygon["h3id"].map(length_by_polyid).fillna(0.0)
+                df_polygon[self.name] = (total_length / df_polygon['area']) \
+                    .replace([float("inf"), float("-inf")], 0.0) \
+                    .fillna(0.0)
+                df_polygon.drop(columns=['area'], inplace=True)
                 output_df = df_polygon
             else:
 
@@ -277,17 +272,13 @@ class RoadsVariable(Variable):
 
                 if self.operator == 'density':
                     df_polygon['area'] = df_polygon.geometry.area
-                    length_sum = df_line_affected.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))
-
-                    length_sum_df = length_sum.reset_index(name='total_length')
-                    length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
-
-                    # merge with area
-                    df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')
-
-                    df_polygon[self.affected_variable] = df_polygon['total_length'] / df_polygon['area']
+                    length_by_polyid = df_line_affected.groupby("polyid")["geometry"].apply(lambda x: x.length.sum())
+                    total_length = df_polygon["h3id"].map(length_by_polyid).fillna(0.0)
+                    df_polygon[self.affected_variable] = (total_length / df_polygon['area']) \
+                        .replace([float("inf"), float("-inf")], 0.0) \
+                        .fillna(0.0)
                     # drop columns
-                    df_polygon.drop(columns=['total_length', 'area'], inplace=True)
+                    df_polygon.drop(columns=['area'], inplace=True)
                     output_df = df_polygon
                     # testing purposes
                     for i, row in output_df.iterrows():

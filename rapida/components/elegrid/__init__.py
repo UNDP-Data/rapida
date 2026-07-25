@@ -189,7 +189,6 @@ class ElectricityVariable(Variable):
                 input_layer_name=self.component,
                 progress=progress
             )
-            el_grid_lines.rename(columns={'h3id': 'polyid'}, inplace=True)
             el_grid_lines.to_file(self.local_path, driver='GPKG', layer=self.component, mode='w')
             self._compute_affected()
             return self.local_path
@@ -217,6 +216,17 @@ class ElectricityVariable(Variable):
 
         df_polygon = gpd.read_file(self.local_path, layer=polygons_layer)
         df_line = gpd.read_file(self.local_path, layer=self.component)
+        if 'h3id' not in df_line.columns:
+            if 'polyid' in df_line.columns:
+                df_line = df_line.rename(columns={'polyid': 'h3id'})
+            else:
+                # Legacy data without polygon id: spatial join to assign polygon ids
+                df_line = gpd.sjoin(
+                    df_line,
+                    df_polygon[['h3id', 'geometry']],
+                    how='left',
+                    predicate='intersects'
+                ).drop(columns=['index_right'], errors='ignore')
 
 
 
@@ -232,9 +242,8 @@ class ElectricityVariable(Variable):
 
             if self.operator == 'density':
                 df_polygon['area'] = df_polygon.geometry.area
-                length_sum = df_line.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))
+                length_sum = df_line.groupby("h3id")["geometry"].apply(lambda x: sum(x.length))
                 length_sum_df = length_sum.reset_index(name='total_length')
-                length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
 
                 # merge with area
                 df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')
@@ -257,14 +266,23 @@ class ElectricityVariable(Variable):
                 if progress is not None and evaluate_task is not None:
                     progress.update(evaluate_task, description=f'[green]Computing {self.affected_layer}.')
                 df_line_affected = gpd.read_file(self.local_path, layer=self.affected_layer)
+                if 'h3id' not in df_line_affected.columns:
+                    if 'polyid' in df_line_affected.columns:
+                        df_line_affected = df_line_affected.rename(columns={'polyid': 'h3id'})
+                    else:
+                        df_line_affected = gpd.sjoin(
+                            df_line_affected,
+                            df_polygon[['h3id', 'geometry']],
+                            how='left',
+                            predicate='intersects'
+                        ).drop(columns=['index_right'], errors='ignore')
 
                 # affected density
                 if self.operator == 'density':
                     df_polygon['area'] = df_polygon.geometry.area
-                    length_sum = df_line_affected.groupby("polyid")["geometry"].apply(lambda x: sum(x.length))
+                    length_sum = df_line_affected.groupby("h3id")["geometry"].apply(lambda x: sum(x.length))
 
                     length_sum_df = length_sum.reset_index(name='total_length')
-                    length_sum_df.rename(columns={"polyid": "h3id"}, inplace=True)
 
                     # merge with area
                     df_polygon = df_polygon.merge(length_sum_df, on="h3id", how='left')

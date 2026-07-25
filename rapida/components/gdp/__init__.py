@@ -33,6 +33,10 @@ class GdpComponent(Component):
 
 
     def __call__(self, variables: List[str] = None, target_year: int=None, **kwargs) -> str:
+        if target_year is None:
+            from datetime import date
+            target_year = date.today().year
+
         if not variables:
             variables = self.variables
         else:

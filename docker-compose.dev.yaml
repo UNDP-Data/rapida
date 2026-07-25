@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: ./Dockerfile
-      target: dev
+      target: prod
     image: rapida-dev:latest
     volumes:
       - ./Makefile:/rapida/Makefile
@@ -13,5 +13,8 @@ services:
       # - ~/.rapida:/root/.rapida
       # uncomment to mount data folder from local
       # - ./data:/data
+    environment:
+      # This allows the container to find the modified rapida source code in the mounted volume
+      - PYTHONPATH=/rapida
     env_file:
       - .env

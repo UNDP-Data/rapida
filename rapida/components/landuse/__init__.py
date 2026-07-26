@@ -420,11 +420,12 @@ class LanduseVariable(Variable):
         source_value = self.target_band_value
 
         calc_creation_options = {
-            "COMPRESS": "ZSTD",
+            "COMPRESS": "DEFLATE",
             "PREDICTOR": 2,
             "BIGTIFF": "IF_SAFER",
             "BLOCKXSIZE": "256",
-            "BLOCKYSIZE": "256"
+            "BLOCKYSIZE": "256",
+            "TILED": "YES"
         }
 
         def progress_callback(complete, message, user_data):

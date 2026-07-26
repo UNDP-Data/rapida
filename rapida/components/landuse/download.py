@@ -311,9 +311,9 @@ async def download_stac(
                 creationOptions=[
                     "BLOCKXSIZE=256",
                     "BLOCKYSIZE=256",
-                    "COMPRESS=ZSTD",
+                    "COMPRESS=DEFLATE",
                     "BIGTIFF=YES",
-                    "RESAMPLING=NEAREST",
+                    "TILED=YES",
                 ],
                 callback=gdal_callback,
                 callback_data=(progress, stac_task, None)

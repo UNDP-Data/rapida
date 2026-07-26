@@ -478,7 +478,7 @@ class SentinelItem(object):
             dstNodata=nodata_value,
             resampleAlg='near',
             format='GTiff',
-            creationOptions=['COMPRESS=ZSTD', 'TILED=YES'],
+            creationOptions=['COMPRESS=DEFLATE', 'TILED=YES', 'BLOCKXSIZE=256', 'BLOCKYSIZE=256'],
             outputBounds=[dst_left, dst_bottom, dst_right, dst_top],  # Exact bounds
             xRes=src_pixel_size,
             yRes=src_pixel_size,

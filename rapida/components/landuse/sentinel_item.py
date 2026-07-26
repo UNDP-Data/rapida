@@ -165,7 +165,7 @@ class SentinelItem(object):
         :param mask_layer: layer name to clip by
         """
         self.item = item
-        self._target_asset = SENTINEL2_ASSET_MAP
+        self._target_asset = SENTINEL2_ASSET_MAP.copy()
         self._target_srs = None
         self._asset_files = {}
         self.mask_file = mask_file
@@ -246,7 +246,7 @@ class SentinelItem(object):
 
         try:
             loop = asyncio.get_event_loop()
-            loop.run_until_complete(
+            downloaded_paths = loop.run_until_complete(
                 download_remote_files(
                     file_urls=file_urls,
                     dst_folder=download_dir,
@@ -254,6 +254,27 @@ class SentinelItem(object):
                     progress=progress, force=force
                 )
             )
+
+            # Normalize asset file paths using actual downloaded file locations.
+            resolved_asset_files = {}
+            for path in downloaded_paths:
+                file_name = os.path.basename(path)
+                band_name, _ = os.path.splitext(file_name)
+                if band_name in self._asset_files:
+                    resolved_asset_files[band_name] = path
+
+            if resolved_asset_files:
+                self._asset_files.update(resolved_asset_files)
+
+            missing_required_bands = [
+                band_name
+                for band_name in LandusePrediction.required_bands
+                if band_name not in self._asset_files or not os.path.exists(self._asset_files[band_name])
+            ]
+            if missing_required_bands:
+                raise FileNotFoundError(
+                    f"{self.id}: Missing required landuse band files after download: {', '.join(missing_required_bands)}"
+                )
 
             # once all downloads are successfully done, write item.json in the folder
             # While item.json not real imagery data it contains some extracted medatada which can be usewful

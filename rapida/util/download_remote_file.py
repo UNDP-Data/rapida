@@ -256,13 +256,15 @@ async def download_remote_files(
             for file_url in file_urls:
                 if target_path_func is not None:
                     target_path = target_path_func(file_url, dst_folder)
-                    new_dirname = os.path.dirname(target_path)
-                    if new_dirname != dst_folder:
-                        os.makedirs(new_dirname, exist_ok=True)
-                    file_name = os.path.basename(target_path)
+                    if target_path is None:
+                        raise ValueError(f"target_path_func returned None for URL: {file_url}")
                 else:
                     file_name = os.path.basename(file_url)
-                target_path = os.path.join(dst_folder, file_name)
+                    target_path = os.path.join(dst_folder, file_name)
+
+                target_dir = os.path.dirname(target_path)
+                if target_dir:
+                    os.makedirs(target_dir, exist_ok=True)
 
                 tasks.append(
                     asyncio.create_task(

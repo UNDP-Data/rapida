@@ -17,6 +17,7 @@ from shapely.wkb import loads as load_wkb
 from shapely.ops import orient, transform
 import numpy as np
 from pyproj import Transformer
+import country_converter
 
 gdal.UseExceptions()
 logger = logging.getLogger(__name__)
@@ -120,7 +121,7 @@ async def prepare_osm_pbf_old(bbox: tuple[float, float, float, float], dst_dir: 
 
 
 async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str = "/tmp", progress: Progress = None,
-                          max_concurrency: int = 5, use_geofabrik: bool = True) -> str:
+                          max_concurrency: int = 5,  clip_country:str=None, use_geofabrik = False) -> str:
     """
     Orchestrates the entire top-down OSM extraction pipeline, supporting both Geofabrik and Movisda.
     """
@@ -133,6 +134,10 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
     final_output_pbf = str(dest_path / "local_routing.osm.pbf")
     downloaded_files = []
 
+
+    osm_source = os.environ.get('CONNECTIVITY_OSM_SOURCE', None)
+    if osm_source is not None:
+        use_geofabrik = osm_source.lower() == 'geofabrik'
     async with httpx.AsyncClient(timeout=None, follow_redirects=True) as client:
         if use_geofabrik:
             response = await client.get("https://download.geofabrik.de/index-v1.json")
@@ -141,6 +146,7 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
                 f for f in response.json().get('features', [])
                 if f['properties'].get('iso3166-1:alpha2') or f['properties'].get('iso3166-2')
             ]
+            name_col = 'name'
         else:
             response = await client.get("https://osm.download.movisda.io/admin/Admin-latest.geojson")
             response.raise_for_status()
@@ -148,23 +154,34 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
                 f for f in response.json().get('features', [])
                 if str(f['properties'].get('admin_level')) == "2"
             ]
+            name_col = 'name_en'
 
         gdf = gpd.GeoDataFrame.from_features(features, crs="EPSG:4326")
+
         intersecting = gdf[gdf.intersects(bbox_geom)]
 
         if intersecting.empty:
             source = "Geofabrik" if use_geofabrik else "Movisda"
             raise ValueError(f"No valid {source} footprints cover the bbox: {bbox}")
 
+
+        intersecting['iso3'] =  country_converter.convert(intersecting[name_col].tolist(), to='ISO3')
+
+        if clip_country:
+            if not clip_country in intersecting['iso3'].tolist():
+                logger.warning(f'cli-country={clip_country} was supplied but it was not found to intersect {bbox}')
+            intersecting = intersecting[intersecting['iso3'] == clip_country]
+
         pbf_urls = []
         if use_geofabrik:
             for url in intersecting['urls'].apply(lambda x: x.get('pbf')).dropna():
-                # Routing to the French mirror as originally specified
+
                 try:
                     r = await client.head(url=url, follow_redirects=True)
                     r.raise_for_status()
                     pbf_urls.append(url)
                 except httpx.HTTPError:
+                    # Routing to the French mirror as a safety measure
                     fr_url = url.replace("https://download.geofabrik.de", "http://download.openstreetmap.fr/extracts")
                     pbf_urls.append(fr_url)
 
@@ -176,6 +193,7 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
 
                 actual_prefix = prefix if pd.notna(prefix) and prefix else f"{name}-"
                 pbf_urls.append(f"https://osm.download.movisda.io/admin/{actual_prefix}{timestamp}.osm.pbf")
+
 
         tasks = []
         semaphore = asyncio.Semaphore(max_concurrency)
@@ -547,3 +565,84 @@ def read_barriers(src_path: str, src_layer: str = None, barriers_buffer: float =
                 exclude_polygons.append(ring_coords)
 
     return exclude_polygons
+
+
+async def extract_water_bodies(pbf_path: str, dst_dir: str, progress=None) -> str:
+    """
+    Extracts inland water bodies, rivers, lakes, and ocean/coastal areas via Osmium,
+    exporting a unified water mask GeoJSON to clip or difference against isochrones.
+    """
+    dst_path = Path(dst_dir)
+    filtered_pbf = dst_path / "water_bodies.osm.pbf"
+    raw_geojson = dst_path / "raw_water_bodies.geojson"
+    final_geojson = dst_path / "water_bodies.geojson"
+
+    # Filter inland water, wide rivers, bays, reservoirs, and coastal water/land boundaries
+    tags_to_keep = [
+        "wr/natural=water,bay,strait,coastline",
+        "wr/waterway=riverbank,dock,canal",
+        "wr/landuse=reservoir,basin",
+        "wr/place=sea,ocean"
+    ]
+
+    if progress:
+        progress.console.print("[cyan]Filtering water bodies and coastlines from OSM via Osmium...[/cyan]")
+
+    # Step 1: Filter PBF down to water and coastline elements
+    run_cli(["osmium", "tags-filter", pbf_path] + tags_to_keep + ["-o", str(filtered_pbf), "--overwrite"])
+
+    # Step 2: Export to GeoJSON
+    # Osmium export automatically constructs closed polygons for natural=water relations/ways
+    run_cli(["osmium", "export", "--overwrite", str(filtered_pbf), "-o", str(raw_geojson)])
+
+    # Step 3: Process geometries and ensure clean polygon outputs in a background thread
+    def process_water_geometries():
+        with open(raw_geojson, "r") as f:
+            data = json.load(f)
+
+        processed_features = []
+
+        for i, feature in enumerate(data.get("features", []), start=1):
+            geom_dict = feature.get("geometry")
+            if not geom_dict:
+                continue
+
+            geom = shape(geom_dict)
+
+            # We only care about polygonal water geometries for clipping/masking
+            if geom.geom_type not in ["Polygon", "MultiPolygon"]:
+                continue
+
+            tags = feature["properties"].get("tags", {})
+
+            processed_features.append({
+                "type": "Feature",
+                "geometry": mapping(geom),
+                "properties": {
+                    "osm_id": feature["properties"].get("id", i),
+                    "name": tags.get("name", "unnamed_water"),
+                    "natural": tags.get("natural"),
+                    "water": tags.get("water"),
+                    "waterway": tags.get("waterway")
+                }
+            })
+
+        data["features"] = processed_features
+
+        with open(final_geojson, "w") as f:
+            json.dump(data, f)
+
+    if progress:
+        progress.console.print("[cyan]Building polygon geometries for water mask...[/cyan]")
+
+    await asyncio.to_thread(process_water_geometries)
+
+    # Clean up intermediate files
+    for path in [filtered_pbf, raw_geojson]:
+        if path.exists():
+            path.unlink()
+
+    if progress:
+        progress.console.print(f"[bold green]✓ Water bodies successfully extracted to: {final_geojson}[/bold green]")
+
+    return str(final_geojson)

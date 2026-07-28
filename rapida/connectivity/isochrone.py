@@ -18,6 +18,10 @@ MODE_MAP = {
     "drive": "auto",
     "bike": "bicycle"
 }
+
+#Example max distance configured for the service
+ISOCHRONES_MAX_RADIUS = 5000.0
+
 project_to_meters = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True).transform
 project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
 
@@ -57,6 +61,8 @@ async def connectivity_areas(
         barriers_layer:str=None,
         barriers_buffer:int=None,
         disjoint:bool=False,
+        smooth:bool=False,
+        radius:int=None,
         progress=None
 ) -> dict:
     tar_file = Path(tar_path)
@@ -88,7 +94,7 @@ async def connectivity_areas(
 
     contours = [{"time": int(mins)} for mins in intervals_minutes]
     barriers_coords = read_barriers(src_path=barriers_dataset, src_layer=barriers_layer, barriers_buffer=barriers_buffer)
-    locations = [{"lon": float(lon), "lat": float(lat), "radius": 5000} for lon, lat in origins]
+    locations = [{"lon": float(lon), "lat": float(lat), "radius": radius} for lon, lat in origins]
     #locations = [{"lon": float(lon), "lat": float(lat)} for lon, lat in origins]
 
     if progress:
@@ -114,11 +120,12 @@ async def connectivity_areas(
             "denoise": 0.2,  # Valhalla's native pre-smoothing
             "show_holes": True,  # <-- CRITICAL: Prevents intervals from swallowing each other
             "reverse":True,
+            "generalize": 20
 
 
         }
         if travel_mode == 'drive':
-            request['costing_options'] = {"auto":{"use_tracks":1, "use_unpaved":1}}
+            request['costing_options'] = {"auto":{"use_tracks":1, "ignore_access":1}}
         if barriers_coords:
             request['exclude_polygons'] = barriers_coords
         try:
@@ -127,62 +134,57 @@ async def connectivity_areas(
 
             # 3. Intercept Valhalla's output and apply Shapely smoothing
             for fid, feature in enumerate(isochrone_geojson.get("features", []), start=1):
-                raw_geom_wgs84 = shape(feature["geometry"])
+                if smooth:
+                    raw_geom_wgs84 = shape(feature["geometry"])
 
-                # 1. Get the bounding box of the raw WGS84 polygon
-                minx, miny, maxx, maxy = raw_geom_wgs84.bounds
+                    # 1. Get the bounding box of the raw WGS84 polygon
+                    minx, miny, maxx, maxy = raw_geom_wgs84.bounds
 
-                # 2. Replicate Valhalla's exact internal grid sizing logic from `thor/isochrone.cc`
-                dx_deg = maxx - minx
-                dy_deg = maxy - miny
+                    # 2. Replicate Valhalla's exact internal grid sizing logic from `thor/isochrone.cc`
+                    dx_deg = maxx - minx
+                    dy_deg = maxy - miny
 
-                # Valhalla targets ~300 bins but rigidly clamps the degree step between 0.001 and 0.005
-                valhalla_degree_step = max(0.001, min(0.005, max(dx_deg, dy_deg) / 300.0))
+                    # Valhalla targets ~300 bins but rigidly clamps the degree step between 0.001 and 0.005
+                    valhalla_degree_step = max(0.001, min(0.005, max(dx_deg, dy_deg) / 300.0))
 
-                # 3. Convert that exact degree step to flat meters at the local latitude
-                # 1 degree latitude is ~111,320 meters.
-                real_cell_size_meters = valhalla_degree_step * 111320
+                    # 3. Convert that exact degree step to flat meters at the local latitude
+                    # 1 degree latitude is ~111,320 meters.
+                    real_cell_size_meters = valhalla_degree_step * 111320
 
-                # 4. Use this true runtime value for your smoothing radius (e.g., 1.5x to 2x the cell size)
-                smooth_radius_meters = real_cell_size_meters * 1.5
+                    # 4. Use this true runtime value for your smoothing radius (e.g., 1.5x to 2x the cell size)
+                    smooth_radius_meters = real_cell_size_meters * 1.5
 
-                # 5. Apply the Morphological Opening/Closing (Buffer out, in, out)
-                geom_meters = transform(project_to_meters, raw_geom_wgs84)
+                    # 5. Apply the Morphological Opening/Closing (Buffer out, in, out)
+                    geom_meters = transform(project_to_meters, raw_geom_wgs84)
+                    # # 3. The Hardcoded Metric Rule of Thumb
+                    # # 500 meters out, 1000 meters in, 500 meters out
+                    # smooth_radius_meters = valhalla_config['meili']['grid']['size'] * 1.05
 
+                    # 4. Morphological Closing (Now using actual physical meters)
+                    smooth_geom_meters = geom_meters.buffer(
+                        smooth_radius_meters,
+                        join_style=JOIN_STYLE.round
+                    ).buffer(
+                        -(smooth_radius_meters * 2),
+                        join_style=JOIN_STYLE.round
+                    ).buffer(
+                        smooth_radius_meters,
+                        join_style=JOIN_STYLE.round
+                    )
 
+                    # 5. Metric Simplification (Drop vertices closer than 50 meters to the line)
+                    smooth_geom_meters = smooth_geom_meters.simplify(50, preserve_topology=True)
 
-                # # 3. The Hardcoded Metric Rule of Thumb
-                # # 500 meters out, 1000 meters in, 500 meters out
-                # smooth_radius_meters = valhalla_config['meili']['grid']['size'] * 1.05
+                    # 6. Convert back to WGS84 degrees so the GeoJSON renders on a map properly
+                    final_geom_wgs84 = transform(project_to_degrees, smooth_geom_meters)
 
-
-
-                # 4. Morphological Closing (Now using actual physical meters)
-                smooth_geom_meters = geom_meters.buffer(
-                    smooth_radius_meters,
-                    join_style=JOIN_STYLE.round
-                ).buffer(
-                    -(smooth_radius_meters * 2),
-                    join_style=JOIN_STYLE.round
-                ).buffer(
-                    smooth_radius_meters,
-                    join_style=JOIN_STYLE.round
-                )
-
-                # 5. Metric Simplification (Drop vertices closer than 50 meters to the line)
-                smooth_geom_meters = smooth_geom_meters.simplify(50, preserve_topology=True)
-
-                # 6. Convert back to WGS84 degrees so the GeoJSON renders on a map properly
-                final_geom_wgs84 = transform(project_to_degrees, smooth_geom_meters)
-                feature["id"] = fid
-                #feature["geometry"] = mapping(final_geom_wgs84)
+                    feature["geometry"] = mapping(final_geom_wgs84)
 
 
 
                 feature["properties"].update({
                     "mode": travel_mode,
                     "type": "system_catchment",
-                    "facility_count": len(locations),
                     "id": fid
                 })
                 results["features"].append(feature)
@@ -198,14 +200,14 @@ async def connectivity_areas(
             if progress and routing_task_id is not None:
                 progress.advance(routing_task_id)
 
-        return results
+        return geopandas.GeoDataFrame.from_features(results, crs='EPSG:4326')
 
-    isos = await asyncio.to_thread(run_routing)
+    isos_gdf = await asyncio.to_thread(run_routing)
 
     if disjoint:
 
         # Example Usage:
-        gdf = geopandas.GeoDataFrame.from_features(isos, crs='EPSG:4326')
-        r_gdf = make_isochrones_disjoint(gdf, time_col='contour')
-        isos = r_gdf.to_geo_dict()
-    return isos
+
+        isos_gdf = make_isochrones_disjoint(isos_gdf, time_col='contour')
+
+    return isos_gdf

@@ -5,7 +5,7 @@ from rapida.util.bbox_param_type import get_best_semantic_label
 import geopandas as gpd
 import logging
 from rich.progress import Progress
-from rapida.connectivity.io import prepare_osm_pbf,extract_health_sites, extract_origins_from_geojson, extract_origins
+from rapida.connectivity.io import prepare_osm_pbf,extract_health_sites, extract_origins_from_geojson, extract_origins, extract_water_bodies
 from rapida.connectivity.graph import compile_valhalla_graph
 from rapida.connectivity.isochrone import connectivity_areas
 from rapida.cli.assess import assess
@@ -19,7 +19,8 @@ async def run_connectivity_analysis(
         bbox:tuple[float, float, float, float]=None, travel_mode:str=None, time_intervals:list[int] =None,
         dst_dir:str=None, barriers_dataset:str=None, barriers_layer:str=None, barriers_buffer:int=None,
         sites_dataset:str=None, sites_layer:str=None,pop_vars:str|tuple[str]=None,
-        progress:Progress=None, year=datetime.datetime.now().year, disjoint:bool=False
+        progress:Progress=None, year=datetime.datetime.now().year, disjoint:bool=False, radius:float=None,
+        clip_country:str=None, smooth:bool=False
     ):
     if bbox is None:
         assert sites_dataset is not None, f'site_dataset has to be provided when bbox is not'
@@ -33,7 +34,9 @@ async def run_connectivity_analysis(
         bbox = gdf.total_bounds
     bbox_label = get_best_semantic_label(bbox=bbox)
     dest_dir = os.path.join(dst_dir, bbox_label)
-    bbox_pbf = await prepare_osm_pbf(bbox=bbox, dst_dir=dest_dir, progress=progress)
+    bbox_pbf = await prepare_osm_pbf(bbox=bbox, dst_dir=dest_dir, progress=progress, clip_country=clip_country)
+
+
     if sites_dataset is None:
         sites = await extract_health_sites(pbf_path=bbox_pbf, dst_dir=dest_dir, progress=progress)
     else:
@@ -43,13 +46,25 @@ async def run_connectivity_analysis(
     origins = extract_origins(sites_dataset=sites, src_layer=sites_layer)
 
 
-    results = await connectivity_areas(
-        tar_path=dag_tar_path, origins=origins, travel_mode=travel_mode, intervals_minutes=time_intervals, disjoint=disjoint)
+    isochrones_gdf = await connectivity_areas(
+        tar_path=dag_tar_path, origins=origins, travel_mode=travel_mode, intervals_minutes=time_intervals,
+        radius=radius, disjoint=disjoint, smooth=smooth)
 
+    water_bodies_path = await extract_water_bodies(pbf_path=bbox_pbf,dst_dir=dest_dir, progress=progress)
+    water_gdf = gpd.read_file(water_bodies_path)
+    if not water_gdf.empty:
+        if isochrones_gdf.crs != water_gdf.crs:
+            water_gdf = water_gdf.to_crs(isochrones_gdf.crs)
 
-    isochrones_path = os.path.join(dest_dir,  'isochrones.geojson')
-    with open(isochrones_path, "w") as f:
-        json.dump(results, f, indent=2)
+        single_water_geom = water_gdf.geometry.union_all()
+        isochrones_gdf["geometry"] = isochrones_gdf.geometry.difference(single_water_geom)
+
+        # 3. Clean up empty/exploded geometries if any were cut into pieces
+        isochrones_gdf = isochrones_gdf[~isochrones_gdf.is_empty].explode(index_parts=False)
+    # 5. Save the final processed isochrones to GeoJSON
+    isochrones_path = os.path.join(dest_dir, "isochrones.geojson")
+    isochrones_gdf.to_file(isochrones_path, driver="GeoJSON")
+
     if pop_vars:
         with TemporaryDirectory(dir=dest_dir, delete=True) as project_folder:
             project = Project(path=project_folder, polygons=isochrones_path, comment='temp project for conn isochrones')

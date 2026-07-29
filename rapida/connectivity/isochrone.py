@@ -5,6 +5,7 @@ from pathlib import Path
 import geopandas
 from valhalla import Actor
 from shapely.geometry import shape, mapping, JOIN_STYLE
+from shapely import make_valid
 from pyproj import Transformer
 from shapely.ops import transform
 import logging
@@ -154,7 +155,7 @@ async def connectivity_areas(
             # 3. Intercept Valhalla's output and apply Shapely smoothing
             for fid, feature in enumerate(isochrone_geojson.get("features", []), start=1):
                 if smooth:
-                    raw_geom_wgs84 = shape(feature["geometry"])
+                    raw_geom_wgs84 = make_valid(shape(feature["geometry"]))
 
                     # 1. Get the bounding box of the raw WGS84 polygon
                     minx, miny, maxx, maxy = raw_geom_wgs84.bounds
@@ -174,7 +175,7 @@ async def connectivity_areas(
                     smooth_radius_meters = real_cell_size_meters * 1.5
 
                     # 5. Apply the Morphological Opening/Closing (Buffer out, in, out)
-                    geom_meters = transform(project_to_meters, raw_geom_wgs84)
+                    geom_meters = make_valid(transform(project_to_meters, raw_geom_wgs84))
 
 
                     # 4. Morphological Closing (Now using actual physical meters)

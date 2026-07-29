@@ -20,7 +20,7 @@ MODE_MAP = {
 }
 
 #Example max distance configured for the service
-ISOCHRONES_MAX_RADIUS = 5000.0
+ISOCHRONES_MAX_RADIUS = 1000.0
 
 project_to_meters = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True).transform
 project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
@@ -30,6 +30,7 @@ project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=Tr
 def make_isochrones_disjoint(gdf, time_col="time", group_col=None):
     """Converts overlapping concentric isochrones into mutually exclusive rings."""
     # Ensure data is sorted by travel time (smallest/inner first)
+    gdf["geometry"] = gdf["geometry"].make_valid()
     sort_cols = [group_col, time_col] if group_col else [time_col]
     gdf = gdf.sort_values(sort_cols).reset_index(drop=True)
 
@@ -62,34 +63,34 @@ async def connectivity_areas(
         barriers_buffer:int=None,
         disjoint:bool=False,
         smooth:bool=False,
-        radius:int=None,
+        radius:int=ISOCHRONES_MAX_RADIUS,
         progress=None
 ) -> dict:
     tar_file = Path(tar_path)
     build_config_file = tar_file.parent / "valhalla.json"
-    runtime_config_file = tar_file.parent / "valhalla_runtime.json"
+    #runtime_config_file = tar_file.parent / "valhalla_runtime.json"
 
-    # 1. Bypass Valhalla's hardcoded multi-origin security limits
-    with open(build_config_file, "r") as f:
-        valhalla_config = json.load(f)
-
-    if "service_limits" not in valhalla_config:
-        valhalla_config["service_limits"] = {}
-    if "isochrone" not in valhalla_config["service_limits"]:
-        valhalla_config["service_limits"]["isochrone"] = {}
-
-    # Update top-level orchestration limits
-    valhalla_config["service_limits"]["isochrone"]["max_locations"] = 50000
-    valhalla_config["service_limits"]["isochrone"]["max_distance"] = 2000000
-    valhalla_config["service_limits"]["isochrone"]["max_contours"] = 20
-
-
-    # THE EXACT MATCHING KEY FROM YOUR CONFIG:
-    valhalla_config["service_limits"]["max_exclude_polygons_length"] = 500000  # Bump to 500km perimeter length
-    valhalla_config["service_limits"]["allow_hard_exclusions"] = True
-
-    with open(runtime_config_file, "w") as f:
-        json.dump(valhalla_config, f)
+    # # 1. Bypass Valhalla's hardcoded multi-origin security limits
+    # with open(build_config_file, "r") as f:
+    #     valhalla_config = json.load(f)
+    #
+    # if "service_limits" not in valhalla_config:
+    #     valhalla_config["service_limits"] = {}
+    # if "isochrone" not in valhalla_config["service_limits"]:
+    #     valhalla_config["service_limits"]["isochrone"] = {}
+    #
+    # # Update top-level orchestration limits
+    # valhalla_config["service_limits"]["isochrone"]["max_locations"] = 50000
+    # valhalla_config["service_limits"]["isochrone"]["max_distance"] = 2000000
+    # valhalla_config["service_limits"]["isochrone"]["max_contours"] = 20
+    #
+    #
+    # # THE EXACT MATCHING KEY FROM YOUR CONFIG:
+    # valhalla_config["service_limits"]["max_exclude_polygons_length"] = 500000  # Bump to 500km perimeter length
+    # valhalla_config["service_limits"]["allow_hard_exclusions"] = True
+    #
+    # with open(runtime_config_file, "w") as f:
+    #     json.dump(valhalla_config, f)
 
 
     contours = [{"time": int(mins)} for mins in intervals_minutes]
@@ -104,28 +105,46 @@ async def connectivity_areas(
         )
 
     def run_routing():
-        actor = Actor(str(runtime_config_file))
+        actor = Actor(str(build_config_file))
         results = {"type": "FeatureCollection", "features": []}
 
 
         costing_name = MODE_MAP.get(travel_mode)
+        # 1. Define mode-specific costing options using Valhalla's internal keys
+        costing_options = {}
 
+        if costing_name == "auto":
+            costing_options["auto"] = {
+                "use_tracks": 1.0,  # Allows routing on unpaved rural tracks
+                "ignore_access": True,  # Bypasses minor OSM access restriction tags
+                "unclassified_penalty": 0,
+            }
+        elif costing_name == "pedestrian":
+            costing_options["pedestrian"] = {
+                "use_tracks": 1.0,
+                "use_hills": 0.5,
+            }
+        elif costing_name == "bicycle":
+            costing_options["bicycle"] = {
+                "use_roads": 0.5,
+                "use_hills": 0.5,
+            }
 
         # 2. Fire a single bulk request per mode
         request = {
             "locations": locations,
             "costing": costing_name,
+            "costing_options": costing_options,
             "contours": contours,
             "polygons": True,
-            "denoise": 0.2,  # Valhalla's native pre-smoothing
-            "show_holes": True,  # <-- CRITICAL: Prevents intervals from swallowing each other
+            "denoise": 0,  # Valhalla's native pre-smoothing
             "reverse":True,
-            "generalize": 20
+            "generalize": 50
 
 
         }
-        if travel_mode == 'drive':
-            request['costing_options'] = {"auto":{"use_tracks":1, "ignore_access":1}}
+        # if travel_mode == 'drive':
+        #     request['costing_options'] = {"auto":{"use_tracks":1, "ignore_access":1}}
         if barriers_coords:
             request['exclude_polygons'] = barriers_coords
         try:
@@ -156,9 +175,7 @@ async def connectivity_areas(
 
                     # 5. Apply the Morphological Opening/Closing (Buffer out, in, out)
                     geom_meters = transform(project_to_meters, raw_geom_wgs84)
-                    # # 3. The Hardcoded Metric Rule of Thumb
-                    # # 500 meters out, 1000 meters in, 500 meters out
-                    # smooth_radius_meters = valhalla_config['meili']['grid']['size'] * 1.05
+
 
                     # 4. Morphological Closing (Now using actual physical meters)
                     smooth_geom_meters = geom_meters.buffer(

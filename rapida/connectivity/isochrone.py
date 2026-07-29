@@ -68,6 +68,7 @@ async def connectivity_areas(
 ) -> dict:
     tar_file = Path(tar_path)
     build_config_file = tar_file.parent / "valhalla.json"
+
     #runtime_config_file = tar_file.parent / "valhalla_runtime.json"
 
     # # 1. Bypass Valhalla's hardcoded multi-origin security limits
@@ -96,7 +97,7 @@ async def connectivity_areas(
     contours = [{"time": int(mins)} for mins in intervals_minutes]
     barriers_coords = read_barriers(src_path=barriers_dataset, src_layer=barriers_layer, barriers_buffer=barriers_buffer)
     locations = [{"lon": float(lon), "lat": float(lat), "radius": radius} for lon, lat in origins]
-    #locations = [{"lon": float(lon), "lat": float(lat)} for lon, lat in origins]
+
 
     if progress:
         routing_task_id = progress.add_task(
@@ -137,14 +138,13 @@ async def connectivity_areas(
             "costing_options": costing_options,
             "contours": contours,
             "polygons": True,
-            "denoise": 0,  # Valhalla's native pre-smoothing
+            "denoise": 0,  # Valhalla's native pre-smoothing captures all the details when 0
             "reverse":True,
             "generalize": 50
 
 
         }
-        # if travel_mode == 'drive':
-        #     request['costing_options'] = {"auto":{"use_tracks":1, "ignore_access":1}}
+
         if barriers_coords:
             request['exclude_polygons'] = barriers_coords
         try:
@@ -190,7 +190,7 @@ async def connectivity_areas(
                     )
 
                     # 5. Metric Simplification (Drop vertices closer than 50 meters to the line)
-                    smooth_geom_meters = smooth_geom_meters.simplify(50, preserve_topology=True)
+                    smooth_geom_meters = smooth_geom_meters.simplify(20, preserve_topology=True)
 
                     # 6. Convert back to WGS84 degrees so the GeoJSON renders on a map properly
                     final_geom_wgs84 = transform(project_to_degrees, smooth_geom_meters)

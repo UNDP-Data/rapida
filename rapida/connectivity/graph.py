@@ -107,12 +107,12 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
     tile_dir = os.path.join(dst_dir, "valhalla_tiles")
     os.makedirs(tile_dir, exist_ok=True)
     tar_path = os.path.join(dst_dir, "valhalla_tiles.tar")
-    #os.makedirs(tar_path, exist_ok=True)
+
     config_path = os.path.join(dst_dir, "valhalla.json")
 
     # 1. Generate the Valhalla JSON configuration natively
     if progress:
-        progress.console.print("[cyan]Generating Valhalla engine configuration...[/cyan]")
+        progress.console.print("[cyan]Generating Valhalla engine configuration ...[/cyan]")
 
     try:
         valhalla_conf = get_config(
@@ -126,20 +126,35 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
             tile_extract=tar_path,
             verbose=False
         )
-        # ---------------------------------------------------------
-        # INJECT CUSTOM LIMITS BEFORE SAVING THE BUILD CONFIG
-        # ---------------------------------------------------------
-        if "service_limits" not in valhalla_conf:
-            valhalla_conf["service_limits"] = {}
-        if "isochrone" not in valhalla_conf["service_limits"]:
-            valhalla_conf["service_limits"]["isochrone"] = {}
+    # ---------------------------------------------------------
+    # INJECT LOKI DEFAULTS FOR RURAL/SPARSE ROUTING
+    # ---------------------------------------------------------
+    if "loki" not in valhalla_conf:
+        valhalla_conf["loki"] = {}
+    if "service_defaults" not in valhalla_conf["loki"]:
+        valhalla_conf["loki"]["service_defaults"] = {}
 
-        # Expand the max_locations limit to allow system-wide bulk routing
-        valhalla_conf["service_limits"]["isochrone"]["max_locations"] = 50000
-        valhalla_conf["service_limits"]["isochrone"]["max_distance"] = 2000000
-        valhalla_conf["service_limits"]["isochrone"]["max_contours"] = 20
-        valhalla_conf["service_limits"]["max_exclude_polygons_length"] = 500000  # Bump to 500km perimeter length
-        valhalla_conf["service_limits"]["allow_hard_exclusions"] = True
+    # Avoid snapping to disconnected islands (farm tracks)
+    valhalla_conf["loki"]["service_defaults"]["minimum_reachability"] = 10
+    # Do not penalize roads that are physically far from the POI
+    valhalla_conf["loki"]["service_defaults"]["street_side_max_distance"] = 5000
+    # Extend the maximum search radius for deeply isolated points
+    #valhalla_conf["loki"]["service_defaults"]["search_cutoff"] = 50000
+
+    # ---------------------------------------------------------
+    # INJECT CUSTOM LIMITS BEFORE SAVING THE BUILD CONFIG
+    # ---------------------------------------------------------
+    if "service_limits" not in valhalla_conf:
+        valhalla_conf["service_limits"] = {}
+    if "isochrone" not in valhalla_conf["service_limits"]:
+        valhalla_conf["service_limits"]["isochrone"] = {}
+
+    # Expand the max_locations limit to allow system-wide bulk routing
+    valhalla_conf["service_limits"]["isochrone"]["max_locations"] = 50000
+    valhalla_conf["service_limits"]["isochrone"]["max_distance"] = 2000000
+    valhalla_conf["service_limits"]["isochrone"]["max_contours"] = 20
+    valhalla_conf["service_limits"]["max_exclude_polygons_length"] = 500000  # Bump to 500km perimeter length
+    valhalla_conf["service_limits"]["allow_hard_exclusions"] = True
 
     # ---------------------------------------------------------
     # APPLY AUTOMATED JSON SPEED OVERRIDES
@@ -187,6 +202,8 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
 
     with open(config_path, "w") as f:
         json.dump(valhalla_conf, f, indent=4)
+
+
 
     # 2. Define the blocking C++ execution function
     def run_compiler():

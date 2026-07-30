@@ -7,8 +7,9 @@ from valhalla import Actor
 from shapely.geometry import shape, mapping, JOIN_STYLE
 from shapely import make_valid
 from pyproj import Transformer
-from shapely.ops import transform
+from shapely.ops import transform, unary_union
 import logging
+import numpy as np
 from rapida.connectivity.io import read_barriers
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,40 @@ project_to_meters = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=Tru
 project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
 
 
+def get_empirical_radius(geom_meters, fallback_radius):
+    """Dynamically calculates the smoothing radius based on polygon segment lengths."""
+    try:
+        # Handle both Polygons and MultiPolygons safely
+        polys = geom_meters.geoms if geom_meters.geom_type == 'MultiPolygon' else [geom_meters]
+        lengths = []
+
+        for poly in polys:
+            coords = poly.exterior.coords
+            # Fast vectorized distance calculation between consecutive vertices
+            x = np.array([c[0] for c in coords])
+            y = np.array([c[1] for c in coords])
+            dist = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
+
+            # Keep only meaningful segments (ignoring duplicate vertices < 1 meter)
+            lengths.extend(dist[dist > 1.0])
+
+        if lengths:
+            # The 15th percentile reliably targets the smallest common denominator (the grid step)
+            empirical_cell_size = np.percentile(lengths, 50)
+            # Round to the nearest meter to group floating-point variations
+            rounded_lengths = np.round(lengths, decimals=0)
+
+            # Find the most frequent rounded length (the mode)
+            values, counts = np.unique(rounded_lengths, return_counts=True)
+            empirical_cell_size = values[np.argmax(counts)]
+
+            # Apply the 0.85 multiplier to tightly fuse the grid without ballooning
+            return empirical_cell_size * 1.44
+
+    except Exception as e:
+        logger.warning(f"Empirical radius calculation failed, using fallback: {e}")
+
+    return fallback_radius
 
 def make_isochrones_disjoint(gdf, time_col="time", group_col=None):
     """Converts overlapping concentric isochrones into mutually exclusive rings."""
@@ -69,31 +104,6 @@ async def connectivity_areas(
 ) -> dict:
     tar_file = Path(tar_path)
     build_config_file = tar_file.parent / "valhalla.json"
-
-    #runtime_config_file = tar_file.parent / "valhalla_runtime.json"
-
-    # # 1. Bypass Valhalla's hardcoded multi-origin security limits
-    # with open(build_config_file, "r") as f:
-    #     valhalla_config = json.load(f)
-    #
-    # if "service_limits" not in valhalla_config:
-    #     valhalla_config["service_limits"] = {}
-    # if "isochrone" not in valhalla_config["service_limits"]:
-    #     valhalla_config["service_limits"]["isochrone"] = {}
-    #
-    # # Update top-level orchestration limits
-    # valhalla_config["service_limits"]["isochrone"]["max_locations"] = 50000
-    # valhalla_config["service_limits"]["isochrone"]["max_distance"] = 2000000
-    # valhalla_config["service_limits"]["isochrone"]["max_contours"] = 20
-    #
-    #
-    # # THE EXACT MATCHING KEY FROM YOUR CONFIG:
-    # valhalla_config["service_limits"]["max_exclude_polygons_length"] = 500000  # Bump to 500km perimeter length
-    # valhalla_config["service_limits"]["allow_hard_exclusions"] = True
-    #
-    # with open(runtime_config_file, "w") as f:
-    #     json.dump(valhalla_config, f)
-
 
     contours = [{"time": int(mins)} for mins in intervals_minutes]
     barriers_coords = read_barriers(src_path=barriers_dataset, src_layer=barriers_layer, barriers_buffer=barriers_buffer)
@@ -172,27 +182,52 @@ async def connectivity_areas(
                     real_cell_size_meters = valhalla_degree_step * 111320
 
                     # 4. Use this true runtime value for your smoothing radius (e.g., 1.5x to 2x the cell size)
-                    smooth_radius_meters = real_cell_size_meters * 1.5
+                    smooth_radius_meters = real_cell_size_meters * .85
 
                     # 5. Apply the Morphological Opening/Closing (Buffer out, in, out)
                     geom_meters = make_valid(transform(project_to_meters, raw_geom_wgs84))
+                    # 6. Explode MultiPolygon into individual Polygons
+                    polys = geom_meters.geoms if geom_meters.geom_type == 'MultiPolygon' else [geom_meters]
+                    smoothed_polys = []
 
+                    for poly in polys:
+                        smooth_radius_meters1 = get_empirical_radius(poly, smooth_radius_meters)
+                        # Morphological Closing on each individual polygon
+                        smoothed = poly.buffer(
+                            smooth_radius_meters1,
+                            join_style=JOIN_STYLE.round
+                        ).buffer(
+                            -smooth_radius_meters1,
+                            join_style=JOIN_STYLE.round
+                        )
 
-                    # 4. Morphological Closing (Now using actual physical meters)
-                    smooth_geom_meters = geom_meters.buffer(
-                        smooth_radius_meters,
-                        join_style=JOIN_STYLE.round
-                    ).buffer(
-                        -(smooth_radius_meters * 2),
-                        join_style=JOIN_STYLE.round
-                    ).buffer(
-                        smooth_radius_meters,
-                        join_style=JOIN_STYLE.round
-                    )
+                        # Simplification on each individual polygon
+                        smoothed = smoothed.simplify(50, preserve_topology=True)
 
-                    # 5. Metric Simplification (Drop vertices closer than 50 meters to the line)
-                    smooth_geom_meters = smooth_geom_meters.simplify(20, preserve_topology=True)
+                        # Ignore any polygons that completely disappeared during the negative buffer
+                        if not smoothed.is_empty:
+                            smoothed_polys.append(smoothed)
 
+                    # 7. Recombine back into a valid MultiPolygon
+                    # Using unary_union safely merges any internal overlaps that the buffering might have caused
+                    smooth_geom_meters = make_valid(unary_union(smoothed_polys))
+
+                    # # 5. Calculate empirical radius
+                    # smooth_radius_meters1 = get_empirical_radius(geom_meters, smooth_radius_meters)
+                    #
+                    # # 4. Morphological Closing (Buffer OUT, then IN by the same amount)
+                    # # This fills the jagged grid gaps and rounds corners without severing thin corridors.
+                    # smooth_geom_meters = geom_meters.buffer(
+                    #     smooth_radius_meters1,
+                    #     join_style=JOIN_STYLE.round
+                    # ).buffer(
+                    #     -smooth_radius_meters1,
+                    #     join_style=JOIN_STYLE.round
+                    # )
+                    #
+                    # # 5. Metric Simplification (Drop vertices closer than 50 meters to the line)
+                    # smooth_geom_meters = smooth_geom_meters.simplify(20, preserve_topology=True)
+                    #
                     # 6. Convert back to WGS84 degrees so the GeoJSON renders on a map properly
                     final_geom_wgs84 = transform(project_to_degrees, smooth_geom_meters)
 

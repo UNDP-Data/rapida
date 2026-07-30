@@ -151,9 +151,9 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
 
     # Expand the max_locations limit to allow system-wide bulk routing
     valhalla_conf["service_limits"]["isochrone"]["max_locations"] = 50000
-    valhalla_conf["service_limits"]["isochrone"]["max_distance"] = 2000000
+    valhalla_conf["service_limits"]["isochrone"]["max_distance"] = 20000000
     valhalla_conf["service_limits"]["isochrone"]["max_contours"] = 20
-    valhalla_conf["service_limits"]["max_exclude_polygons_length"] = 500000  # Bump to 500km perimeter length
+    valhalla_conf["service_limits"]["max_exclude_polygons_length"] = 500000000  # Bump to 50000km perimeter length
     valhalla_conf["service_limits"]["allow_hard_exclusions"] = True
 
     # ---------------------------------------------------------

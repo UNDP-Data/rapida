@@ -170,7 +170,8 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
         if clip_country:
             if not clip_country in intersecting['iso3'].tolist():
                 logger.warning(f'cli-country={clip_country} was supplied but it was not found to intersect {bbox}')
-            intersecting = intersecting[intersecting['iso3'] == clip_country]
+            else:
+                intersecting = intersecting[intersecting['iso3'] == clip_country]
 
         pbf_urls = []
         if use_geofabrik:
@@ -533,12 +534,27 @@ def read_barriers(src_path: str, src_layer: str = None, barriers_buffer: float =
 
         if lyr is None:
             raise ValueError(f"Layer '{src_layer}' could not be found.")
+        source_srs = lyr.GetSpatialRef()
+        target_srs = osr.SpatialReference()
+        target_srs.ImportFromEPSG(4326)
+        # CRITICAL for GDAL 3+: Force traditional Longitude/Latitude (X/Y) axis order
+        target_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
 
+        # 3. Check if they are different to avoid redundant transformations
+        needs_reprojection = False
+        coord_trans = None
+
+        if source_srs is not None and not source_srs.IsSame(target_srs):
+            needs_reprojection = True
+            coord_trans = osr.CoordinateTransformation(source_srs, target_srs)
         lyr.ResetReading()
         for feat in lyr:
             geom_ogr = feat.GetGeometryRef()
             if geom_ogr is None or geom_ogr.IsEmpty():
                 continue
+            # 4. Reproject the geometry in place
+            if needs_reprojection:
+                geom_ogr.Transform(coord_trans)
 
             wkb_output = geom_ogr.ExportToWkb()
             if wkb_output is None or isinstance(wkb_output, int):

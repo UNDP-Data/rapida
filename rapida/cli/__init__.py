@@ -18,10 +18,6 @@ from rich.progress import Progress
 import click
 import nest_asyncio
 nest_asyncio.apply()
-import uvloop
-import asyncio
-
-asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
 
 
 

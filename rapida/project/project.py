@@ -16,7 +16,7 @@ import pyogrio
 from geopandas import GeoDataFrame
 from osgeo import gdal, ogr, osr
 from azure.storage.fileshare import ShareClient
-import reverse_geocoder as rg
+import geopandas as gpd
 from rapida import constants
 from rapida.az.blobstorage import check_blob_exists, delete_blob
 from rapida.session import Session
@@ -107,8 +107,10 @@ class Project:
 
             if polygons is not None:
                 l = geopandas.list_layers(polygons)
+
                 lnames = l.name.tolist()
                 lcount = len(lnames)
+
                 if lcount > 1:
                     click.echo(f'{polygons} contains {lcount} layers: {",".join(lnames)}')
                     layer_name = click.prompt(
@@ -142,34 +144,38 @@ class Project:
                 if  "iso3" in cols and gdf['iso3'].isna().any():
                     gdf.drop(columns=["iso3"], inplace=True)
                 cols = gdf.columns.tolist()
-                if 'iso3' not in cols:
+
+                if not 'iso3' in cols:
                     logger.info(
                         'ISO3 column missing or some values are empty in ISO3 column. '
-                        'Going to add country codes into "iso3" column'
+                        'Going to add country codes into "iso3" column via spatial join.'
                     )
-                    geo_srs = osr.SpatialReference()
-                    geo_srs.ImportFromEPSG(4326)
-                    geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
-                    coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
-                    centroids = gdf.geometry.centroid
-                    transformed = [coord_trans.TransformPoint(x, y) for x, y in zip(centroids.x, centroids.y)]
-                    lats = [t[1] for t in transformed]
-                    lons = [t[0] for t in transformed]
+                    url = f"/vsicurl/https://undpngddlsgeohubdev01.blob.core.windows.net/admin/cgaz/geoBoundariesCGAZ_ADM0.fgb"
+                    # 1. Extract centroids first
+                    centroids = gdf.copy()
+                    if 'iso3' in centroids.columns:
+                        centroids = centroids.drop(columns=['iso3'])
+                    centroids.geometry = centroids.geometry.centroid.representative_point()
 
-                    iso3_codes = []
-                    for lat, lon in zip(lats, lons):
-                        try:
-                            result = rg.search((lat, lon))[0]
-                            iso2_cc = result.get('cc', '')
-                            country = coco.convert(names=iso2_cc, to='ISO3')
-                            iso3_codes.append(country)
-                        except Exception as e:
-                            logger.warning(f"Failed to fetch ISO3 for point ({lat}, {lon}): {e}")
-                            iso3_codes.append(None)
-                    gdf["iso3"] = iso3_codes
+                    # 2. Project centroids to EPSG:4326 for the remote mask query
+                    centroids_4326 = centroids.to_crs(epsg=4326)
+                    centroids_4326.to_file('/tmp/isocen.fgb', engine='pyogrio')
 
-                    self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, gdf["iso3"]))))
+                    # 3. Use 'mask' instead of 'bbox'. This asks GDAL to only download
+                    # features that intersect your specific points, ignoring empty space.
+                    a0_gdf = gpd.read_file(url, mask=centroids_4326, engine="pyogrio")
 
+                    # 4. Perform vectorized spatial join (both are now in EPSG:4326)
+                    joined = gpd.sjoin(centroids_4326, a0_gdf, how='left', predicate='within')
+
+                    # 5. Drop potential duplicates from borders and assign back to original gdf
+                    joined = joined[~joined.index.duplicated(keep='first')]
+                    gdf['iso3'] = joined['iso3']
+
+                    # # 6. Generate the tuple of valid country codes
+                    # self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, gdf["iso3"]))))
+
+                    # 7. Export to GeoPackage
                     gdf.to_file(
                         filename=self.geopackage_file_path,
                         driver="GPKG",
@@ -179,6 +185,44 @@ class Project:
                         promote_to_multi=True,
                         index=False
                     )
+
+                # if 'iso3' not in cols:
+                #     logger.info(
+                #         'ISO3 column missing or some values are empty in ISO3 column. '
+                #         'Going to add country codes into "iso3" column'
+                #     )
+                #     geo_srs = osr.SpatialReference()
+                #     geo_srs.ImportFromEPSG(4326)
+                #     geo_srs.SetAxisMappingStrategy(osr.OAMS_TRADITIONAL_GIS_ORDER)
+                #     coord_trans = osr.CoordinateTransformation(self.target_srs, geo_srs)
+                #     centroids = gdf.geometry.centroid
+                #     transformed = [coord_trans.TransformPoint(x, y) for x, y in zip(centroids.x, centroids.y)]
+                #     lats = [t[1] for t in transformed]
+                #     lons = [t[0] for t in transformed]
+                #
+                #     iso3_codes = []
+                #     for lat, lon in zip(lats, lons):
+                #         try:
+                #             result = rg.search((lat, lon))[0]
+                #             iso2_cc = result.get('cc', '')
+                #             country = coco.convert(names=iso2_cc, to='ISO3')
+                #             iso3_codes.append(country)
+                #         except Exception as e:
+                #             logger.warning(f"Failed to fetch ISO3 for point ({lat}, {lon}): {e}")
+                #             iso3_codes.append(None)
+                #     gdf["iso3"] = iso3_codes
+                #
+                #     self.countries = tuple(sorted(set(filter(lambda x: x in COUNTRY_CODES, gdf["iso3"]))))
+                #
+                #     gdf.to_file(
+                #         filename=self.geopackage_file_path,
+                #         driver="GPKG",
+                #         engine="pyogrio",
+                #         mode="w",
+                #         layer=self.polygons_layer_name,
+                #         promote_to_multi=True,
+                #         index=False
+                #     )
 
                 if 'h3id' in cols:
                     h3ids = gdf['h3id'].tolist()

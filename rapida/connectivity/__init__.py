@@ -50,20 +50,33 @@ async def run_connectivity_analysis(
         tar_path=dag_tar_path, origins=origins, travel_mode=travel_mode, intervals_minutes=time_intervals,
         radius=radius, disjoint=disjoint, smooth=smooth)
 
+    if clip_country:
+        url = f"/vsicurl/https://undpngddlsgeohubdev01.blob.core.windows.net/admin/cgaz/geoBoundariesCGAZ_ADM0.fgb"
+        a0_gdf = gpd.read_file(url, bbox=bbox, engine="pyogrio")
+        if not clip_country in a0_gdf['iso3'].tolist():
+            raise Exception(f'--clip-country {clip_country} does not intersect bbox {bbox}')
+        a0_gdf = a0_gdf[a0_gdf['iso3'] == clip_country]
+        if isochrones_gdf.crs != a0_gdf.crs:
+            a0_gdf = a0_gdf.to_crs(isochrones_gdf.crs)
+        isochrones_gdf = isochrones_gdf.clip(a0_gdf)
+        isochrones_gdf['iso3'] = clip_country
+
     water_bodies_path = await extract_water_bodies(pbf_path=bbox_pbf,dst_dir=dest_dir, progress=progress)
     water_gdf = gpd.read_file(water_bodies_path)
     if not water_gdf.empty:
         if isochrones_gdf.crs != water_gdf.crs:
             water_gdf = water_gdf.to_crs(isochrones_gdf.crs)
 
-        single_water_geom = water_gdf.geometry.union_all()
-        isochrones_gdf["geometry"] = isochrones_gdf.geometry.difference(single_water_geom)
+        water_poly = water_gdf.geometry.union_all()
+        isochrones_gdf["geometry"] = isochrones_gdf.geometry.difference(water_poly)
 
         # 3. Clean up empty/exploded geometries if any were cut into pieces
         isochrones_gdf = isochrones_gdf[~isochrones_gdf.is_empty].explode(index_parts=False)
     # 5. Save the final processed isochrones to GeoJSON
     isochrones_path = os.path.join(dest_dir, "isochrones.geojson")
+
     isochrones_gdf.to_file(isochrones_path, driver="GeoJSON")
+    del isochrones_gdf
 
     if pop_vars:
         with TemporaryDirectory(dir=dest_dir, delete=True) as project_folder:
@@ -97,15 +110,35 @@ async def run_connectivity_analysis(
                     index=False
                 )
 
-    if barriers_dataset is not None:
+
+    if barriers_dataset is not None and pop_vars:
         logger.info(f'Computing isochrones with barriers')
-        barrier_results = await connectivity_areas(
+
+        barrier_isochrones_gdf = await connectivity_areas(
         tar_path=dag_tar_path, origins=origins, travel_mode=travel_mode, intervals_minutes=time_intervals,
-        barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer, disjoint=disjoint
+        barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer, disjoint=disjoint, radius=radius,
+            smooth=smooth, progress=progress
                              )
+
+        if clip_country:
+            logger.info('Clipping barriers isochrones with ADM0')
+            url = f"/vsicurl/https://undpngddlsgeohubdev01.blob.core.windows.net/admin/cgaz/geoBoundariesCGAZ_ADM0.fgb"
+            a0_gdf = gpd.read_file(url, bbox=bbox, engine="pyogrio")
+            if not clip_country in a0_gdf['iso3'].tolist():
+                raise Exception(f'--clip-country {clip_country} does not intersect bbox {bbox}')
+            a0_gdf = a0_gdf[a0_gdf['iso3'] == clip_country]
+            if barrier_isochrones_gdf.crs != a0_gdf.crs:
+                a0_gdf = a0_gdf.to_crs(barrier_isochrones_gdf.crs)
+            barrier_isochrones_gdf = barrier_isochrones_gdf.clip(a0_gdf)
+            barrier_isochrones_gdf['iso3'] = clip_country
+        if not water_gdf.empty:
+            logger.info('Removing water bodies from barrier isochrones')
+            #barrier_isochrones_gdf["geometry"] = barrier_isochrones_gdf.geometry.difference(water_poly)
+            barrier_isochrones_gdf = barrier_isochrones_gdf.overlay(water_gdf, how='difference')
+            # 3. Clean up empty/exploded geometries if any were cut into pieces
+            barrier_isochrones_gdf = barrier_isochrones_gdf[~barrier_isochrones_gdf.is_empty].explode(index_parts=False)
         barrier_isochrones_path = os.path.join(dest_dir, 'isochrones_with_barriers.geojson')
-        with open(barrier_isochrones_path, "w") as f:
-            json.dump(barrier_results, f, indent=2)
+        barrier_isochrones_gdf.to_file(barrier_isochrones_path, driver="GeoJSON")
         if pop_vars:
             logger.info(f'Computing zonal stats for barrier isochrones')
             with TemporaryDirectory(dir=dest_dir, delete=True) as project_folder:
@@ -128,17 +161,18 @@ async def run_connectivity_analysis(
                     if not disjoint:
                         barrier_pop_stat_gdf = barrier_pop_stat_gdf.iloc[pop_stat_gdf.geometry.area.sort_values(ascending=False).index]
                     barrier_pop_stat_gdf = barrier_pop_stat_gdf.to_crs('EPSG:4326')
-
-                    pop_col_names = [f'{popv}_{year}' for popv in pop_vars]
-                    new_pop_col_names = [f'{popv}_{year}_barrier' for popv in pop_vars]
-                    col_name_dict = dict(zip(pop_col_names, new_pop_col_names))
-                    barrier_pop_stat_gdf.rename(columns=col_name_dict, inplace=True)
-
-                    data_cols = ['contour']+pop_col_names
-                    data_frame = pop_stat_gdf[data_cols]
-                    barrier_pop_stat_gdf = barrier_pop_stat_gdf.merge(data_frame, on='contour', how='left')
-                    for pvar, bar_pvar in col_name_dict.items():
-                        barrier_pop_stat_gdf[f'{pvar}_{bar_pvar}_difference'] = barrier_pop_stat_gdf[pvar] - barrier_pop_stat_gdf[bar_pvar]
+                    #
+                    # pop_col_names = [f'{popv}_{year}' for popv in pop_vars]
+                    # new_pop_col_names = [f'{popv}_{year}_barrier' for popv in pop_vars]
+                    # col_name_dict = dict(zip(pop_col_names, new_pop_col_names))
+                    # barrier_pop_stat_gdf.rename(columns=col_name_dict, inplace=True)
+                    #
+                    # data_cols = ['contour']+pop_col_names
+                    # data_frame = pop_stat_gdf[data_cols]
+                    # barrier_pop_stat_gdf = barrier_pop_stat_gdf.merge(data_frame, on='contour', how='left')
+                    # for pvar, bar_pvar in col_name_dict.items():
+                    #     barrier_pop_stat_gdf[f'{pvar}_{bar_pvar}_difference'] = barrier_pop_stat_gdf[pvar] - barrier_pop_stat_gdf[bar_pvar]
+                    #     barrier_pop_stat_gdf[f'{pvar}_{bar_pvar}_perc_difference'] = barrier_pop_stat_gdf[f'{pvar}_{bar_pvar}_difference'] / barrier_pop_stat_gdf[pvar] * 100
 
                     barrier_pop_stat_gdf.to_file(
                         filename=barrier_isochrones_path,

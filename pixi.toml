@@ -1,7 +1,7 @@
 [project]
 name = "rapida"
 version = "0.1.0"
-description = "Tools for natural hazards assessment over population, landuse, and infrastructure"
+description = "Tools for natural hazards assessment"
 authors = ["Ioan Ferencik <data@undp.org>"]
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
@@ -15,10 +15,11 @@ libgdal-netcdf = "*"
 
 [pypi-dependencies]
 rapida = { path = ".", editable = true }
+dotenv-cli = "*"
+
+[activation.env]
+PLAYWRIGHT_BROWSERS_PATH = "${PIXI_PROJECT_ROOT}/.pixi/playwright-browsers"
 
 [tasks]
-setup = "playwright install chromium --only-shell"
-
-[feature.global.package]
-# Instructs Pixi how to expose executables when installed globally
-executable = "rapida"
+setup = { cmd = "dotenv -e .env playwright install chromium --only-shell" }
+rapida = { cmd = "dotenv -e .env rapida" }

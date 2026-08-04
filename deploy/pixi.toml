@@ -8,23 +8,36 @@ platforms = ["linux-64", "win-64", "osx-arm64"]
 python = ">=3.12"
 numpy = "<2"
 gdal = ">=3.12.0"
-fiona = "*"
-rasterio = "*"
-geopandas = "*"
-shapely = "*"
-exactextract = "*"
-rio-cogeo = "*"
-pyarrow = "*"
-h5py = ">=3.16.0"
-satpy = ">=0.59.0"
-matplotlib = ">=3.10.9"
-netcdf4 = ">=1.7.3"
-h5netcdf = ">=1.8.1"
+libgdal-netcdf = "*"
+osmium-tool = ">=1.19.1,<2"
+#playwright="*"
+#fiona = "*"
+#rasterio = "*"
+#geopandas = "*"
+#shapely = "*"
+#exactextract = "*"
+#rio-cogeo = "*"
+#pyarrow = "*"
+#h5py = ">=3.16.0"
+#satpy = ">=0.59.0"
+#matplotlib = ">=3.10.9"
+#netcdf4 = ">=1.7.3"
+#h5netcdf = ">=1.8.1"
+#marimo = ">=0.23.14,<0.24"
 
 [pypi-dependencies]
-# Pixi natively understands Git URLs in the pypi section!
+# Pixi natively understands Git URLs in the pypi section in pyproject.toml
 rapida = { git = "https://github.com/UNDP-Data/rapida.git", branch = "main" }
 dotenv-cli="*"
+#maplibre = { version = ">=0.3.6, <0.4", extras = ["ipywidget"] }
+#openlayers = ">=0.1.6, <0.2"
+
+[activation.env]
+# Forces Playwright to install browsers inside the local project folder
+PLAYWRIGHT_BROWSERS_PATH = ".pixi/playwright-browsers"
+
 
 [tasks]
-rapida = "dotenv -e .env rapida"
+setup = {cmd = "dotenv -e .env playwright install chromium --only-shell"}
+rapida = {cmd = "dotenv -e .env rapida", depends-on=["setup"]}
+#rapida = "dotenv -e .env rapida"

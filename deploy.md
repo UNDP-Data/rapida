@@ -22,9 +22,13 @@ curl -O https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/deplo
 curl.exe -O https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/deploy/pixi.toml
 ```
 
-## .env  file
-Create a .env file and define following environmental variables.
-Alternatively ensure the environmental variables defined below exists in your system
+## Environmental variables
+
+There are two types of environmental variables: mandatory and optional.
+The **mandatory** ones contain information that is required to operate specific parts of rapida like
+downloading imagery from earthdata through a token or authenticating to [space-track.org](www.space-track.org).
+Rapida throws and error if these variables are not defined and needed.
+
 ```shell
 # for uploading to azure
 TENANT_ID=
@@ -34,8 +38,14 @@ EARTHDATA_TOKEN=
 # for predicting precisely VIIRS orbits
 SPACETRACK_USER=
 SPACETRACK_PASSWORD=
+```
 
+The **optional** environmental variables do not generate errors if not defined. Rapida lets the user know whenever these
+variables arte detected and detected and override/change default behaviour with a custom one.
+
+```shell
 # override road type default seed for connectivity analysis
+#Default values
 
 #"motorway": 105,
 #"trunk": 90,
@@ -45,9 +55,21 @@ SPACETRACK_PASSWORD=
 #"unclassified": 40,
 #"residential": 35,
 #"service": 25
+# variables that change default values
 
-MJOLNIR_SECONDARY_SPEED=40
+#MJOLNIR_MOTORWAY_SPEED=60
+#MJOLNIR_TRUNK_SPEED=50
+#MJOLNIR_PRIMARY_SPEED=35
+#MJOLNIR_SECONDARY_SPEED=25
+#MJOLNIR_UNCLASSIFIED_SPEED=15
+#MJOLNIR_RESIDENTIAL_SPEED=12
+#MJOLNIR_SERVICE_SPEED=8
+#CONNECTIVITY_OSM_SOURCE=MOVISDA # MOVISDA, GEOFABRIK
+
 ```
+
+
+
 
 ## run NTL
 ```shell

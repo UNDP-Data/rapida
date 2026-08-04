@@ -1,10 +1,14 @@
-[project]
+[workspace]
 name = "rapida"
 version = "0.1.0"
 description = "Tools for natural hazards assessment"
 authors = ["Ioan Ferencik <data@undp.org>"]
 channels = ["conda-forge"]
 platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+
+[package]
+name = "rapida"
+version = "0.1.0"
 
 [dependencies]
 python = ">=3.12"

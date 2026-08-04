@@ -1,12 +1,21 @@
 [workspace]
+name = "rapida"
+version = "0.1.0"
+description = "Tools for natural hazards assessment"
+authors = ["Ioan Ferencik <data@undp.org>"]
 channels = ["conda-forge"]
-platforms = ["win-64", "linux-64", "osx-arm64", "osx-64"]
-preview = ["pixi-build"]
+platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
 
 [dependencies]
-rapida = { path = "." }
+python = ">=3.12"
+gdal = ">=3.12.0"
+osmium-tool = ">=1.19.1"
+h5py = ">=3.11.0"
+libgdal-netcdf = "*"
 
 [pypi-dependencies]
+# This installs your pyproject.toml natively using uv/pip, grabbing ALL 40 dependencies
+rapida = { path = ".", editable = true }
 dotenv-cli = "*"
 
 [activation.env]
@@ -14,22 +23,4 @@ PLAYWRIGHT_BROWSERS_PATH = ".pixi/playwright-browsers"
 
 [tasks]
 setup = "dotenv -e .env playwright install chromium --only-shell"
-rapida = "dotenv -e .env rapida"
-
-[package]
-name = "rapida"
-version = "0.1.0"
-
-[package.build]
-backend = { name = "pixi-build-python", version = "0.*" }
-
-[package.host-dependencies]
-setuptools = ">=61.0"
-setuptools_scm = ">=8.0"
-
-[package.run-dependencies]
-python = ">=3.12"
-gdal = ">=3.12.0"
-osmium-tool = ">=1.19.1"
-h5py = ">=3.11.0"
-libgdal-netcdf = "*"
+rapida = { cmd = "dotenv -e .env rapida" }

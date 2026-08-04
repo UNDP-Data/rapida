@@ -1,0 +1,24 @@
+[project]
+name = "rapida"
+version = "0.1.0"
+description = "Tools for natural hazards assessment over population, landuse, and infrastructure"
+authors = ["Ioan Ferencik <data@undp.org>"]
+channels = ["conda-forge"]
+platforms = ["win-64", "linux-64", "osx-64", "osx-arm64"]
+
+[dependencies]
+python = ">=3.12"
+gdal = ">=3.12.0"
+osmium-tool = ">=1.19.1"
+h5py = ">=3.11.0"
+libgdal-netcdf = "*"
+
+[pypi-dependencies]
+rapida = { path = ".", editable = true }
+
+[tasks]
+setup = "playwright install chromium --only-shell"
+
+[feature.global.package]
+# Instructs Pixi how to expose executables when installed globally
+executable = "rapida"

@@ -261,7 +261,7 @@ async def prepare_osm_pbf(bbox: tuple[float, float, float, float], dst_dir: str 
 
         elif len(extracted_chunks) == 1:
             # If there was only one valid chunk, just rename it to the final output target
-            os.rename(extracted_chunks[0], final_output_pbf)
+            os.replace(extracted_chunks[0], final_output_pbf)
 
         else:
             raise ValueError(f"No OSM data found in the provided bbox: {bbox}")

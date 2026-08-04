@@ -512,7 +512,7 @@ class PopulationVariable(Variable):
         )
 
         if os.path.exists(source):os.remove(source)
-        os.rename(imported_local_path, source)
+        os.replace(imported_local_path, source)
         return source
 
     def _compute_affected_(self, progress=None, **kwargs):

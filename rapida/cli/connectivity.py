@@ -98,7 +98,11 @@ def parse_intervals(ctx, param, value):
               type=str, callback=validate_variables,
               help=f"One or more RAPIDA population variable to compute zonal stats for withing the connectivity zones"
               )
-
+@click.option('-l','--stats-admin-level',
+                type=click.IntRange(min=1, max=2, clamp=False),
+                help='Admin level from where to extract the admin features when computing stats for --popvar/s.'\
+                      'The statistics will be computed from the results of intersecting the isochrones with admin data'
+                )
 @click.option(
     "--dst-dir",
     "-d",           # Short option
@@ -134,16 +138,16 @@ def parse_intervals(ctx, param, value):
 )
 
 
-@click.option(
-    '--smooth',
-    is_flag=True,
-    help=(
-            "By default Valhalla routing engine create isochrones using a grid and the edges of polygons are squarish."
-            "Use this flag to smoothen them out. in some instances this can alter the isochrones significantly."
-            "In general it is save to use smoothing on small areas (towns, cities)"
-    ),
-    default=False
-)
+# @click.option(
+#     '--smooth',
+#     is_flag=True,
+#     help=(
+#             "By default Valhalla routing engine create isochrones using a grid and the edges of polygons are squarish."
+#             "Use this flag to smoothen them out. in some instances this can alter the isochrones significantly."
+#             "In general it is save to use smoothing on small areas (towns, cities)"
+#     ),
+#     default=True
+# )
 
 @click.option(
     '--disjoint',
@@ -161,9 +165,9 @@ def parse_intervals(ctx, param, value):
 async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_mode:str=None,
                        time_intervals:list[int] =None, dst_dir:str=None,
                        barriers_dataset:str=None, barriers_layer:str=None, barriers_buffer:int=None,
-                       sites_dataset:str=None, sites_layer:str=None, popvar:str|tuple[str]=None,
+                       sites_dataset:str=None, sites_layer:str=None, popvar:str|tuple[str]=None, stats_admin_level:int=None,
                        max_snap_distance:float=None, clip_country:str=None,
-                       disjoint:bool=False, smooth:bool=False
+                       disjoint:bool=False, smooth:bool=True
     ):
     logger.info(f'Running connectivity analysis')
     progress = ctx.obj.get('progress')
@@ -171,6 +175,6 @@ async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_
         return await run_connectivity_analysis(
             bbox=bbox, dst_dir=dst_dir, travel_mode=travel_mode, time_intervals=time_intervals,
             barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer,
-            sites_dataset=sites_dataset, sites_layer=sites_layer, pop_vars=popvar,
+            sites_dataset=sites_dataset, sites_layer=sites_layer, pop_vars=popvar,stats_admin_level=stats_admin_level,
             progress=progress, radius=max_snap_distance, clip_country=clip_country, disjoint=disjoint, smooth=smooth
         )

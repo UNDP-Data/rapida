@@ -662,3 +662,124 @@ async def extract_water_bodies(pbf_path: str, dst_dir: str, progress=None) -> st
         progress.console.print(f"[bold green]✓ Water bodies successfully extracted to: {final_geojson}[/bold green]")
 
     return str(final_geojson)
+
+
+import asyncio
+from pathlib import Path
+import geopandas as gpd
+
+
+async def extract_roads(pbf_path: str, dst_dir: str, progress=None) -> gpd.GeoDataFrame:
+    """
+    Extracts road network via Osmium and loads it directly into a GeoDataFrame.
+    """
+    dst_path = Path(dst_dir)
+    filtered_pbf = dst_path / "roads_only.osm.pbf"
+    roads_geojsonseq = dst_path / "roads.geojsonseq"
+
+    tags_to_keep = [
+        "w/highway=motorway,trunk,primary,secondary,tertiary,unclassified,residential"
+    ]
+
+    if progress:
+        progress.console.print("[cyan]Filtering roads from OSM via Osmium...[/cyan]")
+
+    # Step 1: Filter PBF down to specified road types
+    await asyncio.to_thread(
+        run_cli,
+        ["osmium", "tags-filter", str(pbf_path)] + tags_to_keep + ["-o", str(filtered_pbf), "--overwrite"]
+    )
+
+    if progress:
+        progress.console.print("[cyan]Exporting roads to GeoJSONSeq...[/cyan]")
+
+    # Step 2: Export to geojsonseq (LineStrings only)
+    await asyncio.to_thread(
+        run_cli,
+        ["osmium", "export", str(filtered_pbf), "-o", str(roads_geojsonseq), "-f", "geojsonseq",
+         "--geometry-type=linestring", "--overwrite"]
+    )
+
+    # if progress:
+    #     progress.console.print("[cyan]Loading roads into GeoDataFrame...[/cyan]")
+    return roads_geojsonseq
+    # # Step 3: Load directly into GeoDataFrame
+    # def load_gdf():
+    #     # Using pyogrio to parse the geojsonseq significantly faster than Fiona
+    #     return gpd.read_file(roads_geojsonseq, engine="pyogrio")
+    #
+    # roads_gdf = await asyncio.to_thread(load_gdf)
+    #
+    # # Step 4: Clean up intermediate files
+    # for path in [filtered_pbf, roads_geojsonseq]:
+    #     if path.exists():
+    #         path.unlink()
+    #
+    # if progress:
+    #     progress.console.print("[bold green]✓ Roads successfully extracted into GeoDataFrame[/bold green]")
+    #
+    # return roads_gdf
+
+
+def filter_polygons(poly_ds_path:str=None, poly_layer:str=None, lines_ds_path:str=None, dst_dir:str=None  ):
+    dst_path = Path(dst_dir)
+    dst_filtered_poly_ds_path = dst_path / 'filtered_barriers.fgb'
+    # 1. Load and explode MultiPolygons to single parts
+    polys = gpd.read_file(poly_ds_path, layer=poly_layer, engine="pyogrio").explode(index_parts=False)
+    lines = gpd.read_file(lines_ds_path, engine="pyogrio")
+
+    if polys.crs != lines.crs:
+        polys.to_crs(lines.crs, inplace=True)
+
+    # 2. Intersect with lines and drop the join index
+    joined = polys.sjoin(lines, how="inner", predicate="intersects")
+
+    # SPEEDUP 1: Drop duplicated polygons to prevent unary_union from choking on overlaps
+    unique_polys = joined[~joined.index.duplicated(keep='first')]
+
+    # SPEEDUP 2: Isolate just the geometry column so pandas doesn't waste time aggregating attributes
+    unique_polys[['geometry']].dissolve() \
+        .to_file(dst_filtered_poly_ds_path, engine="pyogrio", promote_to_multi=True)
+
+    if dst_filtered_poly_ds_path.exists():return dst_filtered_poly_ds_path
+
+
+async def extract_admin_boundaries(pbf_path: str, dst_dir: str, admin_level: int, progress=None) -> str:
+    """
+    Extracts administrative boundaries via Osmium and exports to a GeoJSONSeq.
+    Maps standard ADM levels (0, 1, 2) to OSM admin_levels (2, 4, 6).
+    """
+    dst_path = Path(dst_dir)
+
+    # Map ADM 0, 1, 2 to proper OSM admin_levels (Country=2, Province/State=4, District/County=6)
+    osm_level = {0: 2, 1: 4, 2: 6}.get(admin_level, admin_level)
+
+    filtered_pbf = dst_path / f"admin_{osm_level}_only.osm.pbf"
+    admin_geojsonseq = dst_path / f"admin_{osm_level}.geojsonseq"
+
+    # Filter for relations and ways matching the specific admin level
+    tags_to_keep = [f"r/admin_level={osm_level}", f"w/admin_level={osm_level}"]
+
+    if progress:
+        progress.console.print(f"[cyan]Filtering admin_level={osm_level} from OSM via Osmium...[/cyan]")
+
+    # Step 1: Filter PBF down to specified administrative boundaries
+    await asyncio.to_thread(
+        run_cli,
+        ["osmium", "tags-filter", str(pbf_path)] + tags_to_keep + ["-o", str(filtered_pbf), "--overwrite"]
+    )
+
+    if progress:
+        progress.console.print("[cyan]Exporting admin boundaries to GeoJSONSeq...[/cyan]")
+
+    # Step 2: Export to geojsonseq (Requires polygon geometry type for boundaries)
+    await asyncio.to_thread(
+        run_cli,
+        ["osmium", "export", str(filtered_pbf), "-o", str(admin_geojsonseq), "-f", "geojsonseq",
+         "--geometry-type=polygon", "--overwrite"]
+    )
+
+    if progress:
+        progress.console.print("[cyan]Loading admin boundaries completed...[/cyan]")
+
+    return str(admin_geojsonseq)

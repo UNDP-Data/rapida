@@ -511,7 +511,7 @@ class PopulationVariable(Variable):
             **kwargs
         )
 
-        os.remove(source)
+        if os.path.exists(source):os.remove(source)
         os.rename(imported_local_path, source)
         return source
 

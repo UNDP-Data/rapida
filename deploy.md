@@ -9,9 +9,28 @@ that guarantees a seamless setup across all platforms.
 Pixi defaults to the biggest Conda package repository, conda-forge, which contains over 30,000 packages.
 ## Install pixi
 
-Refer to [pixi installation](https://pixi.prefix.dev/latest/#installation) docs
+### Windows
 
-## Download
+1. install git
+```shell
+git winget install --id Git.Git -e --source winget
+
+```
+
+
+2. install pixi
+```shell
+git winget install --id Git.Git -e --source winget
+
+```
+
+
+### Linux & Mac
+
+
+
+
+## Download pixi coinfig
 
 **Linux & macOS**
 ```bash

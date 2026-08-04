@@ -10,6 +10,7 @@ numpy = "<2"
 gdal = ">=3.12.0"
 libgdal-netcdf = "*"
 osmium-tool = ">=1.19.1,<2"
+h5py = ">=3.11.0"
 #playwright="*"
 #fiona = "*"
 #rasterio = "*"
@@ -39,5 +40,6 @@ PLAYWRIGHT_BROWSERS_PATH = ".pixi/playwright-browsers"
 
 [tasks]
 setup = {cmd = "dotenv -e .env playwright install chromium --only-shell"}
-rapida = {cmd = "dotenv -e .env rapida", depends-on=["setup"]}
+
+rapida = {cmd = "dotenv -e .env rapida"}
 #rapida = "dotenv -e .env rapida"

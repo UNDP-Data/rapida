@@ -7,39 +7,121 @@ To eliminate this barrier, Rapida leverages pixi — a **fast, modern, and highl
 that guarantees a seamless setup across all platforms.
 
 Pixi defaults to the biggest Conda package repository, conda-forge, which contains over 30,000 packages.
-## Install pixi
 
-### Windows
+## Windows
 
-1. install git
+### 1. install git
 ```shell
 git winget install --id Git.Git -e --source winget
 
 ```
 
-
-2. install pixi
+### 2. install pixi
 ```shell
 git winget install --id Git.Git -e --source winget
 
 ```
 
+### 3. download pixi cfg 
 
-### Linux & Mac
-
-
-
-
-## Download pixi coinfig
-
-**Linux & macOS**
-```bash
-curl -O https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/deploy/pixi.toml
-```
-**Windows**
 ```shell
 curl.exe -O https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/deploy/pixi.toml
 ```
+
+
+### 4. install 
+```shell
+pixi install
+
+```
+
+### 5. setup playwright 
+```shell
+pixi  run setup
+
+```
+
+
+### 6. run in local folder 
+```shell
+PS C:\Users\rapida\rapida> pixi run rapida
+✨ Pixi task (rapida): dotenv -e .env rapida
+Usage: rapida [OPTIONS] COMMAND [ARGS]...
+
+  UNDP Crisis Bureau Rapida tool.
+
+  This command line tool is designed to assess various geospatial variables
+  representing exposure and vulnerability aspects of geospatial risk induced
+  by natural hazards.
+
+Options:
+  --help  Show this message and exit.
+
+Commands:
+  init          initialize RAPIDA tool
+  auth          authenticate with UNDP account
+  admin         fetch administrative boundaries at various levels from
+                OSM/OCHA
+  create        create a RAPIDA project in a new folder
+  assess        assess/evaluate a specific geospatial exposure
+                components/variables
+  list-project  list RAPIDA projects/folders located in default Azure file
+                share
+  download      download a RAPIDA project from Azure file share
+  upload        upload a RAPIDA project to Azure file share
+  publish       publish RAPIDA project results to Azure and GeoHub
+  delete        delete a RAPIDA project from Azure file share
+  addh3id       add h3id to a vector dataset
+  population    Population data management commands.
+  ntl           Nighttime Lights VIIRS data and impact detection
+  connectivity  run connectivity analysis
+
+```
+
+
+### 7. make rapida accessible globally 
+```shell
+powershell -ExecutionPolicy Bypass -c "irm https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/deploy/install.ps1 | iex"
+
+```
+
+
+
+
+## Linux & Mac
+
+### 1. install git
+
+See [Git installation instructions](https://git-scm.com/install/)
+
+### 2. install pixi
+```shell
+curl -fsSL https://pixi.sh/install.sh | sh
+```
+```shell
+# or 
+wget -qO- https://pixi.sh/install.sh | sh
+
+```
+
+### 3. Download pixi config
+
+```bash
+curl -O https://raw.githubusercontent.com/UNDP-Data/rapida/refs/heads/main/deploy/pixi.toml
+```
+### 4. install 
+```shell
+pixi install
+
+```
+
+### 5. setup playwright 
+```shell
+pixi  run setup
+
+```
+
+
 
 ## Environmental variables
 

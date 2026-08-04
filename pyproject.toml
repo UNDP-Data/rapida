@@ -23,7 +23,7 @@ dependencies = [
     #"GDAL",
     "azure-storage-blob",
     "overturemaps",
-    "uvloop",
+    #"uvloop",
     "aiofiles",
     "aiohttp",
     "requests",

@@ -199,6 +199,7 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
         # ---------------------------------------------------------
 
     valhalla_conf["mjolnir"]["min_reachability"] = 0
+    valhalla_conf["mjolnir"]["use_mmap"] = False
 
     with open(config_path, "w") as f:
         json.dump(valhalla_conf, f, indent=4)

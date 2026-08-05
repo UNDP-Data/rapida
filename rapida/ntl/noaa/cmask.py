@@ -272,14 +272,18 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     if cc is not None:return cc
     lon_min, lat_min, lon_max, lat_max = bbox
     subdataset_str = f'NETCDF:"/vsicurl/{hdf_url}":CloudMaskBinary'
-
+    # --- THE WARP FIX ---
+    # Open the dataset explicitly first to bypass the Warp string-parsing bug
+    src_ds = gdal.Open(subdataset_str)
+    if src_ds is None:
+        raise Exception(f'Failed to open subdataset for {hdf_url}')
 
     # 2. Warp directly from the subdataset string over the network
     # GDAL's C++ engine reads the global polygon, clips the exact byte blocks,
     # and handles the 750m resolution on-the-fly into a memory buffer.
     ds = gdal.Warp(
         '',  # Output to RAM
-        subdataset_str,
+        src_ds,
         format='MEM',
         dstSRS='EPSG:4326', # works here because we are counting pixels not planar metrics
         outputBounds=[lon_min, lat_min, lon_max, lat_max],
@@ -287,6 +291,7 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
         dstNodata=-128,
         geoloc=True
     )
+    src_ds = None
     if ds is None:
         raise Exception(f'Failed to compute cloud coverage for {hdf_url}')
 

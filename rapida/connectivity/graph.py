@@ -197,12 +197,12 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
         # ---------------------------------------------------------
 
     valhalla_conf["mjolnir"]["min_reachability"] = 0
+    valhalla_conf["mjolnir"]["data_processing"]["use_admin_db"] = False
+
     if sys.platform == "win32":
         valhalla_conf["mjolnir"]["use_mmap"] = False
 
-    # ADD THESE TWO LINES:
-    valhalla_conf["mjolnir"]["admin"] = os.path.join(dst_dir, "admin.sqlite").replace("\\", "/")
-    valhalla_conf["mjolnir"]["timezone"] = os.path.join(dst_dir, "tz_world.sqlite").replace("\\", "/")
+
 
     with open(config_path, "w", encoding='utf-8') as f:
         json.dump(valhalla_conf, f, indent=4)

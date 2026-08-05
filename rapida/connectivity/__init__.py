@@ -103,9 +103,9 @@ async def run_connectivity_analysis(
         if stats_admin_level:
             url = f"/vsicurl/https://undpngddlsgeohubdev01.blob.core.windows.net/admin/cgaz/geoBoundariesCGAZ_ADM{stats_admin_level}.fgb"
             adm_gdf = gpd.read_file(url, bbox=bbox, engine="pyogrio")
-            if 'iso3' in isochrones_gdf.columns.tolist():
-                adm_gdf.drop(columns=['iso3'], inplace=True)
             if clip_country:
+                if 'iso3' in isochrones_gdf.columns.tolist():
+                    isochrones_gdf.drop(columns=['iso3'], inplace=True)
                 adm_gdf = adm_gdf[adm_gdf['iso3'] == clip_country]
                 isochrones_gdf['iso3'] = clip_country
             if isochrones_gdf.crs != adm_gdf.crs:

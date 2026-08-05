@@ -190,7 +190,7 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
             }
         ]
 
-        with open(speeds_config_path, "w") as f:
+        with open(speeds_config_path, "w", encoding='utf-8') as f:
             json.dump(speed_schema, f, indent=4)
 
         valhalla_conf["mjolnir"]["default_speeds_config"] = speeds_config_path
@@ -200,7 +200,11 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
     if sys.platform == "win32":
         valhalla_conf["mjolnir"]["use_mmap"] = False
 
-    with open(config_path, "w") as f:
+    # ADD THESE TWO LINES:
+    valhalla_conf["mjolnir"]["admin"] = os.path.join(dst_dir, "admin.sqlite").replace("\\", "/")
+    valhalla_conf["mjolnir"]["timezone"] = os.path.join(dst_dir, "tz_world.sqlite").replace("\\", "/")
+
+    with open(config_path, "w", encoding='utf-8') as f:
         json.dump(valhalla_conf, f, indent=4)
 
 

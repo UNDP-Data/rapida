@@ -199,6 +199,12 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
     valhalla_conf["mjolnir"]["min_reachability"] = 0
 
     valhalla_conf["mjolnir"]["data_processing"]["use_admin_db"] = False
+    # Enable file logging for the Valhalla C++ engine
+    valhalla_conf["logging"] = {
+        "type": "file",
+        "color": False,
+        "file_name": os.path.join(dst_dir, "valhalla_build.log").replace("\\", "/")
+    }
 
     if sys.platform == "win32":
         valhalla_conf["mjolnir"]["use_mmap"] = False

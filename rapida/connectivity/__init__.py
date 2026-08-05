@@ -103,10 +103,11 @@ async def run_connectivity_analysis(
         if stats_admin_level:
             url = f"/vsicurl/https://undpngddlsgeohubdev01.blob.core.windows.net/admin/cgaz/geoBoundariesCGAZ_ADM{stats_admin_level}.fgb"
             adm_gdf = gpd.read_file(url, bbox=bbox, engine="pyogrio")
-            if clip_country:
-                adm_gdf = adm_gdf[adm_gdf['iso3'] == clip_country]
             if 'iso3' in isochrones_gdf.columns.tolist():
                 adm_gdf.drop(columns=['iso3'], inplace=True)
+            if clip_country:
+                adm_gdf = adm_gdf[adm_gdf['iso3'] == clip_country]
+                isochrones_gdf['iso3'] = clip_country
             if isochrones_gdf.crs != adm_gdf.crs:
                 adm_gdf.to_crs(isochrones_gdf.crs, inplace=True)
             results = []
@@ -146,12 +147,12 @@ async def run_connectivity_analysis(
                     project=project.path,
                     force=False
                 )
-                stat_gpkg_path = os.path.join(project_folder,'data', f'{project.name}.gpkg')
-                pop_stat_gdf = gpd.read_file(stat_gpkg_path, layer='stats.population')
-                if not disjoint:
-                    pop_stat_gdf = pop_stat_gdf.iloc[pop_stat_gdf.geometry.area.sort_values(ascending=False).index]
-                pop_stat_gdf = pop_stat_gdf.to_crs('EPSG:4326')
-
+            stat_gpkg_path = os.path.join(project_folder,'data', f'{project.name}.gpkg')
+            pop_stat_gdf = gpd.read_file(stat_gpkg_path, layer='stats.population')
+            if not disjoint:
+                pop_stat_gdf = pop_stat_gdf.iloc[pop_stat_gdf.geometry.area.sort_values(ascending=False).index]
+            pop_stat_gdf = pop_stat_gdf.to_crs('EPSG:4326')
+            if not stats_admin_level:
                 pop_stat_gdf.to_file(
                     filename=isochrones_path,
                     driver="GeoJSON",
@@ -161,7 +162,82 @@ async def run_connectivity_analysis(
                     promote_to_multi=True,
                     index=False
                 )
-            #Project._instance = None
+            else:
+                logger.info('Aggregating zonal stats independently and pivoting to wide format...')
+
+                pop_col_names = [f'{popv}_{year}' for popv in pop_vars]
+                admin_col_name = f'admin{stats_admin_level}_name'
+                assert admin_col_name in pop_stat_gdf.columns.tolist()
+                pop_stat_gdf['contour'] = pop_stat_gdf['contour'].astype(float).astype(int)
+                pop_stat_gdf[admin_col_name] = pop_stat_gdf[admin_col_name].astype(str).str.strip()
+
+                # 1. Group and sum the base stats independently (vectorized aggregation)
+                base_agg = pop_stat_gdf.groupby([admin_col_name, 'contour'])[pop_col_names].sum().reset_index()
+
+
+
+                # 2. Pivot to Wide Format (Option 2: contours become columns)
+                pivot_df = base_agg.pivot(index=admin_col_name, columns='contour', values=pop_col_names)
+
+                # Flatten the MultiIndex columns (e.g., ('male_total_2026', 15.0) -> 'male_total_2026_15min')
+                pivot_df.columns = [f"{col[0]}_{int(col[1])}min" for col in pivot_df.columns]
+                wide_df = pivot_df.reset_index()
+
+                # 6. Attach geometries from the original adm_gdf
+                logger.info('Merging aggregated stats back onto original admin boundaries...')
+
+                # Handle case where CGAZ admin column might natively be 'shapeName'
+                adm_join_col = admin_col_name if admin_col_name in adm_gdf.columns else 'shapeName'
+
+                final_gdf = adm_gdf.merge(
+                    wide_df,
+                    left_on=adm_join_col,
+                    right_on=admin_col_name,
+                    how='inner'  # Use 'inner' to only keep admin units that actually had isochrones
+                )
+
+                gc.collect()
+
+                with TemporaryDirectory(dir=dest_dir, delete=True, ) as admin_project_folder:
+                    logger.info(f'Computing zonal stats for total population ')
+                    adm_ds_path = os.path.join(dest_dir, f'admin_{stats_admin_level}.fgb')
+                    adm_gdf.to_file(adm_ds_path, driver="FlatGeobuf", engine="pyogrio")
+                    admin_project = Project(path=admin_project_folder, polygons=adm_ds_path,
+                                            comment='temp project for admin stats')
+                    with click.Context(assess) as ctx:
+                        ctx.ensure_object(dict)
+                        ctx.obj['progress'] = progress
+                        # 2. Use invoke. Do NOT pass 'ctx' manually here.
+                        # Click intercepts this and injects it as the first argument automatically.
+                        ctx.invoke(
+                            assess,
+                            components=('population',),
+                            variables=['total'],
+                            year=year,
+                            project=admin_project.path,
+                            force=False
+                        )
+
+                        admin_stat_gpkg_path = os.path.join(admin_project_folder, 'data', f'{admin_project.name}.gpkg')
+                        admin_pop_stat_gdf = gpd.read_file(admin_stat_gpkg_path, layer='stats.population')
+                        final_gdf = final_gdf.merge(admin_pop_stat_gdf[[admin_col_name, f'total_{year}']],
+                                                    on=admin_col_name)
+
+                    if os.path.exists(adm_ds_path): os.remove(adm_ds_path)
+
+                admin_iso_stats = os.path.join(dest_dir, f"admin{stats_admin_level}_iso_stats.geojson")
+                logger.info(f"Writing final aggregated admin boundaries to {admin_iso_stats}")
+
+                final_gdf.to_file(
+                    filename=admin_iso_stats,  # Fixed: this was pointing to barrier_isochrones_path
+                    driver="GeoJSON",
+                    engine="pyogrio",
+                    mode="w",
+                    layer=f"admin{stats_admin_level}_iso_stats",
+                    promote_to_multi=True,
+                    index=False
+                )
+
 
 
     if barriers_dataset is not None and pop_vars:
@@ -342,7 +418,7 @@ async def run_connectivity_analysis(
 
                         gc.collect()
 
-                        with TemporaryDirectory(dir=dest_dir, delete=True, ignore_cleanup_errors=True) as admin_project_folder:
+                        with TemporaryDirectory(dir=dest_dir, delete=True,ignore_cleanup_errors=True ) as admin_project_folder:
                             logger.info(f'Computing zonal stats for total population ')
                             adm_ds_path = os.path.join(dest_dir, f'admin_{stats_admin_level}.fgb')
                             adm_gdf.to_file(adm_ds_path, driver="FlatGeobuf", engine="pyogrio")

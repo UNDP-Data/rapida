@@ -316,27 +316,24 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     gdal.UseExceptions()
     gdal.PushErrorHandler('CPLQuietErrorHandler')
 
-    # # --- 1. DYNAMIC DRIVER SELECTION ---
-    # is_windows = platform.system() == "Windows"
-    #
-    # if is_windows:
-    #     gdal.SetConfigOption('GDAL_SKIP', 'netCDF')
-    #     # On Windows, we force the HDF5 driver and its specific string syntax
-    #     base_ds = f'HDF5:"/vsicurl/{hdf_url}"'
-    #     mask_str = f'{base_ds}://CloudMaskBinary'
-    #     lon_str = f'{base_ds}://Longitude'
-    #     lat_str = f'{base_ds}://Latitude'
-    # else:
-    #     gdal.SetConfigOption('GDAL_SKIP', '')
+    # --- 1. DYNAMIC DRIVER SELECTION ---
+    is_windows = platform.system() == "Windows"
+
+    if is_windows:
+        gdal.SetConfigOption('GDAL_SKIP', 'netCDF')
+        # On Windows, we force the HDF5 driver and its specific string syntax
+        base_ds = f'HDF5:"/vsicurl/{hdf_url}"'
+        mask_str = f'{base_ds}://CloudMaskBinary'
+        lon_str = f'{base_ds}://Longitude'
+        lat_str = f'{base_ds}://Latitude'
+    else:
+        gdal.SetConfigOption('GDAL_SKIP', '')
         # On Linux, we use the native NetCDF driver
-        # base_ds = f'HDF:"/vsicurl/{hdf_url}"'
-        # mask_str = f'{base_ds}:CloudMaskBinary'
-        # lon_str = f'{base_ds}:Longitude'
-        # lat_str = f'{base_ds}:Latitude'
-    base_ds = f'HDF:"/vsicurl/{hdf_url}"'
-    mask_str = f'{base_ds}:CloudMaskBinary'
-    lon_str = f'{base_ds}:Longitude'
-    lat_str = f'{base_ds}:Latitude'
+        base_ds = f'HDF:"/vsicurl/{hdf_url}"'
+        mask_str = f'{base_ds}:CloudMaskBinary'
+        lon_str = f'{base_ds}:Longitude'
+        lat_str = f'{base_ds}:Latitude'
+
     gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '600')
     gdal.SetConfigOption('GDAL_HTTP_MULTIPLEX', 'YES')
     gdal.SetConfigOption('GDAL_HTTP_VERSION', '2')

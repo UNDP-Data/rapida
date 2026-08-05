@@ -159,7 +159,6 @@ class Project:
 
                     # 2. Project centroids to EPSG:4326 for the remote mask query
                     centroids_4326 = centroids.to_crs(epsg=4326)
-                    centroids_4326.to_file('/tmp/isocen.fgb', engine='pyogrio')
 
                     # 3. Use 'mask' instead of 'bbox'. This asks GDAL to only download
                     # features that intersect your specific points, ignoring empty space.
@@ -656,4 +655,3 @@ if __name__ == '__main__':
     project_path = '/data/rap/bgd'
     p = Project(path=project_path)
     src_raster = '/data/rap/bgd/data/population/female_active/BGD_female_active_r.tif'
-    p.align_raster(source_raster=src_raster)

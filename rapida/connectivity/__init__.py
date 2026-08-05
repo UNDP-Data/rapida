@@ -131,7 +131,7 @@ async def run_connectivity_analysis(
             del isochrones_gdf
             del results
 
-        with TemporaryDirectory(dir=dest_dir, delete=True) as project_folder:
+        with TemporaryDirectory(dir=dest_dir, delete=True, ignore_cleanup_errors=True) as project_folder:
             project = Project(path=project_folder, polygons=isochrones_path, comment='temp project for conn isochrones')
             with click.Context(assess) as ctx:
                 ctx.ensure_object(dict)
@@ -161,6 +161,7 @@ async def run_connectivity_analysis(
                     promote_to_multi=True,
                     index=False
                 )
+            #Project._instance = None
 
 
     if barriers_dataset is not None and pop_vars:
@@ -239,7 +240,7 @@ async def run_connectivity_analysis(
                 del results
 
 
-            with TemporaryDirectory(dir=dest_dir, delete=True) as project_folder:
+            with TemporaryDirectory(dir=dest_dir, delete=True, ignore_cleanup_errors=True) as project_folder:
                 project = Project(path=project_folder, polygons=barrier_isochrones_path, comment='temp project for conn isochrones')
                 with click.Context(assess) as ctx:
                     ctx.ensure_object(dict)
@@ -341,7 +342,7 @@ async def run_connectivity_analysis(
 
                         gc.collect()
 
-                        with TemporaryDirectory(dir=dest_dir, delete=True) as admin_project_folder:
+                        with TemporaryDirectory(dir=dest_dir, delete=True, ignore_cleanup_errors=True) as admin_project_folder:
                             logger.info(f'Computing zonal stats for total population ')
                             adm_ds_path = os.path.join(dest_dir, f'admin_{stats_admin_level}.fgb')
                             adm_gdf.to_file(adm_ds_path, driver="FlatGeobuf", engine="pyogrio")

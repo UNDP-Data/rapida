@@ -198,7 +198,7 @@ async def run_connectivity_analysis(
 
                 gc.collect()
 
-                with TemporaryDirectory(dir=dest_dir, delete=True, ) as admin_project_folder:
+                with TemporaryDirectory(dir=dest_dir, delete=True, ignore_cleanup_errors=True) as admin_project_folder:
                     logger.info(f'Computing zonal stats for total population ')
                     adm_ds_path = os.path.join(dest_dir, f'admin_{stats_admin_level}.fgb')
                     adm_gdf.to_file(adm_ds_path, driver="FlatGeobuf", engine="pyogrio")

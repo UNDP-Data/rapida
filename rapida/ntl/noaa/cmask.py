@@ -17,6 +17,7 @@ from shapely.geometry import MultiPoint, Polygon
 from shapely import concave_hull
 from shapely.ops import unary_union
 from itertools import combinations
+import platform
 gdal.UseExceptions()
 
 
@@ -251,7 +252,10 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
 
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
-
+    if platform.system() == "Windows":
+        gdal.SetConfigOption('GDAL_SKIP', 'netCDF')
+    else:
+        gdal.SetConfigOption('GDAL_SKIP', '')
     # 1. Initialize GDAL environment INSIDE the worker process
     gdal.UseExceptions()
     gdal.PushErrorHandler('CPLQuietErrorHandler')

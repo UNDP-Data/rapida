@@ -251,7 +251,7 @@ def cloud_coverage_fast(hdf_url: str, bbox: Iterable[float],
         raise
 
 
-def cloud_coverage(hdf_url: str, bbox: list) -> int:
+def cloud_coverage_winbug(hdf_url: str, bbox: list) -> int:
     if platform.system() == "Windows":
         gdal.SetConfigOption('GDAL_SKIP', 'netCDF')
     else:
@@ -306,6 +306,104 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     return cc
 
 
+import os
+import platform
+import numpy as np
+from osgeo import gdal
+
+
+def cloud_coverage(hdf_url: str, bbox: list) -> int:
+    gdal.UseExceptions()
+    gdal.PushErrorHandler('CPLQuietErrorHandler')
+
+    # # --- 1. DYNAMIC DRIVER SELECTION ---
+    # is_windows = platform.system() == "Windows"
+    #
+    # if is_windows:
+    #     gdal.SetConfigOption('GDAL_SKIP', 'netCDF')
+    #     # On Windows, we force the HDF5 driver and its specific string syntax
+    #     base_ds = f'HDF5:"/vsicurl/{hdf_url}"'
+    #     mask_str = f'{base_ds}://CloudMaskBinary'
+    #     lon_str = f'{base_ds}://Longitude'
+    #     lat_str = f'{base_ds}://Latitude'
+    # else:
+    #     gdal.SetConfigOption('GDAL_SKIP', '')
+        # On Linux, we use the native NetCDF driver
+        # base_ds = f'HDF:"/vsicurl/{hdf_url}"'
+        # mask_str = f'{base_ds}:CloudMaskBinary'
+        # lon_str = f'{base_ds}:Longitude'
+        # lat_str = f'{base_ds}:Latitude'
+    base_ds = f'HDF:"/vsicurl/{hdf_url}"'
+    mask_str = f'{base_ds}:CloudMaskBinary'
+    lon_str = f'{base_ds}:Longitude'
+    lat_str = f'{base_ds}:Latitude'
+    gdal.SetConfigOption('GDAL_HTTP_TIMEOUT', '600')
+    gdal.SetConfigOption('GDAL_HTTP_MULTIPLEX', 'YES')
+    gdal.SetConfigOption('GDAL_HTTP_VERSION', '2')
+    gdal.SetConfigOption('VSI_CACHE', 'TRUE')
+    gdal.SetConfigOption('VSI_CACHE_SIZE', '50000000')
+    gdal.SetConfigOption('GDAL_DISABLE_READDIR_ON_OPEN', 'EMPTY_DIR')
+    gdal.SetConfigOption('CPL_VSIL_CURL_ALLOWED_EXTENSIONS', '.nc')
+
+    _, file_name = os.path.split(hdf_url)
+
+    # (Assuming your cache object is available in scope)
+    cc = cache.fetch(key=file_name)
+    if cc is not None:
+        return cc
+
+    lon_min, lat_min, lon_max, lat_max = bbox
+
+    # --- 2. OPEN THE RAW DATASET ---
+    src_ds = gdal.Open(mask_str)
+    if src_ds is None:
+        raise Exception(f'Failed to open subdataset {mask_str}')
+
+    # --- 3. THE GEOLOCATION FIX ---
+    # Wrap the dataset in an in-memory VRT (Virtual Raster) so we can modify its metadata safely.
+    # We explicitly tell GDAL exactly where the Lat/Lon datasets are located on the network.
+    vrt_ds = gdal.Translate('', src_ds, format='VRT')
+    vrt_ds.SetMetadata({
+        'X_DATASET': lon_str,
+        'X_BAND': '1',
+        'Y_DATASET': lat_str,
+        'Y_BAND': '1',
+        'PIXEL_OFFSET': '0',
+        'LINE_OFFSET': '0',
+        'PIXEL_STEP': '1',
+        'LINE_STEP': '1'
+    }, 'GEOLOCATION')
+
+    # --- 4. WARP ---
+    # Now warp the VRT wrapper. geoloc=True will read our injected metadata and work perfectly.
+    ds = gdal.Warp(
+        '',
+        vrt_ds,
+        format='MEM',
+        dstSRS='EPSG:4326',
+        outputBounds=[lon_min, lat_min, lon_max, lat_max],
+        xRes=0.00675, yRes=0.00675,
+        dstNodata=-128,
+        geoloc=True
+    )
+
+    if ds is None:
+        src_ds = vrt_ds = None  # Release locks
+        raise Exception(f'Failed to compute cloud coverage for {hdf_url}')
+
+    data = ds.GetRasterBand(1).ReadAsArray()
+    valid_data = data[(data == 0) | (data == 1)]
+
+    # Clean up all C++ pointers for Windows file locking
+    src_ds = vrt_ds = ds = None
+
+    if valid_data.size == 0:
+        raise Exception(f'Failed to compute cloud coverage for {hdf_url}. No valid data.')
+
+    cc = int((np.count_nonzero(valid_data == 1) / valid_data.size) * 100)
+
+    cache.store(key=file_name, value=cc)
+    return cc
 
 def cloud_coverage_batch(urls: list[str], bbox: Iterable[float], max_threads: int = 5, progress: Progress = None):
     results = {}

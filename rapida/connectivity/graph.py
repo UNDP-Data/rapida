@@ -197,6 +197,7 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
         # ---------------------------------------------------------
 
     valhalla_conf["mjolnir"]["min_reachability"] = 0
+
     valhalla_conf["mjolnir"]["data_processing"]["use_admin_db"] = False
 
     if sys.platform == "win32":

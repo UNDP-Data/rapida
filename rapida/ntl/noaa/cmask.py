@@ -306,11 +306,6 @@ def cloud_coverage_winbug(hdf_url: str, bbox: list) -> int:
     return cc
 
 
-import os
-import platform
-import numpy as np
-from osgeo import gdal
-
 
 def cloud_coverage(hdf_url: str, bbox: list) -> int:
     gdal.UseExceptions()

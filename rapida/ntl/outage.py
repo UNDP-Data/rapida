@@ -224,7 +224,7 @@ async def detect_outage(
                         geom_type=ogr.wkbPolygon
                     )
 
-                    with TemporaryDirectory(dir=dst_dir, delete=True) as project_folder:
+                    with TemporaryDirectory(dir=dst_dir, delete=True, ignore_cleanup_errors=True) as project_folder:
                         project = Project(path=project_folder, polygons=outage_gpkg_path,
                                           comment='temp project for outage zonal stats')
                         with click.Context(assess) as ctx:

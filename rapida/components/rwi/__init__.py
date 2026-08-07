@@ -168,7 +168,7 @@ class RwiVariable(Variable):
             'GDAL_HTTP_MERGE_CONSECUTIVE_RANGES':'YES',
             'GDAL_CACHEMAX':'512',
             'GDAL_NUMTHREADS':'4'
-        }):
+        }, thread_local=False):
             geo.import_raster(
                 source=local_path, dst=self.local_path, target_srs=project.target_srs,
                 crop_ds=project.geopackage_file_path, crop_layer_name=project.polygons_layer_name,

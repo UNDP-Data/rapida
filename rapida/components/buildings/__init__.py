@@ -223,15 +223,22 @@ class BuildingsVariable(Variable):
 
         polygons_layer = destination_layer if destination_layer in layer_names else project.polygons_layer_name
 
-        # FIX 1: Read ALL columns so we don't drop previously computed variables (like nbuildings)
+        # Read polygons (ALL columns so we keep previous variables like nbuildings)
         polygons_gdf = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
         if 'h3id' in polygons_gdf.columns:
             polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
 
+        # ==========================================
+        # CRITICAL FIX: FORCE MATCHING DATA TYPES (Integer)
+        # Using 'Int64' ensures 64-bit integer matching and prevents NaN crashes
+        # ==========================================
+        polygons_gdf['polyid'] = polygons_gdf['polyid'].astype('Int64')
+        buildings_gdf['polyid'] = buildings_gdf['polyid'].astype('Int64')
+
         # Calculate base stats
         if self.name == 'nbuildings':
-            var_gdf = buildings_gdf['polyid'].value_counts().reset_index()
-            var_gdf.columns = ['polyid', self.name]
+            # This is 100% safe across all Pandas versions
+            var_gdf = buildings_gdf.groupby('polyid').size().reset_index(name=self.name)
         else:
             buildings_gdf[self.name] = buildings_gdf.geometry.area
             var_gdf = buildings_gdf.groupby('polyid', as_index=False)[self.name].sum()
@@ -242,37 +249,41 @@ class BuildingsVariable(Variable):
             if affected_layer_name in layer_names:
                 affected_buildings_gdf = gpd.read_file(dataset_path, layer=affected_layer_name,
                                                        columns=['polyid', 'geometry'])
+                # Force integer on affected buildings too
+                affected_buildings_gdf['polyid'] = affected_buildings_gdf['polyid'].astype('Int64')
 
                 if self.name == 'nbuildings':
-                    affected_var_gdf = affected_buildings_gdf['polyid'].value_counts().reset_index()
-                    affected_var_gdf.columns = ['polyid', affected_var_name]
+                    affected_var_gdf = affected_buildings_gdf.groupby('polyid').size().reset_index(
+                        name=affected_var_name)
                 else:
                     affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
                     affected_var_gdf = affected_buildings_gdf.groupby('polyid', as_index=False)[affected_var_name].sum()
 
-                # FIX 2: Change to 'left' merge to keep polygons that have 0 affected buildings
+                # Left merge to keep polygons that have 0 affected buildings
                 var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='left')
 
-                # Fill NaNs with 0 (for polygons with buildings, but none affected)
                 var_gdf[affected_var_name] = var_gdf[affected_var_name].fillna(0)
-
                 var_gdf[affected_var_percentage_name] = (var_gdf[affected_var_name] / var_gdf[self.name]) * 100
                 var_gdf[affected_var_percentage_name] = var_gdf[affected_var_percentage_name].fillna(0)
 
-        # Remove old columns before merging (to prevent _x and _y suffix duplicates)
-        polygons_gdf.drop(columns=[col for col in [self.name, affected_var_name, affected_var_percentage_name] if
-                                   col in polygons_gdf.columns], inplace=True)
+        # Remove ONLY the current variable's columns before merging
+        cols_to_drop = [col for col in [self.name, affected_var_name, affected_var_percentage_name] if
+                        col in polygons_gdf.columns]
+        if cols_to_drop:
+            polygons_gdf.drop(columns=cols_to_drop, inplace=True)
 
         # Final Merge and Save
         out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='left')
 
-        # FIX 3: Fill NaNs with 0 for polygons that had no buildings at all
+        # Fill NaNs with 0 for polygons that had NO buildings
         out_gdf[self.name] = out_gdf[self.name].fillna(0)
         if project.raster_mask is not None and affected_var_name in out_gdf.columns:
             out_gdf[affected_var_name] = out_gdf[affected_var_name].fillna(0)
             out_gdf[affected_var_percentage_name] = out_gdf[affected_var_percentage_name].fillna(0)
 
         out_gdf = out_gdf.rename(columns={'polyid': 'h3id'})
+
+        # Write back out
         out_gdf.to_file(dataset_path, layer=destination_layer, driver='GPKG', mode='w')
 
     def resolve(self, **kwargs):

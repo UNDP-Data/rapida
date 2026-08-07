@@ -17,7 +17,7 @@ import requests
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 import json
 import getpass
-
+import platform
 
 logger = logging.getLogger(__name__)
 
@@ -234,14 +234,20 @@ class SurgeTokenCredential(TokenCredential):
         auth_code = None
 
         with (sync_playwright() as p):
-            with p.chromium.launch(headless=True,
-                                   args=[   "--disable-gpu",
-                                            "--disable-dev-shm-usage",
-                                            "--no-sandbox",
-                                            "--single-process",
-                                            "--disable-setuid-sandbox",
-                                            "--use-gl=egl"
-                                    ]) as browser: # Use headless=True for invisible mode
+            chromium_args = [
+                "--disable-gpu",
+                "--disable-dev-shm-usage",
+                "--no-sandbox"
+            ]
+            if platform.system() != 'Windows':
+                chromium_args.extend([
+                    "--single-process",
+                    "--disable-setuid-sandbox",
+                    "--use-gl=egl"
+                ])
+
+
+            with p.chromium.launch(headless=True,args=chromium_args) as browser: # Use headless=True for invisible mode
                 error_msg = None
                 page = browser.new_page()
 

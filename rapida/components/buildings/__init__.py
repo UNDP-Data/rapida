@@ -205,7 +205,6 @@ class BuildingsVariable(Variable):
         assert force, f'invalid force={force}'
         return self.download(force=force, **kwargs)
 
-
     def evaluate(self, **kwargs):
         destination_layer = f'stats.{self.component}'
         affected_var_name = f'{self.name}_affected'
@@ -216,20 +215,20 @@ class BuildingsVariable(Variable):
 
         dataset_path, layer_name = self.local_path.split('::')
 
-        # Read only necessary columns (avoid loading full geometries if not needed)
+        # Read buildings
         buildings_gdf = gpd.read_file(dataset_path, layer=layer_name, columns=['polyid', 'geometry'])
 
-        # List layers once to avoid repeated I/O operations
         layers = pyogrio.list_layers(dataset_path)
         layer_names = layers[:, 0]
 
         polygons_layer = destination_layer if destination_layer in layer_names else project.polygons_layer_name
 
-        # Read only necessary columns for polygons
-        polygons_gdf = gpd.read_file(project.geopackage_file_path, layer=polygons_layer, columns=['h3id', 'geometry'])
-        polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
+        # FIX 1: Read ALL columns so we don't drop previously computed variables (like nbuildings)
+        polygons_gdf = gpd.read_file(project.geopackage_file_path, layer=polygons_layer)
+        if 'h3id' in polygons_gdf.columns:
+            polygons_gdf = polygons_gdf.rename(columns={'h3id': 'polyid'})
 
-        # **Efficient Building Count Calculation**
+        # Calculate base stats
         if self.name == 'nbuildings':
             var_gdf = buildings_gdf['polyid'].value_counts().reset_index()
             var_gdf.columns = ['polyid', self.name]
@@ -237,7 +236,7 @@ class BuildingsVariable(Variable):
             buildings_gdf[self.name] = buildings_gdf.geometry.area
             var_gdf = buildings_gdf.groupby('polyid', as_index=False)[self.name].sum()
 
-        # **Handle Affected Buildings**
+        # Handle Affected Buildings
         if project.raster_mask is not None:
             affected_layer_name = f'{self.component}.affected'
             if affected_layer_name in layer_names:
@@ -251,18 +250,29 @@ class BuildingsVariable(Variable):
                     affected_buildings_gdf[affected_var_name] = affected_buildings_gdf.geometry.area
                     affected_var_gdf = affected_buildings_gdf.groupby('polyid', as_index=False)[affected_var_name].sum()
 
-                # Merge affected data
-                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='inner')
-                var_gdf[affected_var_percentage_name] = (var_gdf[affected_var_name] / var_gdf[self.name]) * 100
+                # FIX 2: Change to 'left' merge to keep polygons that have 0 affected buildings
+                var_gdf = var_gdf.merge(affected_var_gdf, on='polyid', how='left')
 
-        # **Remove old columns before merging**
+                # Fill NaNs with 0 (for polygons with buildings, but none affected)
+                var_gdf[affected_var_name] = var_gdf[affected_var_name].fillna(0)
+
+                var_gdf[affected_var_percentage_name] = (var_gdf[affected_var_name] / var_gdf[self.name]) * 100
+                var_gdf[affected_var_percentage_name] = var_gdf[affected_var_percentage_name].fillna(0)
+
+        # Remove old columns before merging (to prevent _x and _y suffix duplicates)
         polygons_gdf.drop(columns=[col for col in [self.name, affected_var_name, affected_var_percentage_name] if
                                    col in polygons_gdf.columns], inplace=True)
 
-        # **Final Merge and Save**
+        # Final Merge and Save
         out_gdf = polygons_gdf.merge(var_gdf, on='polyid', how='left')
-        out_gdf = out_gdf.rename(columns={'polyid': 'h3id'})
 
+        # FIX 3: Fill NaNs with 0 for polygons that had no buildings at all
+        out_gdf[self.name] = out_gdf[self.name].fillna(0)
+        if project.raster_mask is not None and affected_var_name in out_gdf.columns:
+            out_gdf[affected_var_name] = out_gdf[affected_var_name].fillna(0)
+            out_gdf[affected_var_percentage_name] = out_gdf[affected_var_percentage_name].fillna(0)
+
+        out_gdf = out_gdf.rename(columns={'polyid': 'h3id'})
         out_gdf.to_file(dataset_path, layer=destination_layer, driver='GPKG', mode='w')
 
     def resolve(self, **kwargs):

@@ -312,11 +312,13 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     gdal.PushErrorHandler('CPLQuietErrorHandler')
 
     # --- 1. DYNAMIC DRIVER SELECTION ---
-    is_windows = platform.system() == "Windows"
+    # GDAL's netCDF driver can only read /vsi paths on Linux (it needs userfaultfd).
+    # On Windows and macOS we skip it and drive the HDF5 driver directly instead.
+    use_hdf5_driver = platform.system() != "Linux"
 
-    if is_windows:
+    if use_hdf5_driver:
         gdal.SetConfigOption('GDAL_SKIP', 'netCDF')
-        # On Windows, we force the HDF5 driver and its specific string syntax
+        # On Windows and MacOS, we force the HDF5 driver and its specific string syntax
         base_ds = f'HDF5:"/vsicurl/{hdf_url}"'
         mask_str = f'{base_ds}://CloudMaskBinary'
         lon_str = f'{base_ds}://Longitude'

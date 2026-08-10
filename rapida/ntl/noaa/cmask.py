@@ -326,7 +326,7 @@ def cloud_coverage(hdf_url: str, bbox: list) -> int:
     else:
         gdal.SetConfigOption('GDAL_SKIP', '')
         # On Linux, we use the native NetCDF driver
-        base_ds = f'HDF:"/vsicurl/{hdf_url}"'
+        base_ds = f'HDF5:"/vsicurl/{hdf_url}"'
         mask_str = f'{base_ds}:CloudMaskBinary'
         lon_str = f'{base_ds}:Longitude'
         lat_str = f'{base_ds}:Latitude'

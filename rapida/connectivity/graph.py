@@ -211,6 +211,7 @@ async def compile_valhalla_graph(pbf_path: str, dst_dir: str, progress=None) -> 
 
     if sys.platform == "win32":
         valhalla_conf["mjolnir"]["use_mmap"] = False
+        valhalla_conf["mjolnir"]["concurrency"] = 1
 
 
 

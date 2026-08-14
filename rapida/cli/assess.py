@@ -91,6 +91,21 @@ def validate_variables(ctx, param, value):
     return value
 
 
+def validate_popvars(ctx, param, value):
+    """
+    click callback function to validate --popvar values against population component variables.
+    """
+    if not value:
+        return value
+    valid_vars = get_variables_by_components(['population']).get('population', [])
+    invalid = [v for v in value if v not in valid_vars]
+    if invalid:
+        raise click.BadParameter(
+            f"Invalid popvar{'s' if len(invalid) > 1 else ''}: {', '.join(invalid)}. "
+            f"Valid options: {', '.join(valid_vars)}")
+    return value
+
+
 def validate_datetime_range(ctx, param, value):
     """
     click callback function to validate --datetime value
@@ -154,7 +169,7 @@ def build_variable_help():
 @click.command(short_help='assess/evaluate a specific geospatial exposure components/variables', no_args_is_help=True)
 @click.option(
     '--all', '-a', is_flag=True, default=False,
-    help="compute all components and variables if this option is set"
+    help="compute all auto-runnable components and variables (excludes landuse and ntl) if this option is set"
 )
 @click.option(
     '--components', '-c', required=False, multiple=True,
@@ -172,6 +187,23 @@ def build_variable_help():
 @click.option("--outage-date", "outage_date", type=click.DateTime(formats=["%Y-%m-%d"]), required=False,
               help='The human experience of a specific night, local time zone matched to the center of bbox')
 
+@click.option('--popvar', 'popvar', required=False, multiple=True,
+              type=str, callback=validate_popvars,
+              help="Optional. One or more population variables to compute affected-population zonal stats "
+                   "over detected outages (ntl component only). If omitted, the population count-variables "
+                   "already present in the project are auto-selected.")
+
+@click.option('-ot', '--percentage-drop', 'percentage_drop', type=int, default=50, show_default=True,
+              help="Outage threshold: minimum %% radiance drop to flag a pixel as an outage (ntl component only).")
+
+@click.option('-cm', '--cmask', 'mask_clouds', is_flag=True, default=False,
+              help="Enable cloud masking during NTL outage detection (ntl component only). Off by default to "
+                   "avoid over-masking (NASA A2/water-vapor is frequently flagged cloudy).")
+
+@click.option('--bbox-buffer', 'bbox_buffer', type=float, default=0.0, show_default=True,
+              help="Optional. Enlarge the project bbox by this many meters before NTL outage detection "
+                   "(NTL has ~500m pixels; helps small AOIs). 0 = no buffer (ntl component only).")
+
 @click.option('--cloud-cover', '-cc', required=False, type=int, multiple=False, default=5,
               show_default=True,help=f"Optional. Minimum cloud cover rate to search items for landuse component.")
 @click.option('-p', '--project',
@@ -182,7 +214,7 @@ def build_variable_help():
               help=f'Force assess components. Downloaded data or computed data will be ignored and recomputed.')
 
 @click.pass_context
-def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, outage_date=None, cloud_cover=None, project: str = None, force=False):
+def assess(ctx, all=False, components=None,  variables=None, year=None, datetime_range=None, outage_date=None, popvar=None, percentage_drop=50, mask_clouds=False, bbox_buffer=0.0, cloud_cover=None, project: str = None, force=False):
     """
     Assess/evaluate a specific geospatial exposure components/variables
 
@@ -198,7 +230,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
 
     Usage:
 
-    rapida assess --all: assess all components
+    rapida assess --all: assess all auto-runnable components (excludes landuse and ntl)
 
     rapida assess -c rwi: assess RWI component only.
 
@@ -209,6 +241,13 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
     rapida assess -c rwi -p ./data/sample_project: assess RWI component for RAPIDA project stored at sample_project folder.
 
     rapida assess -c landuse -dt 2025-02-01/2025-05-31 -cc 10: Search Sentinel 2 item which is less than 10% of cloud cover from February to May 2025.
+
+    rapida assess -c ntl -v noaa_outage --outage-date 2026-07-20 -ot 40 --bbox-buffer 2000: NTL outage detection for a specific night.
+
+    NTL notes: the 'ntl' component requires --outage-date. NOAA (noaa_outage) is usually more reliable than the NASA
+    archive (nasa_outage), whose bottom-of-atmosphere product is frequently flagged as cloudy. For small areas of
+    interest, enlarge the search window with --bbox-buffer (NTL pixels are ~500m) and tune the outage threshold with
+    -ot/--percentage-drop. To inspect input data quality for the same bbox and date, use `rapida ntl search`.
 
     """
     progress = ctx.obj.get('progress')
@@ -237,7 +276,7 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
             target_components = components
             if len(components) == 0:
                 if all:
-                    target_components = set(filter(lambda x: x != "landuse", all_components))
+                    target_components = set(filter(lambda x: x not in {"landuse", "ntl"}, all_components))
                 else:
                     logger.warning(f"At least one component is required. If you want to assess all components, use --all option")
                     return
@@ -267,6 +306,10 @@ def assess(ctx, all=False, components=None,  variables=None, year=None, datetime
                           year=year,
                           datetime_range=datetime_range,
                           outage_date=outage_date,
+                          pop_vars=popvar,
+                          percentage_drop=percentage_drop,
+                          mask_clouds=mask_clouds,
+                          bbox_buffer=bbox_buffer,
                           cloud_cover=cloud_cover,
                           force=force)
 

@@ -105,6 +105,20 @@ async def download_file(file_url=None, dst_file_path=None,
                     remote_size_str = response.headers.get('Content-Length')
                     remote_size = int(remote_size_str) if remote_size_str else None
 
+                    # Auth/authorization failures (e.g. NASA Earthdata / LANCE NRT) are
+                    # served as an HTML login page with HTTP 200, which would otherwise be
+                    # saved with the data extension and later crash cryptically in GDAL.
+                    # Detect it here so we fail clearly and never cache the bad file.
+                    content_type = response.headers.get('Content-Type', '')
+                    if 'text/html' in content_type.lower():
+                        raise Exception(
+                            f'Authentication/authorization failed for {file_url}: server '
+                            f'returned an HTML page (Content-Type: {content_type}) instead of '
+                            f'the data file. For NASA NRT (LANCE) data, ensure the account behind '
+                            f'EARTHDATA_TOKEN has authorized the required application at '
+                            f'https://urs.earthdata.nasa.gov (Applications -> Authorized Apps).'
+                        )
+
                     if os.path.exists(dst_file_path):
                         # Only compare sizes if remote_size is known
                         if not force and remote_size is not None and os.path.getsize(dst_file_path) == remote_size:

@@ -31,7 +31,8 @@ async def download_and_track(granule, dest_dir, prog_bar):
     return granule.timestamp, result_dict
 
 async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
-                deliverable:str=None, dst_dir:str=None, progress:Progress=None):
+                deliverable:str=None, dst_dir:str=None, progress:Progress=None,
+                mask_clouds:bool=False):
     """
     Indentify and download the BEST available data suitable to detect outages.
     :param dst_dir:
@@ -48,7 +49,7 @@ async def fetch(bbox:tuple[numbers.Number]=None, nominal_date:datetime=None,
         logger.info(f'Going to predict VIIRS satellite passes for {nominal_date.date()} over target area: {bbox}')
         granules = await async_search_granules(
             satellites=None, nominal_date=nominal_date, bbox=bbox,
-            cmask=True, progress=progress)
+            cmask=mask_clouds, progress=progress)
         if not granules:
             logger.info(f'No descending granules for found for {nominal_date.date()} over target area {bbox}')
             return

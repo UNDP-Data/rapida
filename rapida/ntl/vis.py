@@ -114,11 +114,17 @@ def plot(array):
     plt.show()
 
 
-def display2(data=dict(), interpolation='nearest', title='', max_discrete_vals=5):
+def display2(data=dict(), interpolation='nearest', title='', max_discrete_vals=5,
+             save_path=None, show=True):
     """
     Improved display function that maximizes screen real estate,
     ensures perfectly aligned subplots, and automatically detects
     discrete classification maps to build custom legends.
+
+    @args
+        @save_path - if set, the figure is written to this path (PNG) instead of
+                     only being shown interactively. Parent directory is created.
+        @show      - if True, the figure is shown interactively via plt.show().
     """
     n = len(data)
     if n == 0: return
@@ -190,4 +196,16 @@ def display2(data=dict(), interpolation='nearest', title='', max_discrete_vals=5
         axes_flat[j].axis('off')
 
     fig.suptitle(title, fontsize=20)
-    plt.show()
+
+    if save_path:
+        import os
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        fig.savefig(save_path, dpi=150, bbox_inches='tight')
+
+    if show:
+        plt.show()
+
+    if save_path:
+        # Free the figure once it has been persisted to avoid leaking figures
+        # when many variables are rendered in a single run.
+        plt.close(fig)

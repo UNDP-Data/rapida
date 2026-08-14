@@ -1,8 +1,30 @@
 import logging
+import math
 import reverse_geocoder as rg
 import click
 
 logger = logging.getLogger(__name__)
+
+
+def buffer_bbox(bbox: tuple[float, float, float, float], meters: float) -> tuple[float, float, float, float]:
+    """
+    Enlarge a geographic (WGS84 lon/lat) bbox by a distance in meters on all sides.
+
+    Meters are converted to degrees using an approximation at the bbox center latitude.
+    Useful for coarse rasters (e.g. NTL ~500m pixels) where a small AOI would otherwise
+    contain too few pixels.
+
+    :param bbox: (min_lon, min_lat, max_lon, max_lat) in EPSG:4326
+    :param meters: buffer distance in meters; 0/None returns the bbox unchanged
+    :return: the enlarged bbox
+    """
+    if not meters:
+        return bbox
+    minlon, minlat, maxlon, maxlat = bbox
+    center_lat = (minlat + maxlat) / 2.0
+    dlat = meters / 111320.0
+    dlon = meters / (111320.0 * max(math.cos(math.radians(center_lat)), 1e-6))
+    return (minlon - dlon, minlat - dlat, maxlon + dlon, maxlat + dlat)
 
 
 class BboxParamType(click.ParamType):

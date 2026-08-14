@@ -50,6 +50,7 @@ class Granule:
     elevation:float
     cloud_cover = None
     pint:float = None
+    url:str = None
     @property
     def id(self):
         return f"{self.start_time:%Y%m%d%H%M%S}{self.start_time.microsecond // 100000}" #
@@ -427,9 +428,12 @@ class VIIRSNavigator:
                     current_granule.start_time = start_time
                     logger.debug(f'Replacing granule {old_timestamp} with {current_granule.timestamp}')
 
+            # Always resolve the public URL so downstream consumers (e.g.
+            # select_required_granules) can read granule.url regardless of cmask.
+            url = public_url(file_path=file_path, satellite=self.satellite, source=source)
+            current_granule.url = url
             if cmask:
                 # Use the unique URL as the key (Always unique)
-                url = public_url(file_path=file_path, satellite=self.satellite, source=source)
                 selected_granules[url] = current_granule
             else:
                 # Use the unique file_path as the key to prevent SNPP/N20/N21 overwrites

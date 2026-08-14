@@ -7,6 +7,7 @@ import fsspec
 import h5py
 import secrets
 import asyncio
+import math
 import os
 from rich.progress import Progress
 from rapida.ntl import cache
@@ -133,6 +134,23 @@ def h52vrt(
         tile_vrt_path = f"/vsimem/{file_name}{secrets.token_hex(6)}.vrt"
         gdal.FileFromMemBuffer(tile_vrt_path, tile_xml.encode('utf-8'))
         tile_vrts.append(tile_vrt_path)
+
+    # Snap the crop bounds outward to the source tile pixel grid. gdal.BuildVRT with
+    # a fractional-pixel offset between the mosaic origin and the tile grid raises
+    # "Wrong values in SrcRect" when mosaicking adjacent tiles. Bounds that are
+    # already grid-aligned (e.g. integer degrees from `ntl detect -b`) are a no-op;
+    # sub-pixel reprojection noise from project.geobounds gets aligned to whole
+    # pixels. All tiles share the same global grid, so the last tile's origin
+    # (west/north) and pixel size (px_w/px_h) define the grid phase.
+    if bbox is not None:
+        minx, miny, maxx, maxy = bbox
+        ph = abs(px_h)
+        eps = 1e-6  # tolerance so already-aligned edges don't bump a whole pixel
+        minx = west + math.floor((minx - west) / px_w + eps) * px_w
+        maxx = west + math.ceil((maxx - west) / px_w - eps) * px_w
+        maxy = north - math.floor((north - maxy) / ph + eps) * ph
+        miny = north - math.ceil((north - miny) / ph - eps) * ph
+        bbox = (minx, miny, maxx, maxy)
 
     # 3. Mosaic all virtual tiles into the final master VRT
     vrt_opts = gdal.BuildVRTOptions(

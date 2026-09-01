@@ -170,7 +170,7 @@ async def connectivity(ctx, bbox:tuple[float, float, float, float]=None, travel_
                        disjoint:bool=False, smooth:bool=True
     ):
     logger.info(f'Running connectivity analysis')
-    progress = ctx.obj.get('progress')
+    progress = ctx.obj.get('progress') if ctx.obj else None
     with progress:
         return await run_connectivity_analysis(
             bbox=bbox, dst_dir=dst_dir, travel_mode=travel_mode, time_intervals=time_intervals,

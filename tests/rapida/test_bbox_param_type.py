@@ -69,16 +69,14 @@ def test_convert_rejects_malformed_bbox(value: str) -> None:
         param_type.convert(value, None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not reject non finite ordinates yet")
 def test_nan_input_rejection() -> None:
     """
-    Test a nan ordinate is refused. float() accepts it, so it reaches the clip.
+    Test a nan ordinate is refused. float() accepts it, so convert has to check.
     """
     with pytest.raises(click.BadParameter):
         BboxParamType().convert("nan,nan,nan,nan", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not reject non finite ordinates yet")
 def test_inf_input_rejection() -> None:
     """
     Test a positive inf ordinate is refused.
@@ -87,7 +85,6 @@ def test_inf_input_rejection() -> None:
         BboxParamType().convert("1,2,inf,4", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not reject non finite ordinates yet")
 def test_negative_inf_input_rejection() -> None:
     """
     Test a negative inf ordinate is refused.
@@ -96,7 +93,6 @@ def test_negative_inf_input_rejection() -> None:
         BboxParamType().convert("-inf,2,3,4", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not range check longitude yet")
 def test_longitude_above_maximum_rejection() -> None:
     """
     Test a longitude beyond 180 degrees is refused.
@@ -105,7 +101,6 @@ def test_longitude_above_maximum_rejection() -> None:
         BboxParamType().convert("200,10,210,20", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not range check latitude yet")
 def test_latitude_above_maximum_rejection() -> None:
     """
     Test a latitude beyond 90 degrees is refused.
@@ -114,7 +109,6 @@ def test_latitude_above_maximum_rejection() -> None:
         BboxParamType().convert("10,100,20,110", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not range check lon/lat yet")
 def test_ordinates_below_minimum_rejection() -> None:
     """
     Test ordinates below -180/-90 are refused.
@@ -123,7 +117,6 @@ def test_ordinates_below_minimum_rejection() -> None:
         BboxParamType().convert("-200,-100,-190,-95", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not check min < max yet")
 def test_inverted_longitude_rejection() -> None:
     """
     Test a bbox whose minimum longitude exceeds its maximum is refused.
@@ -132,7 +125,6 @@ def test_inverted_longitude_rejection() -> None:
         BboxParamType().convert("10,0,5,1", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not check min < max yet")
 def test_inverted_latitude_rejection() -> None:
     """
     Test a bbox whose minimum latitude exceeds its maximum is refused.
@@ -141,7 +133,6 @@ def test_inverted_latitude_rejection() -> None:
         BboxParamType().convert("0,10,1,5", None, None)
 
 
-@pytest.mark.xfail(strict=True, reason="convert() does not reject a zero area bbox yet")
 def test_zero_area_bbox_rejection() -> None:
     """
     Test a bbox with identical corners is refused before it reaches GDAL.
@@ -202,7 +193,6 @@ def test_buffer_bbox_survives_a_polar_bbox() -> None:
     assert math.isfinite(maxlon)
 
 
-@pytest.mark.xfail(strict=True, reason="buffer_bbox does not clamp to the valid lat range yet")
 def test_buffer_bbox_keeps_latitude_within_range() -> None:
     """
     Test buffering a polar bbox does not push latitude past 90 degrees.
@@ -274,11 +264,10 @@ def test_get_best_semantic_label_builds_the_hierarchy(
     assert get_best_semantic_label((32.5, 0.2, 32.7, 0.4)) == expected
 
 
-@pytest.mark.xfail(strict=True, reason="an empty geocoder result raises IndexError instead of a click error")
 def test_get_bbox_label_empty_geocoder_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """
-    Test get_bbox_label reports an empty geocoder result as a click error. The
-    first hit is indexed unconditionally, so today this is a bare IndexError.
+    Test get_bbox_label reports an empty geocoder result as a click error rather
+    than indexing an empty list.
     Args:
         monkeypatch (pytest.MonkeyPatch): used to stub the geocoder.
     """
@@ -287,11 +276,10 @@ def test_get_bbox_label_empty_geocoder_result(monkeypatch: pytest.MonkeyPatch) -
         get_bbox_label((32.5, 0.2, 32.7, 0.4))
 
 
-@pytest.mark.xfail(strict=True, reason="an empty geocoder result raises IndexError instead of a click error")
 def test_get_best_semantic_label_empty_geocoder_result(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     Test get_best_semantic_label reports an empty geocoder result as a click
-    error rather than an IndexError.
+    error rather than indexing an empty list.
     Args:
         monkeypatch (pytest.MonkeyPatch): used to stub the geocoder.
     """

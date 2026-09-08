@@ -14,6 +14,10 @@ def buffer_bbox(bbox: tuple[float, float, float, float], meters: float) -> tuple
     Useful for coarse rasters (e.g. NTL ~500m pixels) where a small AOI would otherwise
     contain too few pixels.
 
+    Latitude is clamped to the valid range so a bbox that already touches a pole is not
+    pushed past it. Longitude is left alone because a bbox crossing the antimeridian is
+    a legitimate AOI.
+
     :param bbox: (min_lon, min_lat, max_lon, max_lat) in EPSG:4326
     :param meters: buffer distance in meters; 0/None returns the bbox unchanged
     :return: the enlarged bbox
@@ -24,7 +28,7 @@ def buffer_bbox(bbox: tuple[float, float, float, float], meters: float) -> tuple
     center_lat = (minlat + maxlat) / 2.0
     dlat = meters / 111320.0
     dlon = meters / (111320.0 * max(math.cos(math.radians(center_lat)), 1e-6))
-    return (minlon - dlon, minlat - dlat, maxlon + dlon, maxlat + dlat)
+    return (minlon - dlon, max(-90.0, minlat - dlat), maxlon + dlon, min(90.0, maxlat + dlat))
 
 
 class BboxParamType(click.ParamType):
@@ -41,16 +45,36 @@ class BboxParamType(click.ParamType):
                 f"bbox must be 4 floating point numbers separated by commas. Got '{value}'"
             )
 
+        # nan compares False against everything, so this has to come before the range checks
+        if not all(math.isfinite(x) for x in bbox):
+            self.fail(f"bbox must contain finite numbers. Got '{value}'")
+
+        minlon, minlat, maxlon, maxlat = bbox
+
+        if not (-180 <= minlon <= 180 and -180 <= maxlon <= 180):
+            self.fail(f"bbox longitude must be between -180 and 180. Got '{value}'")
+
+        if not (-90 <= minlat <= 90 and -90 <= maxlat <= 90):
+            self.fail(f"bbox latitude must be between -90 and 90. Got '{value}'")
+
+        if minlon >= maxlon:
+            self.fail(f"bbox min longitude must be smaller than max longitude. Got '{value}'")
+
+        if minlat >= maxlat:
+            self.fail(f"bbox min latitude must be smaller than max latitude. Got '{value}'")
+
         return bbox
 
 
-def get_bbox_label(bbox: tuple[float, float, float, float])->str:
+def get_bbox_label(bbox: tuple[float, float, float, float])->dict:
     minlon, minlat, maxlon, maxlat = bbox
 
     lon = (minlon + maxlon) * .5
     lat = (minlat + maxlat) * .5
-    result = rg.search((lat,lon))[0]
-    return result
+    results = rg.search((lat,lon))
+    if not results:
+        raise click.BadParameter(f"no geocoding result for the center of bbox {bbox}")
+    return results[0]
 
 
 def get_best_semantic_label(bbox: tuple[float, float, float, float]):
@@ -61,7 +85,10 @@ def get_best_semantic_label(bbox: tuple[float, float, float, float]):
 
     # 2. Get the offline geocode result
     # rg.search expects a list/tuple of tuples
-    result = rg.search((lat_center, lon_center))[0]
+    results = rg.search((lat_center, lon_center))
+    if not results:
+        raise click.BadParameter(f"no geocoding result for the center of bbox {bbox}")
+    result = results[0]
 
     country = result.get('cc', '')
     admin1 = result.get('admin1', '').strip()

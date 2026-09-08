@@ -155,35 +155,51 @@ def display2(data=dict(), interpolation='nearest', title='', max_discrete_vals=5
         ax.set_aspect('equal')
 
         # --- THE NEW DYNAMIC LOGIC ---
-        # Filter out NaNs to safely check unique values
-        valid_vals = a[~np.isnan(a)]
+        # 1. Safely filter NaNs
+        if np.issubdtype(a.dtype, np.floating):
+            valid_vals = a[~np.isnan(a)]
+        else:
+            valid_vals = a
+
         unique_vals = np.unique(valid_vals)
 
-        # Check if this is a discrete/classification map (e.g., grid_health or masks)
-        if len(unique_vals) <= max_discrete_vals:
-            # It's discrete! Use specific colors and a custom legend.
-            # (Matches your Black/Yellow/Red layout for 3 values)
+        # 2. Handle empty (all NaNs) or uniform (all 1s) arrays natively
+        if len(unique_vals) < 2:
+            cmap = 'viridis' if 'Mask' in iname else 'magma'
+            # Lock the scale to 0-1 for masks so 'all 1s' doesn't default to purple
+            vmin, vmax = (0, 1) if ('Mask' in iname or a.dtype == bool) else (None, None)
+
+            im = ax.imshow(a, interpolation='none', cmap=cmap, vmin=vmin, vmax=vmax)
+
+            # Only draw a colorbar if there is at least one valid value to label
+            if len(unique_vals) == 1:
+                divider = make_axes_locatable(ax)
+                cax = divider.append_axes("right", size="5%", pad=0.1)
+                plt.colorbar(im, cax=cax, ticks=unique_vals)
+
+        # 3. Check if this is a discrete/classification map (2 to max_discrete_vals)
+        elif len(unique_vals) <= max_discrete_vals:
+            display_a = np.zeros_like(a, dtype=int)
+            for idx, val in enumerate(unique_vals):
+                display_a[a == val] = idx
+
             discrete_palette = ['black', 'yellow', 'red', 'cyan', 'magenta']
             colors = discrete_palette[:len(unique_vals)]
             cmap = ListedColormap(colors)
 
-            # BoundaryNorm ensures the colorbar is split perfectly by the number of classes
             bounds = np.arange(len(unique_vals) + 1) - 0.5
             norm = BoundaryNorm(bounds, cmap.N)
 
-            # Force interpolation='none' so classes don't blur at the edges
-            im = ax.imshow(a, interpolation='none', cmap=cmap, norm=norm)
+            im = ax.imshow(display_a, interpolation='none', cmap=cmap, norm=norm)
 
             divider = make_axes_locatable(ax)
             cax = divider.append_axes("right", size="5%", pad=0.1)
 
-            # Build a discrete colorbar with centered ticks
             cbar = plt.colorbar(im, cax=cax, ticks=np.arange(len(unique_vals)))
-            # Label the ticks with their actual array values
             cbar.ax.set_yticklabels([f'Val: {v}' for v in unique_vals])
 
         else:
-            # It's continuous! (e.g., raw radiance or log_diff)
+            # 4. Continuous maps
             cmap = 'viridis' if 'Mask' in iname else 'magma'
             im = ax.imshow(a, interpolation=interpolation, cmap=cmap)
 

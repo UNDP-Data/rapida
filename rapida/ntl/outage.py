@@ -1,4 +1,4 @@
-
+from matplotlib import pyplot as plt
 from datetime import datetime, timedelta
 import numbers
 import logging
@@ -148,25 +148,31 @@ async def detect_outage(
                 level = product.split('_')[0][-2:] if 'NRT' in deliverable else product[-2:]
                 sub_dataset_name = nasa_const.SUB_DATASETS[level]
                 daily_data = extract_bb(image_files=local_image_files, bbox=bbox,sds_name=sub_dataset_name,progress=progress)
+                if len(set(daily_data.ravel())) ==  1:
+                    logger.info(f'Invalid data for product {product} for {timestamp}. Skipping...')
+                    continue
                 positive = daily_data>=0
                 log_daily_data = np.zeros_like(daily_data)
                 log_daily_data[positive] = np.log1p(daily_data[positive])
-                log_daily_data = np.log1p(daily_data)
 
                 daily_data_label = f'{product}_{timestamp}'
                 arrays[daily_data_label] = log_daily_data
 
                 if mask_clouds:
+                    print('MC', product)
                     qf_array = extract_bb(image_files=local_image_files, sds_name='QF_Cloud_Mask',
                                           bbox=bbox, progress=progress).astype('u2')
                     cloud_confidence = (qf_array >> 6) & 0b11
                     is_cloudy = cloud_confidence == 3
                     arrays['CLOUD_MASK'] = is_cloudy
-                    analysis_mask |= is_cloudy
-                arrays[f'{daily_data_label}_MASK'] = analysis_mask
+                    product_analysis_mask =  (analysis_mask | is_cloudy).astype(bool)
+
+                else:
+                    product_analysis_mask = analysis_mask
+                arrays[f'{daily_data_label}_MASK'] = product_analysis_mask
                 log_difference, zscore, outage = utils.logdiff_outage(
                     log_monthly_data=log_monthly_data,log_daily_data=log_daily_data,
-                    analysis_mask=analysis_mask,percentage_drop=percentage_drop
+                    analysis_mask=product_analysis_mask,percentage_drop=percentage_drop
 
                 )
                 arrays[f'{daily_data_label}_LOGDIFF'] = log_difference
@@ -175,9 +181,11 @@ async def detect_outage(
 
     # --- 5. UNIFIED DISPLAY & EXPORT ---
     #file_name = utils.get_custom_bbox_label(bbox)
+
     file_name = get_best_semantic_label(bbox=bbox)
     outage_tif_path = os.path.join(dst_dir, f'{deliverable}_{file_name}.tif')
     outage_gpkg_path = os.path.join(dst_dir, f'{deliverable}_{file_name}.gpkg')
+    logger.info(f'Writing outage results to {outage_tif_path}')
     write_outage_tif(src_arrays=arrays, gt=gt, dst_path=outage_tif_path)
 
     if pop_vars:

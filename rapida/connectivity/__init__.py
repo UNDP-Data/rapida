@@ -1,8 +1,8 @@
 import datetime
 
 import os.path
-from unittest.mock import inplace
 
+from shapely.geometry import Point
 from rapida.util.bbox_param_type import get_best_semantic_label
 import geopandas as gpd
 import pandas as pd
@@ -243,8 +243,26 @@ async def run_connectivity_analysis(
 
 
 
-    if barriers_dataset is not None and pop_vars:
+    if barriers_dataset is not None:
         info = pyogrio.read_info(barriers_dataset)
+        # 1. Load barriers and align CRS with the EPSG:4326 origins
+        barriers_gdf = gpd.read_file(barriers_dataset, engine="pyogrio")
+        if barriers_gdf.crs and barriers_gdf.crs != "EPSG:4326":
+            barriers_gdf = barriers_gdf.to_crs("EPSG:4326")
+
+        # 2. Merge all barrier polygons into a single geometry for fast intersection checking
+        unified_barriers = barriers_gdf.geometry.union_all()
+
+        logger.info(f'Filtering out origins located inside barriers...')
+
+        # 3. Filter the list of (lon, lat) tuples using Shapely
+        valid_origins = [
+            (lon, lat) for lon, lat in origins
+            if not unified_barriers.contains(Point(lon, lat))
+        ]
+
+        logger.info(f'Proceeding with {len(valid_origins)} valid origins outside barrier zones.')
+
         if 'polygon' in info['geometry_type'].lower(): # keep only polys that actually intersect the roads
             logger.info(f'Removing barrier polygons that do not intersect roads...')
             roads_dataset = await extract_roads(pbf_path=bbox_pbf, dst_dir=dest_dir, progress=progress)
@@ -252,7 +270,7 @@ async def run_connectivity_analysis(
 
         logger.info(f'Computing isochrones with barriers')
         barrier_isochrones_gdf = await connectivity_areas(
-        tar_path=dag_tar_path, origins=origins, travel_mode=travel_mode, intervals_minutes=time_intervals,
+        tar_path=dag_tar_path, origins=valid_origins, travel_mode=travel_mode, intervals_minutes=time_intervals,
         barriers_dataset=barriers_dataset, barriers_layer=barriers_layer, barriers_buffer=barriers_buffer, disjoint=disjoint, radius=radius,
             smooth=smooth, progress=progress
                              )
@@ -268,6 +286,14 @@ async def run_connectivity_analysis(
                 a0_gdf = a0_gdf.to_crs(barrier_isochrones_gdf.crs)
             barrier_isochrones_gdf = barrier_isochrones_gdf.clip(a0_gdf)
             barrier_isochrones_gdf['iso3'] = clip_country
+
+        logger.info('Removing barrier areas from barrier isochrones')
+        if barrier_isochrones_gdf.crs != barriers_gdf.crs:
+            barriers_gdf = barriers_gdf.to_crs(barrier_isochrones_gdf.crs)
+
+        barriers_poly = barriers_gdf.geometry.union_all()
+        barrier_isochrones_gdf["geometry"] = barrier_isochrones_gdf.geometry.difference(barriers_poly)
+
         if not water_gdf.empty:
             logger.info('Removing water bodies from barrier isochrones')
             barrier_isochrones_gdf["geometry"] = barrier_isochrones_gdf.geometry.difference(water_poly)

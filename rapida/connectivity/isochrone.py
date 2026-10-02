@@ -90,8 +90,6 @@ def get_empirical_radius(geom_meters, fallback_radius):
             lengths.extend(dist[dist > 1.0])
 
         if lengths:
-            # The 15th percentile reliably targets the smallest common denominator (the grid step)
-            empirical_cell_size = np.percentile(lengths, 50)
             # Round to the nearest meter to group floating-point variations
             rounded_lengths = np.round(lengths, decimals=0)
 

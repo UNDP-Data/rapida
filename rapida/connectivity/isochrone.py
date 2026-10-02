@@ -28,11 +28,55 @@ project_to_meters = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=Tru
 project_to_degrees = Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True).transform
 
 
-def get_empirical_radius(geom_meters, fallback_radius):
+def get_empirical_radius_old(geom_meters, fallback_radius):
     """Dynamically calculates the smoothing radius based on polygon segment lengths."""
     try:
         # Handle both Polygons and MultiPolygons safely
         polys = geom_meters.geoms if geom_meters.geom_type == 'MultiPolygon' else [geom_meters]
+        lengths = []
+
+        for poly in polys:
+            coords = poly.exterior.coords
+            # Fast vectorized distance calculation between consecutive vertices
+            x = np.array([c[0] for c in coords])
+            y = np.array([c[1] for c in coords])
+            dist = np.sqrt(np.diff(x) ** 2 + np.diff(y) ** 2)
+
+            # Keep only meaningful segments (ignoring duplicate vertices < 1 meter)
+            lengths.extend(dist[dist > 1.0])
+
+        if lengths:
+            # The 15th percentile reliably targets the smallest common denominator (the grid step)
+            empirical_cell_size = np.percentile(lengths, 50)
+            # Round to the nearest meter to group floating-point variations
+            rounded_lengths = np.round(lengths, decimals=0)
+
+            # Find the most frequent rounded length (the mode)
+            values, counts = np.unique(rounded_lengths, return_counts=True)
+            empirical_cell_size = values[np.argmax(counts)]
+
+            # Apply the 0.85 multiplier to tightly fuse the grid without ballooning
+            return empirical_cell_size * 1.44
+
+    except Exception as e:
+        logger.warning(f"Empirical radius calculation failed, using fallback: {e}")
+
+    return fallback_radius
+def get_empirical_radius(geom_meters, fallback_radius):
+    """Dynamically calculates the smoothing radius based on polygon segment lengths."""
+    try:
+        # Safely extract only Polygon geometries, handling GeometryCollections and MultiPolygons
+        def extract_polygons(geom):
+            if geom.geom_type == 'Polygon':
+                return [geom]
+            elif hasattr(geom, 'geoms'):
+                polys = []
+                for part in geom.geoms:
+                    polys.extend(extract_polygons(part))
+                return polys
+            return []
+
+        polys = extract_polygons(geom_meters)
         lengths = []
 
         for poly in polys:
